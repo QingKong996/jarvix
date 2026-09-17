@@ -15,20 +15,16 @@ type AppProps = {
 type TUIMessage = 
   | {
     type: "log"
-    index: number
     level: LogLevel
     text: string
 } | {
     type: "user.message"
-    index: number
     text: string
 } | {
     type: "assistant.message.text"
-    index: number
     text: string
 } | {
     type: "assistant.message.thinking"
-    index: number
     text: string
 }
 

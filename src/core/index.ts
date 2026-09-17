@@ -48,6 +48,14 @@ export class Jarvix {
             messages: [
                 {
                     role: "user",
+                    content: "Hi",
+                    timestamp: Date.now()
+                },{
+                    role: "user",
+                    content: question,
+                    timestamp: Date.now()
+                },{
+                    role: "user",
                     content: question,
                     timestamp: Date.now()
                 }
@@ -61,8 +69,10 @@ export class Jarvix {
             switch(event.type){
                 case "text_start":
                     this.emit({
-                        type: "text.start"
+                        type: "text.start",
+                        contentIndex: event.contentIndex
                     })
+                    console.log("text_start" + event.contentIndex)
                     break;
                 case "start":
                     this.emit({
@@ -72,29 +82,39 @@ export class Jarvix {
                 case "text_delta":
                     this.emit({
                         type: "text.delta",
+                        contentIndex: event.contentIndex,
                         delta: event.delta
                     })
+                    console.log("text_delta" + event.contentIndex)
                     break;
                 case "text_end":
                     this.emit({
-                        type: "text.end"
+                        type: "text.end",
+                        contentIndex: event.contentIndex
                     })
+                    console.log("text_end" + event.contentIndex)
                     break;
                 case "thinking_start":
                     this.emit({
-                        type: "thinking.start"
+                        type: "thinking.start",
+                        contentIndex: event.contentIndex
                     })
+                    console.log("thinking_start" + event.contentIndex)
                     break;
                 case "thinking_delta":
                     this.emit({
                         type: "thinking.delta",
+                        contentIndex: event.contentIndex,
                         delta: event.delta
                     })
+                    console.log("thinking_delta" + event.contentIndex)
                     break;
                 case "thinking_end":
                     this.emit({
-                        type: "thinking.end"
+                        type: "thinking.end",
+                        contentIndex: event.contentIndex
                     })
+                    console.log("thinking_end" + event.contentIndex)
                     break;
                 case "toolcall_start":
                     break;
@@ -114,6 +134,7 @@ export class Jarvix {
                         type: "error",
                         error: event.error.errorMessage
                     })
+                    console.error(event.error.errorMessage);
                     break;
             }
         }

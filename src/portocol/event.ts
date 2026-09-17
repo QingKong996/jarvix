@@ -13,18 +13,24 @@ export type JarvixEvent =
     text: string
 } | {
     type: "text.delta"
+    contentIndex: number
     delta: string
 } | {
     type: "text.start"
+    contentIndex: number
 } | {
     type: "text.end"
+    contentIndex: number
 } | {
     type: "thinking.delta"
+    contentIndex: number
     delta: string
 } | {
     type: "thinking.start"
+    contentIndex: number
 } | {
     type: "thinking.end"
+    contentIndex: number
 } | {
     type: "error"
     error: string | undefined
