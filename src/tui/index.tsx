@@ -6,6 +6,8 @@ import { Jarvix } from "../core";
 import { setJarvix, getJarvix } from "./runtime.ts"
 import { TUIRelayer } from "./TUIrelayer.ts";
 import { type LogLevel } from "../portocol/event.ts";
+import { type JarvixMessage } from "../portocol/event.ts";
+
 
 type AppProps = {
     relayer: TUIRelayer
@@ -14,23 +16,10 @@ type AppProps = {
 
 type TUIMessage = 
   | {
-    type: "log"
-    index: number
+    role: "log"
     level: LogLevel
     text: string
-} | {
-    type: "user.message"
-    index: number
-    text: string
-} | {
-    type: "assistant.message.text"
-    index: number
-    text: string
-} | {
-    type: "assistant.message.thinking"
-    index: number
-    text: string
-}
+} | JarvixMessage
 
 
 function App ({relayer} : AppProps) {
@@ -38,8 +27,8 @@ function App ({relayer} : AppProps) {
 
     const [input, setInput] = useState("");
     const [messages, setMessages] = useState<TUIMessage[]>([]);
-    const [streamingMessage, setStreamingMessage] = useState("");
-    const streamingMessageRef = useRef("");
+    const [streamingMessage, setStreamingMessage] = useState<JarvixMessage[]>([]);
+    const streamingMessageRef = useRef<JarvixMessage[]>([]);
 
     useEffect(() => {
         const methods = ["log", "info", "warn", "error", "debug"] as const;
@@ -58,8 +47,12 @@ function App ({relayer} : AppProps) {
                         typeof arg === "string"
                         ? arg
                         : Bun.inspect(arg, {colors: false})
-                    ).join(" ")
-                addConsole(`[${method.toUpperCase()}]: ${ text }`, method)
+                    ).join(" ");
+                setMessages(prev => [...prev, {
+                    role: "log",
+                    level: method,
+                    text: text
+                }])
             }
         }
 
@@ -71,6 +64,16 @@ function App ({relayer} : AppProps) {
         }
     }, [])
 
+
+    function updateStreamingMessage(
+        updater: (prev: JarvixMessage[]) => JarvixMessage[]
+    ){
+        const next = updater(streamingMessageRef.current);
+
+        streamingMessageRef.current = next;
+        setStreamingMessage(next);
+    }
+
     useEffect(() => {
         return relayer.subscribe((event: JarvixEvent) => {
             switch(event.type){
@@ -78,52 +81,88 @@ function App ({relayer} : AppProps) {
                     console[event.level](event.text);
                     break;
                 case "text.delta":
-                    setStreamingMessage(prev => prev + event.delta);
-                    streamingMessageRef.current += event.delta;
+                    updateStreamingMessage(prev => {
+                        const next = [...prev];
+                        const msg = next[event.contentIndex]
+                        if(
+                            msg != undefined &&
+                            msg.role === "assistant" &&
+                            msg.content.type === "text"
+                          ){
+                            msg.content.text += event.delta
+                        }
+                        return next;
+                    })
                     break;
                 case "text.start":
-                    console.log("text.start");
-                    setStreamingMessage("");
-                    streamingMessageRef.current = "";
+                    updateStreamingMessage(prev => {
+                        const next = [...prev];
+                        if(next[event.contentIndex] === undefined){
+                            next[event.contentIndex] = {
+                                role: "assistant",
+                                content: {
+                                    type: "text",
+                                    text: ""
+                                }
+                            }
+                        }
+                        return next;
+                    })
                     break;
                 case "text.end":
-                    console.log("text.end");
-                    setMessages(prev => [...prev, {
-                    type: "assistant.message.text",
-                    text: streamingMessageRef.current
-                }])
                   break;
                 case "thinking.delta":
-                    setStreamingMessage(prev => prev + event.delta);
-                    streamingMessageRef.current += event.delta;
+                    updateStreamingMessage(prev => {
+                        const next = [...prev];
+                        const msg = next[event.contentIndex]
+                        if(
+                            msg != undefined &&
+                            msg.role === "assistant" &&
+                            msg.content.type === "thinking"
+                          ){
+                            msg.content.thinking += event.delta
+                        }
+                        return next;
+                    })
                      break;
                 case "thinking.start":
-                    console.log("thinking.start");
-                    setStreamingMessage("");
-                    streamingMessageRef.current = "";
+                    updateStreamingMessage(prev => {
+                        const next = [...prev];
+                        if(next[event.contentIndex] === undefined){
+                            next[event.contentIndex] = {
+                                role: "assistant",
+                                content: {
+                                    type: "thinking",
+                                    thinking: ""
+                                }
+                            }
+                        }
+                        return next;
+                    })
                     break;
                 case "thinking.end":
-                    console.log("thinking.end");
-                   setMessages(prev => [...prev, {
-                   type: "assistant.message.thinking",
-                   text: streamingMessageRef.current
-                }])
                    break;
                 case "error":
+                    console.error(Bun.inspect(event.error))
+                    break;
                 case "done":
+                    switch(event.reason){
+                        case "stop":
+                            setMessages(prev => [...prev, ...event.content])
+                            updateStreamingMessage(prev => {
+                                return []
+                            })
+                            break;
+                        case "length":
+                        case "toolUse":
+                    }
+                    break;
                 case "start":
              }
         })
     }, [relayer])
 
 
-    function addConsole(text: string, level: LogLevel){
-        setMessages(prev => [...prev, {
-            type: "log",
-            level: level,
-            text: text
-        }])
-    }
 
 
     function submit(value: string){
@@ -151,22 +190,49 @@ function App ({relayer} : AppProps) {
     >
         {
             messages.map((message, index) => {
-                switch(message.type){
+                switch(message.role){
                     case "log":
-                        return <text key={index}>{message.text}</text>
-                    case "user.message":
-                        return <text key={index}>User:{message.text}</text>
-                    case "assistant.message.text":
-                        return <text key={index}>Assistant:{message.text}</text>
-                    case "assistant.message.thinking":
-                        return <text key={index}>Thinking:{message.text}</text>
+                        switch(message.level){
+                            case "log":
+                                return <text key={index}>[<span fg="white">LOG</span>]{message.text}</text>
+                            case "info":
+                                return <text key={index}>[<span fg="cyan">INFO</span>]{message.text}</text>
+                            case "warn":
+                                return <text key={index}>[<span fg="yellow">WARN</span>]{message.text}</text>
+                            case "error":
+                                return <text key={index}>[<span fg="red">ERROR</span>]{message.text}</text>
+                            case "debug":
+                                return <text key={index}>[<span fg="gray">DEBUG</span>]{message.text}</text>
+                        }
+                    case "user":
+                        return <text key={index}>User:{message.content.text}</text>
+                    case "assistant":
+                        switch(message.content.type){
+                            case "text":
+                                return <text key={index}>Assistant:{message.content.text}</text>
+                            case "thinking":
+                                return <text key={index}>Thinking:{message.content.thinking}</text>
+                        }
 
                 }
             })
         }
-        <text style={{
-            fg: "red"
-        }}>{streamingMessage}</text>
+        {
+            streamingMessage.map((message, index) => {
+                switch(message.role){
+                    case "user":
+                        return <text style={{fg: "red"}} key={index}>User:{message.content.text}</text>
+                    case "assistant":
+                        switch(message.content.type){
+                            case "text":
+                                return <text style={{fg: "red"}} key={index}>Assistant:{message.content.text}</text>
+                            case "thinking":
+                                return <text style={{fg: "red"}} key={index}>Thinking:{message.content.thinking}</text>
+                        }
+
+                }
+            })
+        }
     </scrollbox>
     <box style={{
         border: true,
