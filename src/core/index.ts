@@ -1,7 +1,8 @@
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
-import { type JarvixEvent, type JarvixListener, type JarvixMessage } from "../portocol/event";
+import { type JarvixEvent, type JarvixListener, type JarvixMessage } from "../portocol/event.ts";
 import { type ThinkingContent, type TextContent, type UserMessage, type AssistantMessage, type Tool, type ToolCall } from "@earendil-works/pi-ai";
 import { Type, type TSchema } from "@earendil-works/pi-ai";
+import { inspect } from "node:util";
 
 export class Jarvix {
     private listeners = new Set<JarvixListener>();
@@ -191,7 +192,7 @@ export class Jarvix {
         for(const call of toolCalls){
              switch(call.name){
                  case "echo":
-                     console.log(Bun.inspect(call))
+                     console.log(inspect(call))
                      console.info("ToolCall", call.arguments.text)
                      break;
                  default:

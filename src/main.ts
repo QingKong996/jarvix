@@ -1,15 +1,3 @@
-import { Jarvix } from "./core";
-import { startTUI } from "./tui";
-
-
+import { Jarvix } from "./core/index.ts";
 
 const jarvix = new Jarvix();
-
-
-startTUI(jarvix);
-
-
-
-
-
-
