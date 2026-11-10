@@ -1,4 +1,5 @@
 import { MessageSquare, Settings } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 type SidebarProps = {
     onOpenSettings: () => void;
@@ -11,6 +12,8 @@ function navItemClass(active: boolean): string {
 }
 
 export function Sidebar({ onOpenSettings }: SidebarProps) {
+    const { t } = useTranslation();
+
     return (
         <aside className="flex h-full min-h-0 flex-col bg-secondary/20">
             <div className="flex items-center gap-2.5 border-b border-border px-5 py-3.5">
@@ -20,14 +23,14 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
             <nav className="flex flex-col gap-1 p-3">
                 <div aria-current="page" className={navItemClass(true)}>
                     <MessageSquare className="size-4" />
-                    对话
+                    {t("nav.chat")}
                 </div>
             </nav>
 
             <div className="mt-auto p-3">
                 <button type="button" onClick={onOpenSettings} className={navItemClass(false)}>
                     <Settings className="size-4" />
-                    设置
+                    {t("nav.settings")}
                 </button>
             </div>
         </aside>

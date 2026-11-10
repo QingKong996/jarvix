@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ChevronRight } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { cn } from "cn";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
@@ -9,6 +10,7 @@ type ThinkingBlockProps = {
 };
 
 export function ThinkingBlock({ text, streaming = false }: ThinkingBlockProps) {
+    const { t } = useTranslation();
     const [open, setOpen] = useState(streaming);
 
     return (
@@ -18,7 +20,7 @@ export function ThinkingBlock({ text, streaming = false }: ThinkingBlockProps) {
                 className="group -ml-5 flex w-fit items-center gap-1.5 rounded-md text-[13px] text-muted-foreground transition-colors outline-none select-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
                 <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
-                <span className={cn(streaming && "animate-pulse")}>{streaming ? "思考中…" : "思考过程"}</span>
+                <span className={cn(streaming && "animate-pulse")}>{streaming ? t("thinking.streaming") : t("thinking.label")}</span>
             </CollapsibleTrigger>
 
             <CollapsibleContent>

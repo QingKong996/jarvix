@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, type RefObject } from "react";
+import { useTranslation } from "react-i18next";
 import { useCommitted, useLive } from "../transcript-hooks.ts";
 import { subscribeCommitted, subscribeLive } from "../transcript-store.ts";
 import type { CommittedTurn, LiveTurn } from "../types.ts";
@@ -38,6 +39,7 @@ function CommittedList() {
 }
 
 function LiveTurnView({ turn }: { turn: LiveTurn }) {
+    const { t } = useTranslation();
     const hasText = turn.blocks.some((block) => block.kind === "text" && block.text.length > 0);
     const lastIndex = turn.blocks.at(-1)?.index;
 
@@ -48,7 +50,7 @@ function LiveTurnView({ turn }: { turn: LiveTurn }) {
             ) : (
                 <Markdown key={block.index} text={block.text} streaming={block.index === lastIndex} />
             ))}
-            {hasText ? null : <p className="animate-pulse text-[13px] text-muted-foreground">生成中…</p>}
+            {hasText ? null : <p className="animate-pulse text-[13px] text-muted-foreground">{t("transcript.generating")}</p>}
         </div>
     );
 }

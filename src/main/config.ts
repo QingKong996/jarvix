@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
-import type { JarvixConfig } from "../protocol/config.ts";
+import { SUPPORTED_LANGUAGES, type JarvixConfig } from "../protocol/config.ts";
 
 const configSchema: z.ZodType<JarvixConfig> = z
     .object({
@@ -10,9 +10,13 @@ const configSchema: z.ZodType<JarvixConfig> = z
             .string()
             .trim()
             .transform((value) => (value.length > 0 ? value : undefined))
-            .optional()
+            .optional(),
+        language: z.enum(SUPPORTED_LANGUAGES).optional()
     })
-    .transform(({ apiKey }) => (apiKey ? { apiKey } : {}));
+    .transform(({ apiKey, language }) => ({
+        ...(apiKey ? { apiKey } : {}),
+        ...(language ? { language } : {})
+    }));
 
 const CONFIG_DIRECTORY_NAME = ".jarvix";
 const CONFIG_FILE_NAME = "config.json";

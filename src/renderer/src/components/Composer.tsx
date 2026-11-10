@@ -1,5 +1,6 @@
 import { useState, type FormEvent, type KeyboardEvent } from "react";
 import { Send } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -9,6 +10,7 @@ type ComposerProps = {
 };
 
 export function Composer({ disabled, onSubmit }: ComposerProps) {
+    const { t } = useTranslation();
     const [value, setValue] = useState("");
 
     function handleSubmit(event: FormEvent<HTMLFormElement>): void {
@@ -43,10 +45,10 @@ export function Composer({ disabled, onSubmit }: ComposerProps) {
                 value={value}
                 onChange={(event) => setValue(event.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="输入问题..."
+                placeholder={t("composer.placeholder")}
                 className="max-h-48 min-h-9 flex-1 resize-none"
             />
-            <Button type="submit" size="icon" aria-label="发送" disabled={disabled || value.trim().length === 0}>
+            <Button type="submit" size="icon" aria-label={t("composer.send")} disabled={disabled || value.trim().length === 0}>
                 <Send />
             </Button>
         </form>
