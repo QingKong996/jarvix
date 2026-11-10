@@ -4,11 +4,11 @@ import { join } from "node:path";
 import { Jarvix } from "../core/index.ts";
 import { DEFAULT_THEME, type JarvixConfig, type Theme } from "../protocol/config.ts";
 import { IPC_CHANNELS } from "../protocol/ipc.ts";
-import { loadConfig, parseConfig, saveConfig } from "./config.ts";
+import { configPaths, loadConfig, parseConfig, saveConfig, systemDefaults } from "./config.ts";
 import { createStreamBatcher } from "./stream-batcher.ts";
 
-let config: JarvixConfig = loadConfig();
-const jarvix = new Jarvix(config);
+let config: JarvixConfig = {};
+const jarvix = new Jarvix();
 
 let mainWindow: BrowserWindow | null = null;
 let busy = false;
@@ -120,7 +120,7 @@ ipcMain.handle(IPC_CHANNELS.configGet, (event) => {
 
 ipcMain.handle(IPC_CHANNELS.configSet, (event, payload: unknown) => {
     assertSender(event);
-    config = parseConfig(payload);
+    config = parseConfig(payload, systemDefaults(app.getLocale()));
     saveConfig(config);
     jarvix.setConfig(config);
     applyTheme(config.theme);
@@ -128,6 +128,8 @@ ipcMain.handle(IPC_CHANNELS.configSet, (event, payload: unknown) => {
 });
 
 app.whenReady().then(() => {
+    config = loadConfig(configPaths(), systemDefaults(app.getLocale()));
+    jarvix.setConfig(config);
     applyTheme(config.theme);
     mainWindow = createMainWindow();
 

@@ -6,7 +6,7 @@ export const SUPPORTED_THEMES = ["dark", "light"] as const;
 
 export type Theme = (typeof SUPPORTED_THEMES)[number];
 
-export const DEFAULT_THEME: Theme = "dark";
+export const DEFAULT_THEME: Theme = "light";
 
 /** Config data object shared across IPC, the core runtime and the main-process store. */
 export type JarvixConfig = {
