@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from "react";
-import { Check, LoaderCircle } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import { Check, Eye, EyeOff, LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -32,19 +32,18 @@ type SettingsFormProps = {
     onSaved: (config: JarvixConfig) => void;
 };
 
-function apiKeyPlaceholder(apiKey: string | undefined): string {
-    if (!apiKey) {
-        return "sk-...";
-    }
-    const masked = apiKey.length <= 8 ? "********" : `${apiKey.slice(0, 3)}...${apiKey.slice(-4)}`;
-    return `已配置：${masked}`;
-}
-
 function SettingsForm({ config, onSaved }: SettingsFormProps) {
-    const [value, setValue] = useState("");
+    const [value, setValue] = useState(config?.apiKey ?? "");
+    const [revealed, setRevealed] = useState(false);
     const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (config && !saved) {
+            setValue(config.apiKey ?? "");
+        }
+    }, [config, saved]);
 
     async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
         event.preventDefault();
@@ -57,7 +56,7 @@ function SettingsForm({ config, onSaved }: SettingsFormProps) {
         try {
             const next = await bridge.setConfig({ apiKey: value });
             onSaved(next);
-            setValue("");
+            setValue(next.apiKey ?? "");
             setSaved(true);
         } catch (cause) {
             setError(cause instanceof Error ? cause.message : String(cause));
@@ -68,20 +67,36 @@ function SettingsForm({ config, onSaved }: SettingsFormProps) {
 
     return (
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <label className="flex flex-col gap-2 text-sm">
-                <span className="font-medium">DeepSeek API Key</span>
-                <Input
-                    type="password"
-                    autoComplete="off"
-                    placeholder={apiKeyPlaceholder(config?.apiKey)}
-                    value={value}
-                    onChange={(event) => {
-                        setValue(event.target.value);
-                        setSaved(false);
-                        setError(null);
-                    }}
-                />
-            </label>
+            <div className="flex flex-col gap-2 text-sm">
+                <label htmlFor="settings-api-key" className="font-medium">
+                    DeepSeek API Key
+                </label>
+                <div className="relative">
+                    <Input
+                        id="settings-api-key"
+                        type={revealed ? "text" : "password"}
+                        autoComplete="off"
+                        placeholder="sk-..."
+                        value={value}
+                        onChange={(event) => {
+                            setValue(event.target.value);
+                            setSaved(false);
+                            setError(null);
+                        }}
+                        className="pr-10"
+                    />
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={revealed ? "隐藏 API Key" : "显示 API Key"}
+                        onClick={() => setRevealed((current) => !current)}
+                        className="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground"
+                    >
+                        {revealed ? <EyeOff /> : <Eye />}
+                    </Button>
+                </div>
+            </div>
 
             <div className="flex items-center justify-end gap-3">
                 {saved ? <span className="text-xs text-muted-foreground">已保存</span> : null}
