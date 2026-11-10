@@ -21,7 +21,7 @@ type MenuView = "root" | "model" | "reasoning";
 type ReasoningLevel = "low" | "high" | "max";
 
 // Placeholder options until the composer is wired to the request config.
-const MODELS = ["DeepSeek V4 Flash", "DeepSeek V4 Flash Vision Exp", "DeepSeek V4 Pro"] as const;
+const MODELS = ["DeepSeek V4.1 Flash", "DeepSeek V4 Pro"] as const;
 
 const REASONING_LEVELS: readonly ReasoningLevel[] = ["low", "high", "max"];
 

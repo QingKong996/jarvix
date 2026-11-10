@@ -40,9 +40,9 @@ export class Jarvix {
 
     async request(question: string) {
         const models = builtinModels();
-        const model = models.getModel("deepseek", "deepseek-v4-flash");
+        const model = models.getModel("deepseek", "deepseek-flash");
         if(!model){
-            this.emit({ type: "error", error: "Model not found: deepseek/deepseek-v4-flash" });
+            this.emit({ type: "error", error: "Model not found: deepseek/deepseek-flash" });
             return;
         }
 
