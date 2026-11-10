@@ -81,7 +81,7 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent closeLabel={t("common.close")} className="gap-0 overflow-hidden p-0 sm:max-w-2xl">
+            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-2xl">
                 <DialogHeader className="border-b px-6 py-4">
                     <DialogTitle>{t("settings.title")}</DialogTitle>
                 </DialogHeader>
