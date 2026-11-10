@@ -50,7 +50,14 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
         setLanguage(config?.language ?? activeLanguage(i18n.language));
     }, [open, config, i18n.language]);
 
-    function markDirty(): void {
+    function handleApiKeyChange(value: string): void {
+        setApiKey(value);
+        setSaved(false);
+        setError(null);
+    }
+
+    function handleLanguageChange(value: Language): void {
+        setLanguage(value);
         setSaved(false);
         setError(null);
     }
@@ -107,20 +114,14 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
                             <ModelSettings
                                 apiKey={apiKey}
                                 disabled={disabled}
-                                onChange={(value) => {
-                                    setApiKey(value);
-                                    markDirty();
-                                }}
+                                onChange={handleApiKeyChange}
                             />
                         </div>
                         <div className={section === "general" ? undefined : "hidden"}>
                             <GeneralSettings
                                 language={language}
                                 disabled={disabled}
-                                onChange={(value) => {
-                                    setLanguage(value);
-                                    markDirty();
-                                }}
+                                onChange={handleLanguageChange}
                             />
                         </div>
                     </div>
