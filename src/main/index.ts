@@ -1,8 +1,8 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, ipcMain, nativeTheme, shell } from "electron";
 import type { IpcMainInvokeEvent } from "electron";
 import { join } from "node:path";
 import { Jarvix } from "../core/index.ts";
-import type { JarvixConfig } from "../protocol/config.ts";
+import { DEFAULT_THEME, type JarvixConfig, type Theme } from "../protocol/config.ts";
 import { IPC_CHANNELS } from "../protocol/ipc.ts";
 import { loadConfig, parseConfig, saveConfig } from "./config.ts";
 import { createStreamBatcher } from "./stream-batcher.ts";
@@ -13,13 +13,30 @@ const jarvix = new Jarvix(config);
 let mainWindow: BrowserWindow | null = null;
 let busy = false;
 
+const WINDOW_BACKGROUND: Record<Theme, string> = {
+    dark: "#0b0e14",
+    light: "#ffffff"
+};
+
+function activeTheme(theme: Theme | undefined): Theme {
+    return theme ?? DEFAULT_THEME;
+}
+
+function applyTheme(theme: Theme | undefined): void {
+    const resolved = activeTheme(theme);
+    nativeTheme.themeSource = resolved;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.setBackgroundColor(WINDOW_BACKGROUND[resolved]);
+    }
+}
+
 function createMainWindow(): BrowserWindow {
     const window = new BrowserWindow({
         width: 1080,
         height: 720,
         minWidth: 760,
         minHeight: 520,
-        backgroundColor: "#0b0e14",
+        backgroundColor: WINDOW_BACKGROUND[activeTheme(config.theme)],
         autoHideMenuBar: true,
         webPreferences: {
             preload: join(import.meta.dirname, "../preload/index.cjs"),
@@ -106,10 +123,12 @@ ipcMain.handle(IPC_CHANNELS.configSet, (event, payload: unknown) => {
     config = parseConfig(payload);
     saveConfig(config);
     jarvix.setConfig(config);
+    applyTheme(config.theme);
     return config;
 });
 
 app.whenReady().then(() => {
+    applyTheme(config.theme);
     mainWindow = createMainWindow();
 
     app.on("activate", () => {

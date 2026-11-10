@@ -5,7 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { SUPPORTED_LANGUAGES, type JarvixConfig, type Language } from "../../../protocol/config.ts";
+import {
+    DEFAULT_THEME,
+    SUPPORTED_LANGUAGES,
+    SUPPORTED_THEMES,
+    type JarvixConfig,
+    type Language,
+    type Theme
+} from "../../../protocol/config.ts";
 
 type SettingsDialogProps = {
     open: boolean;
@@ -27,6 +34,10 @@ function isLanguage(value: string): value is Language {
     return SUPPORTED_LANGUAGES.some((language) => language === value);
 }
 
+function isTheme(value: string): value is Theme {
+    return SUPPORTED_THEMES.some((theme) => theme === value);
+}
+
 function activeLanguage(i18nLanguage: string): Language {
     return i18nLanguage === "en" ? "en" : "zh";
 }
@@ -36,6 +47,7 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
     const [section, setSection] = useState<SettingsSection>("model");
     const [apiKey, setApiKey] = useState(config?.apiKey ?? "");
     const [language, setLanguage] = useState<Language>(activeLanguage(i18n.language));
+    const [theme, setTheme] = useState<Theme>(config?.theme ?? DEFAULT_THEME);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -46,6 +58,7 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
         }
         setApiKey(config?.apiKey ?? "");
         setLanguage(config?.language ?? activeLanguage(i18n.language));
+        setTheme(config?.theme ?? DEFAULT_THEME);
     }, [open, config, i18n.language]);
 
     function handleApiKeyChange(value: string): void {
@@ -58,6 +71,11 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
         setError(null);
     }
 
+    function handleThemeChange(value: Theme): void {
+        setTheme(value);
+        setError(null);
+    }
+
     async function handleSave(event: FormEvent<HTMLFormElement>): Promise<void> {
         event.preventDefault();
         if (!bridge || !config || saving) {
@@ -66,10 +84,11 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
         setSaving(true);
         setError(null);
         try {
-            const next = await bridge.setConfig({ ...config, apiKey, language });
+            const next = await bridge.setConfig({ ...config, apiKey, language, theme });
             onSaved(next);
             setApiKey(next.apiKey ?? "");
             setLanguage(next.language ?? language);
+            setTheme(next.theme ?? DEFAULT_THEME);
             await i18n.changeLanguage(next.language ?? language);
             onOpenChange(false);
         } catch (cause) {
@@ -115,8 +134,10 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
                         <div className={section === "general" ? undefined : "hidden"}>
                             <GeneralSettings
                                 language={language}
+                                theme={theme}
                                 disabled={disabled}
-                                onChange={handleLanguageChange}
+                                onLanguageChange={handleLanguageChange}
+                                onThemeChange={handleThemeChange}
                             />
                         </div>
                     </div>
@@ -205,38 +226,68 @@ function ModelSettings({ apiKey, disabled, onChange }: ModelSettingsProps) {
 
 type GeneralSettingsProps = {
     language: Language;
+    theme: Theme;
     disabled: boolean;
-    onChange: (language: Language) => void;
+    onLanguageChange: (language: Language) => void;
+    onThemeChange: (theme: Theme) => void;
 };
 
-function GeneralSettings({ language, disabled, onChange }: GeneralSettingsProps) {
+function GeneralSettings({ language, theme, disabled, onLanguageChange, onThemeChange }: GeneralSettingsProps) {
     const { t } = useTranslation();
 
     return (
-        <div className="flex flex-col gap-2 text-sm">
-            <label htmlFor="settings-language" className="font-medium">
-                {t("settings.general.language")}
-            </label>
-            <Select
-                value={language}
-                disabled={disabled}
-                onValueChange={(value) => {
-                    if (isLanguage(value)) {
-                        onChange(value);
-                    }
-                }}
-            >
-                <SelectTrigger id="settings-language" className="w-44">
-                    <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                    {SUPPORTED_LANGUAGES.map((item) => (
-                        <SelectItem key={item} value={item}>
-                            {LANGUAGE_LABELS[item]}
-                        </SelectItem>
-                    ))}
-                </SelectContent>
-            </Select>
+        <div className="flex flex-col gap-4 text-sm">
+            <div className="flex flex-col gap-2">
+                <label htmlFor="settings-language" className="font-medium">
+                    {t("settings.general.language")}
+                </label>
+                <Select
+                    value={language}
+                    disabled={disabled}
+                    onValueChange={(value) => {
+                        if (isLanguage(value)) {
+                            onLanguageChange(value);
+                        }
+                    }}
+                >
+                    <SelectTrigger id="settings-language" className="w-44">
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {SUPPORTED_LANGUAGES.map((item) => (
+                            <SelectItem key={item} value={item}>
+                                {LANGUAGE_LABELS[item]}
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+            </div>
+
+            <div className="flex flex-col gap-2">
+                <label htmlFor="settings-theme" className="font-medium">
+                    {t("settings.general.theme")}
+                </label>
+                <Select
+                    value={theme}
+                    disabled={disabled}
+                    onValueChange={(value) => {
+                        if (isTheme(value)) {
+                            onThemeChange(value);
+                        }
+                    }}
+                >
+                    <SelectTrigger id="settings-theme" className="w-44">
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {SUPPORTED_THEMES.map((item) => (
+                            <SelectItem key={item} value={item}>
+                                {t(`settings.general.themes.${item}`)}
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+            </div>
         </div>
     );
 }
