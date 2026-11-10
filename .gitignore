@@ -4,6 +4,7 @@ node_modules
 # output
 out
 dist
+release
 *.tgz
 
 # code coverage
@@ -27,9 +28,15 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .cache
 *.tsbuildinfo
 .test-tmp
+.electron-cache
+.electron-builder-cache
+.npm-cache
 
 # IntelliJ based IDEs
 .idea
 
 # Finder (MacOS) folder config
 .DS_Store
+
+
+/.claude/
