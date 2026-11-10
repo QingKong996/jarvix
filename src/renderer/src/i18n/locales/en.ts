@@ -28,7 +28,12 @@ export const en: TranslationResources = {
             hideKey: "Hide API key"
         },
         general: {
-            language: "Language"
+            language: "Language",
+            theme: "Theme",
+            themes: {
+                dark: "Dark",
+                light: "Light"
+            }
         },
         save: "Save",
         cancel: "Cancel"

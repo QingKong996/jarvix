@@ -31,6 +31,14 @@ test("parseConfig rejects an unsupported language", () => {
     expect(() => parseConfig({ language: "fr" })).toThrow(/Invalid config: language/);
 });
 
+test("parseConfig accepts a supported theme", () => {
+    expect(parseConfig({ theme: "light" })).toEqual({ theme: "light" });
+});
+
+test("parseConfig rejects an unsupported theme", () => {
+    expect(() => parseConfig({ theme: "system" })).toThrow(/Invalid config: theme/);
+});
+
 test("parseConfig rejects data that is not an object", () => {
     expect(() => parseConfig(null)).toThrow(/Invalid config/);
     expect(() => parseConfig("sk-test")).toThrow(/Invalid config/);
@@ -52,8 +60,8 @@ test("serializeConfig omits an unset apiKey", () => {
 test("saveConfig and loadConfig round-trip the config data object", () => {
     const paths = configPaths(join(base, "round-trip"));
 
-    saveConfig({ apiKey: "sk-test", language: "en" }, paths);
-    expect(loadConfig(paths)).toEqual({ apiKey: "sk-test", language: "en" });
+    saveConfig({ apiKey: "sk-test", language: "en", theme: "light" }, paths);
+    expect(loadConfig(paths)).toEqual({ apiKey: "sk-test", language: "en", theme: "light" });
 
     saveConfig({}, paths);
     expect(loadConfig(paths)).toEqual({});

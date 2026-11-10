@@ -3,7 +3,11 @@
 
 @source "../../../node_modules/streamdown/dist/*.js";
 
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark {
+    @media (prefers-color-scheme: dark) {
+        @slot;
+    }
+}
 
 @theme {
     --font-sans: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
@@ -39,27 +43,53 @@
 
 :root {
     --radius: 0.5rem;
-    --background: #0b0e14;
-    --foreground: #e6e9ef;
-    --card: #141922;
-    --card-foreground: #e6e9ef;
-    --popover: #141922;
-    --popover-foreground: #e6e9ef;
-    --primary: #5b8cff;
+    --background: #ffffff;
+    --foreground: #0b0e14;
+    --card: #ffffff;
+    --card-foreground: #0b0e14;
+    --popover: #ffffff;
+    --popover-foreground: #0b0e14;
+    --primary: #3b6ef5;
     --primary-foreground: #ffffff;
-    --secondary: #1a202c;
-    --secondary-foreground: #e6e9ef;
-    --muted: #1a202c;
-    --muted-foreground: #8b93a7;
-    --sidebar: #141922;
-    --sidebar-foreground: #e6e9ef;
-    --accent: #1a2233;
-    --accent-foreground: #e6e9ef;
-    --destructive: #ef4444;
+    --secondary: #f1f3f8;
+    --secondary-foreground: #0b0e14;
+    --muted: #f1f3f8;
+    --muted-foreground: #5b6474;
+    --sidebar: #f8f9fb;
+    --sidebar-foreground: #0b0e14;
+    --accent: #e9eef9;
+    --accent-foreground: #0b0e14;
+    --destructive: #dc2626;
     --destructive-foreground: #ffffff;
-    --border: #232a36;
-    --input: #232a36;
-    --ring: #5b8cff;
+    --border: #dfe3ea;
+    --input: #dfe3ea;
+    --ring: #3b6ef5;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --background: #0b0e14;
+        --foreground: #e6e9ef;
+        --card: #141922;
+        --card-foreground: #e6e9ef;
+        --popover: #141922;
+        --popover-foreground: #e6e9ef;
+        --primary: #5b8cff;
+        --primary-foreground: #ffffff;
+        --secondary: #1a202c;
+        --secondary-foreground: #e6e9ef;
+        --muted: #1a202c;
+        --muted-foreground: #8b93a7;
+        --sidebar: #141922;
+        --sidebar-foreground: #e6e9ef;
+        --accent: #1a2233;
+        --accent-foreground: #e6e9ef;
+        --destructive: #ef4444;
+        --destructive-foreground: #ffffff;
+        --border: #232a36;
+        --input: #232a36;
+        --ring: #5b8cff;
+    }
 }
 
 @layer base {
@@ -70,7 +100,7 @@
     html {
         height: 100%;
         overflow: hidden;
-        color-scheme: dark;
+        color-scheme: light;
     }
 
     body {
@@ -95,5 +125,11 @@
 
     [data-streamdown] input[type="checkbox"] {
         accent-color: var(--primary);
+    }
+
+    @media (prefers-color-scheme: dark) {
+        html {
+            color-scheme: dark;
+        }
     }
 }

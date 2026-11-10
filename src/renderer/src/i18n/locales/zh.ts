@@ -26,7 +26,12 @@ export const zh = {
             hideKey: "隐藏 API Key"
         },
         general: {
-            language: "语言"
+            language: "语言",
+            theme: "主题",
+            themes: {
+                dark: "深色",
+                light: "浅色"
+            }
         },
         save: "保存",
         cancel: "取消"
