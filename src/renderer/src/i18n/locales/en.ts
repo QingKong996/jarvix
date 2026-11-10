@@ -1,9 +1,6 @@
 import type { TranslationResources } from "./zh.ts";
 
 export const en: TranslationResources = {
-    common: {
-        close: "Close"
-    },
     nav: {
         chat: "Chat",
         settings: "Settings"
@@ -63,5 +60,11 @@ export const en: TranslationResources = {
         viewFullscreen: "View fullscreen",
         zoomIn: "Zoom in",
         zoomOut: "Zoom out"
+    },
+    // Fixed copy owned by the shadcn-style primitives in components/ui.
+    ui: {
+        dialog: {
+            close: "Close"
+        }
     }
 };

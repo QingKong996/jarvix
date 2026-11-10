@@ -1,7 +1,4 @@
 export const zh = {
-    common: {
-        close: "关闭"
-    },
     nav: {
         chat: "对话",
         settings: "设置"
@@ -61,6 +58,12 @@ export const zh = {
         viewFullscreen: "全屏查看",
         zoomIn: "放大",
         zoomOut: "缩小"
+    },
+    // Fixed copy owned by the shadcn-style primitives in components/ui.
+    ui: {
+        dialog: {
+            close: "关闭"
+        }
     }
 };
 
