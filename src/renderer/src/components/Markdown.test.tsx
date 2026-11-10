@@ -1,10 +1,15 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test } from "vitest";
+import { i18n } from "@/i18n/index.ts";
 import { Markdown } from "./Markdown.tsx";
 
 function render(markdown: string, streaming = false): string {
     return renderToStaticMarkup(<Markdown text={markdown} streaming={streaming} />);
 }
+
+beforeAll(async () => {
+    await i18n.changeLanguage("zh");
+});
 
 describe("Markdown", () => {
     test("renders CJK emphasis that plain CommonMark would reject", () => {

@@ -23,6 +23,14 @@ test("parseConfig drops unknown fields", () => {
     expect(parseConfig({ apiKey: "sk-test", model: "deepseek" })).toEqual({ apiKey: "sk-test" });
 });
 
+test("parseConfig accepts a supported language", () => {
+    expect(parseConfig({ apiKey: "sk-test", language: "en" })).toEqual({ apiKey: "sk-test", language: "en" });
+});
+
+test("parseConfig rejects an unsupported language", () => {
+    expect(() => parseConfig({ language: "fr" })).toThrow(/Invalid config: language/);
+});
+
 test("parseConfig rejects data that is not an object", () => {
     expect(() => parseConfig(null)).toThrow(/Invalid config/);
     expect(() => parseConfig("sk-test")).toThrow(/Invalid config/);
@@ -44,8 +52,8 @@ test("serializeConfig omits an unset apiKey", () => {
 test("saveConfig and loadConfig round-trip the config data object", () => {
     const paths = configPaths(join(base, "round-trip"));
 
-    saveConfig({ apiKey: "sk-test" }, paths);
-    expect(loadConfig(paths)).toEqual({ apiKey: "sk-test" });
+    saveConfig({ apiKey: "sk-test", language: "en" }, paths);
+    expect(loadConfig(paths)).toEqual({ apiKey: "sk-test", language: "en" });
 
     saveConfig({}, paths);
     expect(loadConfig(paths)).toEqual({});

@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { useTranslation } from "react-i18next";
 import {
     Streamdown,
     defaultComponents,
@@ -16,36 +17,8 @@ const math = createMathPlugin({ singleDollarTextMath: true });
 
 const plugins: PluginConfig = { code, math, cjk };
 
-const remarkRehypeOptions = { footnoteLabel: "脚注", footnoteBackLabel: "返回正文" };
-
 // External links are opened by the main process through setWindowOpenHandler.
 const linkSafety: LinkSafetyConfig = { enabled: false };
-
-const translations: Partial<StreamdownTranslations> = {
-    close: "关闭",
-    copied: "已复制",
-    copyCode: "复制代码",
-    copyLink: "复制链接",
-    copyTable: "复制表格",
-    copyTableAsCsv: "复制为 CSV",
-    copyTableAsMarkdown: "复制为 Markdown",
-    copyTableAsTsv: "复制为 TSV",
-    downloadFile: "下载文件",
-    downloadImage: "下载图片",
-    downloadTable: "下载表格",
-    downloadTableAsCsv: "下载为 CSV",
-    downloadTableAsMarkdown: "下载为 Markdown",
-    exitFullscreen: "退出全屏",
-    imageNotAvailable: "图片不可用",
-    openLink: "打开链接",
-    resetView: "重置视图",
-    tableFormatCsv: "CSV",
-    tableFormatMarkdown: "Markdown",
-    tableFormatTsv: "TSV",
-    viewFullscreen: "全屏查看",
-    zoomIn: "放大",
-    zoomOut: "缩小"
-};
 
 const components: Components = {
     h1: ({ className, ...props }) => (
@@ -81,6 +54,39 @@ type MarkdownProps = {
 const UNBOUNDED = Number.POSITIVE_INFINITY;
 
 export const Markdown = memo(function Markdown({ text, streaming = false, className }: MarkdownProps) {
+    const { t } = useTranslation();
+
+    const remarkRehypeOptions = {
+        footnoteLabel: t("markdown.footnoteLabel"),
+        footnoteBackLabel: t("markdown.footnoteBackLabel")
+    };
+
+    const translations: Partial<StreamdownTranslations> = {
+        close: t("markdown.close"),
+        copied: t("markdown.copied"),
+        copyCode: t("markdown.copyCode"),
+        copyLink: t("markdown.copyLink"),
+        copyTable: t("markdown.copyTable"),
+        copyTableAsCsv: t("markdown.copyTableAsCsv"),
+        copyTableAsMarkdown: t("markdown.copyTableAsMarkdown"),
+        copyTableAsTsv: t("markdown.copyTableAsTsv"),
+        downloadFile: t("markdown.downloadFile"),
+        downloadImage: t("markdown.downloadImage"),
+        downloadTable: t("markdown.downloadTable"),
+        downloadTableAsCsv: t("markdown.downloadTableAsCsv"),
+        downloadTableAsMarkdown: t("markdown.downloadTableAsMarkdown"),
+        exitFullscreen: t("markdown.exitFullscreen"),
+        imageNotAvailable: t("markdown.imageNotAvailable"),
+        openLink: t("markdown.openLink"),
+        resetView: t("markdown.resetView"),
+        tableFormatCsv: t("markdown.tableFormatCsv"),
+        tableFormatMarkdown: t("markdown.tableFormatMarkdown"),
+        tableFormatTsv: t("markdown.tableFormatTsv"),
+        viewFullscreen: t("markdown.viewFullscreen"),
+        zoomIn: t("markdown.zoomIn"),
+        zoomOut: t("markdown.zoomOut")
+    };
+
     return (
         <Streamdown
             data-slot="markdown"
