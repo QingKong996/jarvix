@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Check, LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import type { JarvixConfig } from "../../../protocol/config.ts";
 
@@ -20,7 +20,6 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
             <DialogContent>
                 <DialogHeader>
                     <DialogTitle>设置</DialogTitle>
-                    <DialogDescription>API Key 保存在 ~/.jarvix/config.json。</DialogDescription>
                 </DialogHeader>
                 <SettingsForm config={config} onSaved={onSaved} />
             </DialogContent>
@@ -38,7 +37,7 @@ function apiKeyPlaceholder(apiKey: string | undefined): string {
         return "sk-...";
     }
     const masked = apiKey.length <= 8 ? "********" : `${apiKey.slice(0, 3)}...${apiKey.slice(-4)}`;
-    return `已配置：${masked}（输入新 Key 可替换）`;
+    return `已配置：${masked}`;
 }
 
 function SettingsForm({ config, onSaved }: SettingsFormProps) {
@@ -84,16 +83,19 @@ function SettingsForm({ config, onSaved }: SettingsFormProps) {
                 />
             </label>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center justify-end gap-3">
+                {saved ? <span className="text-xs text-muted-foreground">已保存</span> : null}
+                {error ? <span className="text-xs text-destructive">{error}</span> : null}
                 <Button type="submit" disabled={!bridge || saving}>
                     {saving ? <LoaderCircle className="animate-spin" /> : <Check />}
                     保存
                 </Button>
-                {saved ? <span className="text-xs text-muted-foreground">已保存</span> : null}
-                {error ? <span className="text-xs text-destructive">{error}</span> : null}
+                <DialogClose asChild>
+                    <Button type="button" variant="outline">
+                        取消
+                    </Button>
+                </DialogClose>
             </div>
-
-            <p className="text-xs text-muted-foreground">留空保存会清除已保存的 Key；保存后立即生效，无需重启。</p>
         </form>
     );
 }
