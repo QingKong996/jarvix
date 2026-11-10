@@ -58,6 +58,8 @@ function LiveSlot() {
     return live ? <LiveTurnView turn={live} /> : null;
 }
 
+const FOLLOW_THRESHOLD_PX = 80;
+
 function useFollowBottom(ref: RefObject<HTMLElement | null>): void {
     useEffect(() => {
         const container = ref.current;
@@ -65,18 +67,36 @@ function useFollowBottom(ref: RefObject<HTMLElement | null>): void {
             return;
         }
         let frame: number | null = null;
-        const follow = (): void => {
+        let follow = true;
+        let autoScrollTop = 0;
+
+        const updateFollow = (): void => {
+            // Ignore scroll events caused by our own auto-scroll so streaming growth never disables following.
+            if (Math.abs(container.scrollTop - autoScrollTop) <= 1) {
+                return;
+            }
+            follow = container.scrollHeight - container.scrollTop - container.clientHeight <= FOLLOW_THRESHOLD_PX;
+        };
+
+        const scrollToBottom = (): void => {
             if (frame !== null) {
                 return;
             }
             frame = requestAnimationFrame(() => {
                 frame = null;
+                if (!follow) {
+                    return;
+                }
                 container.scrollTop = container.scrollHeight;
+                autoScrollTop = container.scrollTop;
             });
         };
-        const unsubscribeCommitted = subscribeCommitted(follow);
-        const unsubscribeLive = subscribeLive(follow);
+
+        container.addEventListener("scroll", updateFollow, { passive: true });
+        const unsubscribeCommitted = subscribeCommitted(scrollToBottom);
+        const unsubscribeLive = subscribeLive(scrollToBottom);
         return () => {
+            container.removeEventListener("scroll", updateFollow);
             if (frame !== null) {
                 cancelAnimationFrame(frame);
             }

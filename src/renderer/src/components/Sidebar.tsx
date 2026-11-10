@@ -15,7 +15,6 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
         <aside className="flex h-full min-h-0 flex-col bg-secondary/20">
             <div className="flex items-center gap-2.5 border-b border-border px-5 py-3.5">
                 <span className="text-[15px] font-semibold tracking-[0.4px]">Jarvix</span>
-                <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">Electron</span>
             </div>
 
             <nav className="flex flex-col gap-1 p-3">
