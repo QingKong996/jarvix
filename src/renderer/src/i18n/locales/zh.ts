@@ -28,7 +28,6 @@ export const zh = {
         general: {
             language: "语言"
         },
-        saved: "已保存",
         save: "保存",
         cancel: "取消"
     },
