@@ -42,7 +42,7 @@ export class Jarvix {
         const models = builtinModels();
         const model = models.getModel("deepseek", "deepseek-v4-flash");
         if(!model){
-            console.error("Model not found");
+            this.emit({ type: "error", error: "Model not found: deepseek/deepseek-v4-flash" });
             return;
         }
 
