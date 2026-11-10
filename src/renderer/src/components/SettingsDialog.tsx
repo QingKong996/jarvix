@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SUPPORTED_LANGUAGES, type JarvixConfig, type Language } from "../../../protocol/config.ts";
 
 type SettingsDialogProps = {
@@ -26,6 +27,10 @@ const LANGUAGE_LABELS: Record<Language, string> = {
     zh: "中文",
     en: "English"
 };
+
+function isLanguage(value: string): value is Language {
+    return SUPPORTED_LANGUAGES.some((language) => language === value);
+}
 
 export function SettingsDialog({ open, onOpenChange, config, onSaved }: SettingsDialogProps) {
     const { t } = useTranslation();
@@ -201,22 +206,29 @@ function GeneralSettings({ config, onSaved }: SettingsPanelProps) {
 
     return (
         <div className="flex flex-col gap-2 text-sm">
-            <span className="font-medium">{t("settings.general.language")}</span>
-            <div className="flex gap-2">
-                {SUPPORTED_LANGUAGES.map((language) => (
-                    <Button
-                        key={language}
-                        type="button"
-                        size="sm"
-                        variant={language === activeLanguage ? "default" : "outline"}
-                        aria-pressed={language === activeLanguage}
-                        disabled={!bridge || !config || saving}
-                        onClick={() => void selectLanguage(language)}
-                    >
-                        {LANGUAGE_LABELS[language]}
-                    </Button>
-                ))}
-            </div>
+            <label htmlFor="settings-language" className="font-medium">
+                {t("settings.general.language")}
+            </label>
+            <Select
+                value={activeLanguage}
+                disabled={!bridge || !config || saving}
+                onValueChange={(value) => {
+                    if (isLanguage(value)) {
+                        void selectLanguage(value);
+                    }
+                }}
+            >
+                <SelectTrigger id="settings-language" className="w-44">
+                    <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                    {SUPPORTED_LANGUAGES.map((language) => (
+                        <SelectItem key={language} value={language}>
+                            {LANGUAGE_LABELS[language]}
+                        </SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
             {error ? <span className="text-xs text-destructive">{error}</span> : null}
         </div>
     );
