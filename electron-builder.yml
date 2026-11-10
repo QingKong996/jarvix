@@ -1,0 +1,42 @@
+appId: com.jarvix.app
+productName: Jarvix
+copyright: Copyright © 2026 QingKong996
+
+directories:
+  output: dist
+  buildResources: build
+
+electronDist: node_modules/electron/dist
+npmRebuild: false
+
+files:
+  - out/**/*
+  - package.json
+
+asar: true
+
+win:
+  executableName: Jarvix
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  artifactName: ${productName}-${version}-${arch}-setup.${ext}
+
+mac:
+  target:
+    - dmg
+  category: public.app-category.developer-tools
+
+linux:
+  target:
+    - AppImage
+  category: Development
+  maintainer: QingKong996 <qingkong996@gmail.com>

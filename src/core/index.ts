@@ -1,24 +1,18 @@
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
-import { type JarvixEvent, type JarvixListener, type JarvixMessage } from "../portocol/event.ts";
-import { type ThinkingContent, type TextContent, type UserMessage, type AssistantMessage, type Tool, type ToolCall } from "@earendil-works/pi-ai";
-import { Type, type TSchema } from "@earendil-works/pi-ai";
-import { inspect } from "node:util";
+import type { JarvixConfig } from "../protocol/config.ts";
+import { type AssistantBlock, type JarvixEvent, type JarvixListener } from "../protocol/event.ts";
+import type { AssistantMessage, UserMessage } from "@earendil-works/pi-ai";
 
 export class Jarvix {
     private listeners = new Set<JarvixListener>();
     private messages: (AssistantMessage | UserMessage)[] = [];
-    private tools: Tool[] = [
-        {
-            name: "echo",
-            description: "Echo the given text",
-            parameters: Type.Object({
-                text: Type.String
-            })
+    private config: JarvixConfig;
+    constructor(config: JarvixConfig = {}) {
+        this.config = config;
+    }
 
-        } 
-    ]
-    constructor() {
-
+    setConfig(config: JarvixConfig): void {
+        this.config = config;
     }
 
 
@@ -36,12 +30,6 @@ export class Jarvix {
     }
 
 
-        // export interface Tool<TParameters extends TSchema = TSchema> {
-        //     name: string;
-        //     description: string;
-        //     parameters: TParameters;
-        //     constrainedSampling?: false | ConstrainedSamplingConfig;
-        // }
     test(){
         console.log("THIS IS LOG")
         console.info("THIS IS INFO")
@@ -65,10 +53,10 @@ export class Jarvix {
         })
         const stream = models.stream(model, {
                 systemPrompt: "Response user in Chinese",
-                tools: this.tools,
                 messages: this.messages
             },
             {
+                apiKey: this.config.apiKey,
                 reasoning: true,
                 reasoningEffort: "xhigh"
             })
@@ -118,63 +106,34 @@ export class Jarvix {
                         contentIndex: event.contentIndex
                     })
                     break;
-                case "toolcall_start":
-                    break;
-                case "toolcall_delta":
-                    break;
-                case "toolcall_end":
-                    break;
-                                    // export interface AssistantMessage {
-                                    //     role: "assistant";
-                                    //     content: (TextContent | ThinkingContent | ToolCall)[];
-                                    //     api: Api;
-                                    //     provider: ProviderId;
-                                    //     model: string;
-                                    //     responseModel?: string;
-                                    //     responseId?: string;
-                                    //     diagnostics?: AssistantMessageDiagnostic[];
-                                    //     usage: Usage;
-                                    //     stopReason: StopReason;
-                                    //     deferred?: DeferredHandle;
-                                    //     errorMessage?: string;
-                                    //     rawStopReason?: string;
-                                    //     /**
-                                    //      * Provider indication of whether the model explicitly ended its turn.
-                                    //      * Preserved for debugging and does not currently affect agent control flow.
-                                    //      */
-                                    //     endTurn?: boolean;
-                                    //     timestamp: number;
-                                    // }
-                case "done":
-                    const content = event.message.content.flatMap<JarvixMessage>(item => {
+                case "done": {
+                    const blocks: AssistantBlock[] = []
+                    event.message.content.forEach((item, index) => {
                         switch(item.type){
                             case "text":
-                                return [{
-                                role: "assistant",
-                                content: {
+                                blocks.push({
                                     type: "text",
+                                    index,
                                     text: item.text
-                                }
-                            }]
+                                })
+                                break;
                             case "thinking":
-                                return [{
-                                role: "assistant",
-                                content: {
+                                blocks.push({
                                     type: "thinking",
+                                    index,
                                     thinking: item.thinking
-                                }
-                            }]
-                            case "toolCall":
+                                })
+                                break;
                         }
-                        return []
                     })
 
                     this.emit({
                         type: "done",
                         reason: event.reason,
-                        content: content
+                        blocks: blocks
                     })
                     break;
+                }
                 case "error":
                     this.emit({
                         type: "error",
@@ -187,28 +146,5 @@ export class Jarvix {
 
         const finalMessage: AssistantMessage = await stream.result()
         this.messages.push(finalMessage)
-
-        const toolCalls = finalMessage.content.filter(msg => msg.type == "toolCall")
-        for(const call of toolCalls){
-             switch(call.name){
-                 case "echo":
-                     console.log(inspect(call))
-                     console.info("ToolCall", call.arguments.text)
-                     break;
-                 default:
-                     console.warn("Unknown toolCall: ", call.name)
-             }
-        }
-
-    // export interface ToolCall {
-    //     type: "toolCall";
-    //     id: string;
-    //     name: string;
-    //     arguments: Record<string, any>;
-    //     thoughtSignature?: string;
-    //     /** OpenAI Responses namespace for calls to dynamically loaded or namespaced tools. */
-    //     namespace?: string;
-    // }
-
     }
 }
