@@ -237,7 +237,7 @@ function GeneralSettings({ language, theme, disabled, onLanguageChange, onThemeC
 
     return (
         <div className="flex flex-col gap-4 text-sm">
-            <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-4">
                 <label htmlFor="settings-language" className="font-medium">
                     {t("settings.general.language")}
                 </label>
@@ -263,7 +263,7 @@ function GeneralSettings({ language, theme, disabled, onLanguageChange, onThemeC
                 </Select>
             </div>
 
-            <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-4">
                 <label htmlFor="settings-theme" className="font-medium">
                     {t("settings.general.theme")}
                 </label>

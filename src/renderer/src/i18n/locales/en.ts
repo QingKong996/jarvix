@@ -7,7 +7,14 @@ export const en: TranslationResources = {
     },
     composer: {
         placeholder: "Ask a question...",
-        send: "Send"
+        send: "Send",
+        model: "Model",
+        reasoning: "Reasoning",
+        reasoningLevels: {
+            low: "Low",
+            high: "High",
+            max: "Max"
+        }
     },
     transcript: {
         generating: "Generating…"

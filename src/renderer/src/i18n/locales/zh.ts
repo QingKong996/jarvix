@@ -5,7 +5,14 @@ export const zh = {
     },
     composer: {
         placeholder: "输入问题...",
-        send: "发送"
+        send: "发送",
+        model: "模型",
+        reasoning: "推理等级",
+        reasoningLevels: {
+            low: "低",
+            high: "高",
+            max: "Max"
+        }
     },
     transcript: {
         generating: "生成中…"
