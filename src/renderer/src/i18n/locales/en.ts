@@ -28,14 +28,14 @@ export const en: TranslationResources = {
         model: {
             apiKey: "DeepSeek API Key",
             revealKey: "Show API key",
-            hideKey: "Hide API key",
-            saved: "Saved",
-            save: "Save",
-            cancel: "Cancel"
+            hideKey: "Hide API key"
         },
         general: {
             language: "Language"
-        }
+        },
+        saved: "Saved",
+        save: "Save",
+        cancel: "Cancel"
     },
     markdown: {
         footnoteLabel: "Footnotes",

@@ -26,14 +26,14 @@ export const zh = {
         model: {
             apiKey: "DeepSeek API Key",
             revealKey: "显示 API Key",
-            hideKey: "隐藏 API Key",
-            saved: "已保存",
-            save: "保存",
-            cancel: "取消"
+            hideKey: "隐藏 API Key"
         },
         general: {
             language: "语言"
-        }
+        },
+        saved: "已保存",
+        save: "保存",
+        cancel: "取消"
     },
     markdown: {
         footnoteLabel: "脚注",
