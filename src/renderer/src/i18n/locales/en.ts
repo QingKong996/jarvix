@@ -30,7 +30,6 @@ export const en: TranslationResources = {
         general: {
             language: "Language"
         },
-        saved: "Saved",
         save: "Save",
         cancel: "Cancel"
     },

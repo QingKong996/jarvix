@@ -37,12 +37,10 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
     const [apiKey, setApiKey] = useState(config?.apiKey ?? "");
     const [language, setLanguage] = useState<Language>(activeLanguage(i18n.language));
     const [saving, setSaving] = useState(false);
-    const [saved, setSaved] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         if (!open) {
-            setSaved(false);
             setError(null);
             return;
         }
@@ -52,13 +50,11 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
 
     function handleApiKeyChange(value: string): void {
         setApiKey(value);
-        setSaved(false);
         setError(null);
     }
 
     function handleLanguageChange(value: Language): void {
         setLanguage(value);
-        setSaved(false);
         setError(null);
     }
 
@@ -68,7 +64,6 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
             return;
         }
         setSaving(true);
-        setSaved(false);
         setError(null);
         try {
             const next = await bridge.setConfig({ ...config, apiKey, language });
@@ -76,7 +71,7 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
             setApiKey(next.apiKey ?? "");
             setLanguage(next.language ?? language);
             await i18n.changeLanguage(next.language ?? language);
-            setSaved(true);
+            onOpenChange(false);
         } catch (cause) {
             setError(cause instanceof Error ? cause.message : String(cause));
         } finally {
@@ -128,7 +123,6 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
                 </form>
 
                 <div className="flex items-center justify-end gap-3 border-t px-6 py-3">
-                    {saved ? <span className="text-xs text-muted-foreground">{t("settings.saved")}</span> : null}
                     {error ? <span className="text-xs text-destructive">{error}</span> : null}
                     <Button type="button" variant="outline" disabled={saving} onClick={() => onOpenChange(false)}>
                         {t("settings.cancel")}
