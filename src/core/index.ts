@@ -1,14 +1,29 @@
-import { builtinModels } from "@earendil-works/pi-ai/providers/all";
+import {
+    createLlm,
+    type LlmAdapter,
+    type LlmAssistantMessage,
+    type LlmMessage,
+    type LlmModelRef
+} from "../llm/index.ts";
 import type { JarvixConfig } from "../protocol/config.ts";
 import { type AssistantBlock, type JarvixEvent, type JarvixListener } from "../protocol/event.ts";
-import type { AssistantMessage, UserMessage } from "@earendil-works/pi-ai";
+
+const DEFAULT_MODEL: LlmModelRef = { provider: "deepseek", id: "deepseek-flash" };
+const SYSTEM_PROMPT = "Response user in Chinese";
+
+export type JarvixOptions = {
+    llm?: LlmAdapter;
+    config?: JarvixConfig;
+};
 
 export class Jarvix {
     private listeners = new Set<JarvixListener>();
-    private messages: (AssistantMessage | UserMessage)[] = [];
+    private messages: LlmMessage[] = [];
     private config: JarvixConfig;
-    constructor(config: JarvixConfig = {}) {
-        this.config = config;
+    private readonly llm: LlmAdapter;
+    constructor(options: JarvixOptions = {}) {
+        this.config = options.config ?? {};
+        this.llm = options.llm ?? createLlm();
     }
 
     setConfig(config: JarvixConfig): void {
@@ -38,11 +53,10 @@ export class Jarvix {
         console.debug("THIS IS DEBUG")
     }
 
-    async request(question: string) {
-        const models = builtinModels();
-        const model = models.getModel("deepseek", "deepseek-flash");
-        if(!model){
-            this.emit({ type: "error", error: "Model not found: deepseek/deepseek-flash" });
+    async request(question: string): Promise<void> {
+        const model = this.llm.getModel(DEFAULT_MODEL.provider, DEFAULT_MODEL.id);
+        if (!model) {
+            this.emit({ type: "error", error: `Model not found: ${DEFAULT_MODEL.provider}/${DEFAULT_MODEL.id}` });
             return;
         }
 
@@ -50,101 +64,107 @@ export class Jarvix {
             role: "user",
             content: question,
             timestamp: Date.now()
-        })
-        const stream = models.stream(model, {
-                systemPrompt: "Response user in Chinese",
-                messages: this.messages
-            },
-            {
-                apiKey: this.config.apiKey,
-                reasoning: true,
-                reasoningEffort: "xhigh"
-            })
+        });
 
-        for await (const event of stream){
-            switch(event.type){
-                case "text_start":
-                    this.emit({
-                        type: "text.start",
-                        contentIndex: event.contentIndex
-                    })
-                    break;
+        const stream = this.llm.stream({
+            model,
+            messages: this.messages,
+            systemPrompt: SYSTEM_PROMPT,
+            reasoning: "xhigh",
+            apiKey: this.config.apiKey
+        });
+
+        let completed: LlmAssistantMessage | undefined;
+
+        for await (const event of stream) {
+            switch (event.type) {
                 case "start":
                     this.emit({
                         type: "start"
-                    })
+                    });
                     break;
-                case "text_delta":
+                case "text.start":
+                    this.emit({
+                        type: "text.start",
+                        contentIndex: event.index
+                    });
+                    break;
+                case "text.delta":
                     this.emit({
                         type: "text.delta",
-                        contentIndex: event.contentIndex,
+                        contentIndex: event.index,
                         delta: event.delta
-                    })
+                    });
                     break;
-                case "text_end":
+                case "text.end":
                     this.emit({
                         type: "text.end",
-                        contentIndex: event.contentIndex
-                    })
+                        contentIndex: event.index
+                    });
                     break;
-                case "thinking_start":
+                case "thinking.start":
                     this.emit({
                         type: "thinking.start",
-                        contentIndex: event.contentIndex
-                    })
+                        contentIndex: event.index
+                    });
                     break;
-                case "thinking_delta":
+                case "thinking.delta":
                     this.emit({
                         type: "thinking.delta",
-                        contentIndex: event.contentIndex,
+                        contentIndex: event.index,
                         delta: event.delta
-                    })
+                    });
                     break;
-                case "thinking_end":
+                case "thinking.end":
                     this.emit({
                         type: "thinking.end",
-                        contentIndex: event.contentIndex
-                    })
+                        contentIndex: event.index
+                    });
                     break;
-                case "done": {
-                    const blocks: AssistantBlock[] = []
-                    event.message.content.forEach((item, index) => {
-                        switch(item.type){
-                            case "text":
-                                blocks.push({
-                                    type: "text",
-                                    index,
-                                    text: item.text
-                                })
-                                break;
-                            case "thinking":
-                                blocks.push({
-                                    type: "thinking",
-                                    index,
-                                    thinking: item.thinking
-                                })
-                                break;
-                        }
-                    })
-
+                case "done":
+                    completed = event.message;
                     this.emit({
                         type: "done",
-                        reason: event.reason,
-                        blocks: blocks
-                    })
+                        reason: event.message.stopReason,
+                        blocks: assistantBlocks(event.message)
+                    });
                     break;
-                }
                 case "error":
+                    completed = event.message;
                     this.emit({
                         type: "error",
-                        error: event.error.errorMessage
-                    })
-                    console.error(event.error.errorMessage);
+                        error: event.message.errorMessage
+                    });
+                    console.error(event.message.errorMessage);
                     break;
             }
         }
 
-        const finalMessage: AssistantMessage = await stream.result()
-        this.messages.push(finalMessage)
+        if (completed) {
+            this.messages.push(completed);
+        }
     }
+}
+
+function assistantBlocks(message: LlmAssistantMessage): AssistantBlock[] {
+    const blocks: AssistantBlock[] = [];
+    message.content.forEach((item, index) => {
+        switch (item.type) {
+            case "text":
+                blocks.push({
+                    type: "text",
+                    index,
+                    text: item.text
+                });
+                break;
+            case "thinking":
+                blocks.push({
+                    type: "thinking",
+                    index,
+                    thinking: item.thinking
+                });
+                break;
+        }
+    });
+    return blocks;
 }

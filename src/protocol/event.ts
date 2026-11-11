@@ -2,7 +2,7 @@
 export const LOG_LEVELS = ["log", "info", "warn", "error", "debug"] as const;
 export type LogLevel = typeof LOG_LEVELS[number];
 
-/** Final assistant content block. `index` is the block position reported by pi-ai. */
+/** Final assistant content block. `index` is the block position reported by the LLM adapter. */
 export type AssistantBlock =
   | {
     type: "text";
