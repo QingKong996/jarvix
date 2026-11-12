@@ -3,7 +3,8 @@ import type { IpcMainInvokeEvent } from "electron";
 import { join } from "node:path";
 import { Jarvix } from "../core/index.ts";
 import { DEFAULT_THEME, type JarvixConfig, type Theme } from "../protocol/config.ts";
-import { IPC_CHANNELS } from "../protocol/ipc.ts";
+import type { JarvixEvent } from "../protocol/event.ts";
+import { IPC_CHANNELS, type JarvixEventBatch } from "../protocol/ipc.ts";
 import { configPaths, loadConfig, parseConfig, saveConfig, systemDefaults } from "./config.ts";
 import { createStreamBatcher } from "./stream-batcher.ts";
 
@@ -11,7 +12,6 @@ let config: JarvixConfig = {};
 const jarvix = new Jarvix();
 
 let mainWindow: BrowserWindow | null = null;
-let busy = false;
 
 const WINDOW_BACKGROUND: Record<Theme, string> = {
     dark: "#0b0e14",
@@ -86,31 +86,42 @@ function isExternalUrl(url: string): boolean {
     return url.startsWith("https://") || url.startsWith("http://");
 }
 
-const batcher = createStreamBatcher((events) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send(IPC_CHANNELS.event, events);
+function requireSessionId(value: unknown): string {
+    if (typeof value !== "string" || value.length === 0) {
+        throw new Error("Session id must be a non-empty string");
     }
-});
+    return value;
+}
 
-jarvix.subscribe((event) => {
+function sendEvents(sessionId: string, events: JarvixEvent[]): void {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        const batch: JarvixEventBatch = { sessionId, events };
+        mainWindow.webContents.send(IPC_CHANNELS.event, batch);
+    }
+}
+
+const batchers = new Map<string, ReturnType<typeof createStreamBatcher>>();
+
+jarvix.subscribe((event, sessionId) => {
+    let batcher = batchers.get(sessionId);
+    if (!batcher) {
+        batcher = createStreamBatcher((events) => sendEvents(sessionId, events));
+        batchers.set(sessionId, batcher);
+    }
     batcher.push(event);
 });
 
-ipcMain.handle(IPC_CHANNELS.request, async (event, question: unknown) => {
+ipcMain.handle(IPC_CHANNELS.request, async (event, payload: unknown) => {
     assertSender(event);
+    if (typeof payload !== "object" || payload === null) {
+        throw new Error("Invalid request payload");
+    }
+
+    const { question, sessionId } = payload as Record<string, unknown>;
     if (typeof question !== "string" || question.trim().length === 0) {
         throw new Error("Question must be a non-empty string");
     }
-    if (busy) {
-        throw new Error("Jarvix is busy");
-    }
-
-    busy = true;
-    try {
-        await jarvix.request(question);
-    } finally {
-        busy = false;
-    }
+    return jarvix.request(question, requireSessionId(sessionId));
 });
 
 ipcMain.handle(IPC_CHANNELS.configGet, (event) => {
@@ -125,6 +136,21 @@ ipcMain.handle(IPC_CHANNELS.configSet, (event, payload: unknown) => {
     jarvix.setConfig(config);
     applyTheme(config.theme);
     return config;
+});
+
+ipcMain.handle(IPC_CHANNELS.sessionCreate, (event) => {
+    assertSender(event);
+    return jarvix.createSession();
+});
+
+ipcMain.handle(IPC_CHANNELS.sessionOpen, (event, sessionId: unknown) => {
+    assertSender(event);
+    return jarvix.loadSession(requireSessionId(sessionId));
+});
+
+ipcMain.handle(IPC_CHANNELS.sessionsList, (event) => {
+    assertSender(event);
+    return jarvix.listSessions();
 });
 
 app.whenReady().then(() => {

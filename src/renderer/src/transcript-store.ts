@@ -1,3 +1,4 @@
+import type { LlmMessage } from "../../llm/types.ts";
 import type { JarvixEvent } from "../../protocol/event.ts";
 import { initialTranscriptState, transcriptReducer, type TranscriptAction } from "./transcript.ts";
 import type { CommittedTurn, LiveTurn, TranscriptState } from "./types.ts";
@@ -55,6 +56,11 @@ export function getLive(): LiveTurn | null {
 /** Single entry for every batch relayed from the main process. */
 export function ingest(events: JarvixEvent[]): void {
     apply({ type: "events.batch", events });
+}
+
+/** Replace the transcript with the conversation restored at startup. */
+export function hydrate(messages: LlmMessage[]): void {
+    apply({ type: "session.loaded", messages });
 }
 
 export function beginTurn(text: string): void {

@@ -29,10 +29,10 @@ export function createStreamBatcher(flush: Flush): { push(event: JarvixEvent): v
         push(event: JarvixEvent): void {
             if (event.type === "text.delta") {
                 const last = pending[pending.length - 1];
-                if (last?.type === "text.delta" && last.contentIndex === event.contentIndex) {
+                if (last?.type === "text.delta" && last.index === event.index) {
                     pending[pending.length - 1] = {
                         type: "text.delta",
-                        contentIndex: event.contentIndex,
+                        index: event.index,
                         delta: last.delta + event.delta
                     };
                 } else {
@@ -44,10 +44,10 @@ export function createStreamBatcher(flush: Flush): { push(event: JarvixEvent): v
 
             if (event.type === "thinking.delta") {
                 const last = pending[pending.length - 1];
-                if (last?.type === "thinking.delta" && last.contentIndex === event.contentIndex) {
+                if (last?.type === "thinking.delta" && last.index === event.index) {
                     pending[pending.length - 1] = {
                         type: "thinking.delta",
-                        contentIndex: event.contentIndex,
+                        index: event.index,
                         delta: last.delta + event.delta
                     };
                 } else {

@@ -108,12 +108,16 @@ function useFollowBottom(ref: RefObject<HTMLElement | null>): void {
     }, [ref]);
 }
 
-export function Transcript() {
+export function Transcript({ sessionId }: { sessionId: string | null }) {
     const containerRef = useRef<HTMLElement>(null);
     useFollowBottom(containerRef);
 
     return (
-        <section ref={containerRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-x-hidden overflow-y-auto px-14 py-8">
+        <section
+            ref={containerRef}
+            data-session-id={sessionId ?? undefined}
+            className="flex min-h-0 flex-1 flex-col gap-3 overflow-x-hidden overflow-y-auto px-14 py-8"
+        >
             <CommittedList />
             <LiveSlot />
         </section>

@@ -26,5 +26,5 @@
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
   },
-  "include": ["src/main", "src/preload", "src/core", "src/llm", "src/protocol", "src/cli.ts", "electron.vite.config.ts", "vitest.config.ts"]
+  "include": ["src/main", "src/preload", "src/core", "src/llm", "src/protocol", "src/session", "src/cli.ts", "electron.vite.config.ts", "vitest.config.ts"]
 }

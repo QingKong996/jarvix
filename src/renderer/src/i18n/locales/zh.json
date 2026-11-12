@@ -3,6 +3,13 @@
         "chat": "对话",
         "settings": "设置"
     },
+    "sessions": {
+        "new": "新对话",
+        "title": "会话",
+        "empty": "暂无会话",
+        "untitled": "未命名会话",
+        "messageCount": "{{count}} 条消息"
+    },
     "composer": {
         "placeholder": "输入问题...",
         "send": "发送",
