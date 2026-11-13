@@ -1,10 +1,15 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { I18nextProvider } from "react-i18next";
 import { beforeAll, describe, expect, test } from "vitest";
-import { i18n } from "@/i18n/index.ts";
+import { i18n } from "../../../i18n/index.ts";
 import { Markdown } from "./Markdown.tsx";
 
 function render(markdown: string, streaming = false): string {
-    return renderToStaticMarkup(<Markdown text={markdown} streaming={streaming} />);
+    return renderToStaticMarkup(
+        <I18nextProvider i18n={i18n}>
+            <Markdown text={markdown} streaming={streaming} />
+        </I18nextProvider>
+    );
 }
 
 beforeAll(async () => {

@@ -31,13 +31,6 @@ export class Session {
         this.history = [...messages];
     }
 
-    /** Update memory first, then flush the pending write queue in order. */
-    append(message: LlmMessage): void {
-        this.history.push(message);
-        this.pendingPersistence.push(message);
-        this.flushPendingPersistence();
-    }
-
     async request(question: string, runtime: SessionRuntime): Promise<void> {
         if (this.running) {
             throw new Error(`Session is busy: ${this.meta.id}`);
@@ -85,6 +78,13 @@ export class Session {
             meta: this.meta,
             messages: [...this.history]
         };
+    }
+
+    /** Update memory first, then flush the pending write queue in order. */
+    private append(message: LlmMessage): void {
+        this.history.push(message);
+        this.pendingPersistence.push(message);
+        this.flushPendingPersistence();
     }
 
     private flushPendingPersistence(): void {

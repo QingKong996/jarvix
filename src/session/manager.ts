@@ -6,8 +6,8 @@ import { createSession, listSessionSummaries, loadSession } from "./store.ts";
 export class SessionManager {
     private readonly sessions = new Map<string, Session>();
 
-    create(): Session {
-        return this.track(createSession());
+    create(name?: string): Session {
+        return this.track(createSession(name));
     }
 
     load(id: string): Session | null {

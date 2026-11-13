@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, test } from "vitest";
 import type { LlmAssistantMessage, LlmUserMessage } from "../llm/types.ts";
+import type { JarvixSessionMeta } from "../protocol/session.ts";
 import {
     SESSION_FORMAT_VERSION,
     appendSessionMessage,
@@ -13,6 +14,7 @@ import {
 } from "./store.ts";
 
 const base = mkdtempSync(join(tmpdir(), "jarvix-session-"));
+const SESSION_NAME = "Untitled session";
 
 const userMessage: LlmUserMessage = {
     role: "user",
@@ -55,11 +57,12 @@ test("sessionFile places <id>.jsonl in the given directory", () => {
 
 test("createSession writes a v1 header to a <uuid>.jsonl file", () => {
     const directory = join(base, "create");
-    const session = createSession(directory);
+    const session = createSession(SESSION_NAME, directory);
 
     expect(session.messages).toEqual([]);
     expect(session.meta.type).toBe("session");
     expect(session.meta.version).toBe(SESSION_FORMAT_VERSION);
+    expect(session.meta.name).toBe(SESSION_NAME);
     expect(typeof session.meta.createdAt).toBe("number");
 
     const fileName = `${session.meta.id}.jsonl`;
@@ -71,9 +74,17 @@ test("createSession writes a v1 header to a <uuid>.jsonl file", () => {
     expect(JSON.parse(lines[0] ?? "")).toEqual(session.meta);
 });
 
+test.each([undefined, "", "   "])("createSession gives %j the default name", (name) => {
+    const directory = join(base, "default-name");
+    const session = createSession(name, directory);
+
+    expect(session.meta.name).toBe("未命名会话");
+    expect(loadSession(session.meta.id, directory)?.meta.name).toBe("未命名会话");
+});
+
 test("appendSessionMessage then loadSession round-trips messages and meta", () => {
     const directory = join(base, "round-trip");
-    const created = createSession(directory);
+    const created = createSession(SESSION_NAME, directory);
 
     appendSessionMessage(created.meta.id, userMessage, directory);
     appendSessionMessage(created.meta.id, assistantMessage, directory);
@@ -91,7 +102,7 @@ test("appendSessionMessage then loadSession round-trips messages and meta", () =
 
 test("loadSession ignores corrupt and blank lines between valid records", () => {
     const directory = join(base, "corrupt");
-    const created = createSession(directory);
+    const created = createSession(SESSION_NAME, directory);
     const file = sessionFile(created.meta.id, directory);
 
     appendSessionMessage(created.meta.id, userMessage, directory);
@@ -137,31 +148,56 @@ test("loadSession returns null for an unknown id", () => {
     expect(loadSession("00000000-0000-4000-8000-000000000000", join(base, "missing"))).toBeNull();
 });
 
-test("listSessionSummaries reads titles and counts without loading messages", () => {
+test("listSessionSummaries reads names from headers without loading messages", () => {
     const directory = join(base, "summaries");
-    const first = createSession(directory);
-    appendSessionMessage(first.meta.id, userMessage, directory);
-    appendSessionMessage(first.meta.id, assistantMessage, directory);
-    const past = new Date(Date.now() - 60_000);
-    utimesSync(sessionFile(first.meta.id, directory), past, past);
+    const firstMeta: JarvixSessionMeta = {
+        type: "session",
+        version: SESSION_FORMAT_VERSION,
+        id: "named-session",
+        name: "Named session",
+        createdAt: 1_700_000_000_000
+    };
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(sessionFile(firstMeta.id, directory), `${JSON.stringify(firstMeta)}\n`, "utf8");
+    appendSessionMessage(firstMeta.id, { ...userMessage, content: "not the title" }, directory);
 
-    const second = createSession(directory);
-    appendSessionMessage(second.meta.id, { ...userMessage, content: "second prompt" }, directory);
+    const past = new Date(Date.now() - 60_000);
+    utimesSync(sessionFile(firstMeta.id, directory), past, past);
+
+    const second = createSession("Another session", directory);
     mkdirSync(join(directory, "decoy.jsonl"));
 
     const summaries = listSessionSummaries(directory);
-    expect(summaries.map((summary) => summary.id)).toEqual([second.meta.id, first.meta.id]);
+    expect(summaries.map((summary) => summary.id)).toEqual([second.meta.id, firstMeta.id]);
     expect(summaries[1]).toMatchObject({
-        id: first.meta.id,
-        title: "hello",
-        createdAt: first.meta.createdAt,
-        messageCount: 2
+        id: firstMeta.id,
+        name: "Named session",
+        createdAt: firstMeta.createdAt
     });
     expect(summaries[0]).toMatchObject({
         id: second.meta.id,
-        title: "second prompt",
-        createdAt: second.meta.createdAt,
-        messageCount: 1
+        name: "Another session",
+        createdAt: second.meta.createdAt
     });
+    expect(Object.keys(summaries[0]!).sort()).toEqual(["createdAt", "id", "name", "updatedAt"]);
     expect(listSessionSummaries(join(base, "missing-summaries"))).toEqual([]);
+});
+
+test("loadSession rejects headers without a non-empty name", () => {
+    const directory = join(base, "missing-name");
+    const meta = {
+        type: "session",
+        version: SESSION_FORMAT_VERSION,
+        id: "unnamed-session",
+        createdAt: 1_700_000_000_000
+    };
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(
+        sessionFile(meta.id, directory),
+        `${JSON.stringify(meta)}\n`,
+        "utf8"
+    );
+
+    expect(loadSession(meta.id, directory)).toBeNull();
+    expect(listSessionSummaries(directory)).toEqual([]);
 });

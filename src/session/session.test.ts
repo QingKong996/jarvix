@@ -3,8 +3,7 @@ import type { LlmAdapter } from "../llm/index.ts";
 import type {
     LlmAssistantMessage,
     LlmModelInfo,
-    LlmStreamEvent,
-    LlmUserMessage
+    LlmStreamEvent
 } from "../llm/types.ts";
 import type { JarvixEvent } from "../protocol/event.ts";
 import type { JarvixSessionMeta } from "../protocol/session.ts";
@@ -20,19 +19,9 @@ const meta: JarvixSessionMeta = {
     type: "session",
     version: 1,
     id: "session-test",
+    name: "Session test",
     createdAt: 1
 };
-const firstMessage: LlmUserMessage = {
-    role: "user",
-    content: "first",
-    timestamp: 1
-};
-const secondMessage: LlmUserMessage = {
-    role: "user",
-    content: "second",
-    timestamp: 2
-};
-
 const MODEL: LlmModelInfo = {
     provider: "test",
     id: "test-model",
@@ -46,33 +35,64 @@ beforeEach(() => {
     persist.mockReset();
 });
 
-test("retries persistence once and dequeues the message on success", () => {
+test("retries persistence once and dequeues the message on success", async () => {
     persist.mockImplementationOnce(() => {
         throw new Error("disk full");
     });
     const session = new Session(meta);
 
-    session.append(firstMessage);
+    await session.request("first", {
+        llm: fakeLlm(assistantMessage()),
+        config: {},
+        emit: () => undefined
+    });
 
-    expect(persist).toHaveBeenCalledTimes(2);
-    expect(session.snapshot().messages).toEqual([firstMessage]);
+    expect(persist).toHaveBeenCalledTimes(3);
+    expect(persist.mock.calls.map(([, message]) => message.role)).toEqual([
+        "user",
+        "user",
+        "assistant"
+    ]);
+    expect(persist.mock.calls[0]?.[1]).toBe(persist.mock.calls[1]?.[1]);
+    expect(session.snapshot().messages.map((message) => message.role)).toEqual([
+        "user",
+        "assistant"
+    ]);
 });
 
-test("keeps failed messages queued and flushes them in order", () => {
+test("keeps failed messages queued and flushes them in order", async () => {
     persist.mockImplementation(() => {
         throw new Error("disk full");
     });
     const session = new Session(meta);
+    const runtime = {
+        llm: fakeLlm(assistantMessage()),
+        config: {},
+        emit: () => undefined
+    };
 
-    expect(() => session.append(firstMessage)).toThrow(/after 2 attempts/);
+    await expect(session.request("first", runtime)).rejects.toThrow(/after 2 attempts/);
     expect(persist).toHaveBeenCalledTimes(2);
-    expect(session.snapshot().messages).toEqual([firstMessage]);
+    expect(session.snapshot().messages).toEqual([
+        expect.objectContaining({ role: "user", content: "first" })
+    ]);
 
     persist.mockReset();
-    session.append(secondMessage);
+    await session.request("second", {
+        llm: fakeLlm(assistantMessage()),
+        config: {},
+        emit: () => undefined
+    });
 
-    expect(persist.mock.calls.map(([, message]) => message)).toEqual([firstMessage, secondMessage]);
-    expect(session.snapshot().messages).toEqual([firstMessage, secondMessage]);
+    const persisted = persist.mock.calls.map(([, message]) => message);
+    expect(persisted[0]).toBe(session.snapshot().messages[0]);
+    expect(persisted[1]).toEqual(expect.objectContaining({ role: "user", content: "second" }));
+    expect(persisted.map((message) => message.role)).toEqual(["user", "user", "assistant"]);
+    expect(session.snapshot().messages.map((message) => message.role)).toEqual([
+        "user",
+        "user",
+        "assistant"
+    ]);
 });
 
 test("forwards done before persisting its complete assistant message", async () => {

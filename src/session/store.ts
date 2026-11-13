@@ -13,6 +13,7 @@ import {
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import { i18n } from "../i18n/index.ts";
 import type { LlmMessage } from "../llm/types.ts";
 import {
     type JarvixSession,
@@ -24,8 +25,7 @@ export const SESSION_FORMAT_VERSION = 1;
 
 const SESSION_FILE_EXTENSION = ".jsonl";
 const SESSION_FILE_MODE = 0o600;
-const SUMMARY_CHUNK_SIZE = 64 * 1024;
-const SUMMARY_TITLE_LENGTH = 60;
+const SESSION_HEADER_CHUNK_SIZE = 4 * 1024;
 
 type SessionMessageRecord = {
     type: "message";
@@ -40,11 +40,12 @@ export function sessionFile(id: string, directory = defaultSessionDirectory()): 
 }
 
 /** Create a new empty session on disk and return it. */
-export function createSession(directory = defaultSessionDirectory()): JarvixSession {
+export function createSession(name = "", directory = defaultSessionDirectory()): JarvixSession {
     const meta: JarvixSessionMeta = {
         type: "session",
         version: SESSION_FORMAT_VERSION,
         id: randomUUID(),
+        name: name.trim() || i18n.t("sessions.untitled"),
         createdAt: Date.now()
     };
 
@@ -83,9 +84,7 @@ export function loadSession(id: string, directory = defaultSessionDirectory()): 
             continue;
         }
         if (!meta) {
-            if (isSessionMeta(record)) {
-                meta = record;
-            }
+            meta = parseSessionMeta(record);
             continue;
         }
         if (isSessionMessage(record)) {
@@ -96,7 +95,7 @@ export function loadSession(id: string, directory = defaultSessionDirectory()): 
     return meta ? { meta, messages } : null;
 }
 
-/** List session metadata newest first without instantiating sessions or retaining messages. */
+/** List session summaries newest first by reading only each session header. */
 export function listSessionSummaries(directory = defaultSessionDirectory()): JarvixSessionSummary[] {
     let entries: string[];
     try {
@@ -143,6 +142,20 @@ function defaultSessionDirectory(): string {
 }
 
 function readSessionSummary(file: string, id: string, updatedAt: number): JarvixSessionSummary | null {
+    const meta = readSessionMeta(file);
+    if (!meta || meta.id !== id) {
+        return null;
+    }
+    return {
+        id: meta.id,
+        name: meta.name,
+        createdAt: meta.createdAt,
+        updatedAt
+    };
+}
+
+/** Read only the first JSONL record, which holds the session meta. */
+function readSessionMeta(file: string): JarvixSessionMeta | null {
     let descriptor: number;
     try {
         descriptor = openSync(file, "r");
@@ -150,81 +163,29 @@ function readSessionSummary(file: string, id: string, updatedAt: number): Jarvix
         return null;
     }
 
-    const summary: {
-        meta: JarvixSessionMeta | null;
-        title: string | null;
-        messageCount: number;
-    } = {
-        meta: null,
-        title: null,
-        messageCount: 0
-    };
-    let remainder = "";
-    const decoder = new StringDecoder("utf8");
-
-    const consumeLine = (line: string): void => {
-        const record = parseRecord(line);
-        if (record === undefined) {
-            return;
-        }
-        if (!summary.meta) {
-            if (isSessionMeta(record)) {
-                summary.meta = record;
-            }
-            return;
-        }
-        if (!isSessionMessage(record)) {
-            return;
-        }
-        summary.messageCount += 1;
-        if (summary.title === null && record.message.role === "user") {
-            summary.title = sessionTitle(record.message.content);
-        }
-    };
-
     try {
-        const buffer = Buffer.allocUnsafe(SUMMARY_CHUNK_SIZE);
+        const buffer = Buffer.allocUnsafe(SESSION_HEADER_CHUNK_SIZE);
+        const decoder = new StringDecoder("utf8");
+        let header = "";
         while (true) {
             const bytes = readSync(descriptor, buffer, 0, buffer.length, null);
             if (bytes === 0) {
+                header += decoder.end();
                 break;
             }
-            const text = remainder + decoder.write(buffer.subarray(0, bytes));
-            const lines = text.split("\n");
-            remainder = lines.pop() ?? "";
-            for (const line of lines) {
-                consumeLine(line);
+            header += decoder.write(buffer.subarray(0, bytes));
+            const newline = header.indexOf("\n");
+            if (newline !== -1) {
+                header = header.slice(0, newline);
+                break;
             }
         }
-        remainder += decoder.end();
-        consumeLine(remainder);
+        return parseSessionMeta(parseRecord(header));
     } catch {
         return null;
     } finally {
         closeSync(descriptor);
     }
-
-    if (!summary.meta || summary.meta.id !== id) {
-        return null;
-    }
-    return {
-        id: summary.meta.id,
-        title: summary.title,
-        createdAt: summary.meta.createdAt,
-        updatedAt,
-        messageCount: summary.messageCount
-    };
-}
-
-function sessionTitle(content: string): string | null {
-    const normalized = content.replace(/\s+/g, " ").trim();
-    if (normalized.length === 0) {
-        return null;
-    }
-    const characters = [...normalized];
-    return characters.length > SUMMARY_TITLE_LENGTH
-        ? `${characters.slice(0, SUMMARY_TITLE_LENGTH).join("")}…`
-        : normalized;
 }
 
 function serializeRecord(record: SessionRecord): string {
@@ -247,15 +208,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isSessionMeta(value: unknown): value is JarvixSessionMeta {
-    return (
+function parseSessionMeta(value: unknown): JarvixSessionMeta | null {
+    if (!(
         isRecord(value) &&
         value.type === "session" &&
         typeof value.version === "number" &&
         typeof value.id === "string" &&
         value.id.length > 0 &&
         typeof value.createdAt === "number"
-    );
+    )) {
+        return null;
+    }
+    const name = typeof value.name === "string" ? value.name.trim() : "";
+    if (name.length === 0) {
+        return null;
+    }
+    return {
+        type: "session",
+        version: value.version,
+        id: value.id,
+        name,
+        createdAt: value.createdAt
+    };
 }
 
 function isSessionMessage(value: unknown): value is SessionMessageRecord {

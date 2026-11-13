@@ -5,6 +5,8 @@ export type JarvixSessionMeta = {
     type: "session";
     version: number;
     id: string;
+    /** Non-empty display name. */
+    name: string;
     createdAt: number;
 };
 
@@ -17,8 +19,7 @@ export type JarvixSession = {
 /** Lightweight session data for the sidebar; messages stay on disk. */
 export type JarvixSessionSummary = {
     id: string;
-    title: string | null;
+    name: string;
     createdAt: number;
     updatedAt: number;
-    messageCount: number;
 };

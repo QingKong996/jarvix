@@ -1,4 +1,5 @@
 import { createLlm, type LlmAdapter } from "../llm/index.ts";
+import { i18n } from "../i18n/index.ts";
 import type { JarvixConfig } from "../protocol/config.ts";
 import type { JarvixEvent, JarvixListener } from "../protocol/event.ts";
 import type { JarvixSession, JarvixSessionSummary } from "../protocol/session.ts";
@@ -24,8 +25,9 @@ export class Jarvix {
         this.config = config;
     }
 
-    createSession(): JarvixSession {
-        return this.sessions.create().snapshot();
+    createSession(name?: string): JarvixSession {
+        const sessionName = name?.trim() || i18n.t("sessions.untitled", { lng: this.config.language ?? "zh" });
+        return this.sessions.create(sessionName).snapshot();
     }
 
     loadSession(sessionId: string): JarvixSession | null {

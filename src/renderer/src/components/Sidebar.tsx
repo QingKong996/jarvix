@@ -18,7 +18,7 @@ function navItemClass(active: boolean): string {
 }
 
 function sessionItemClass(active: boolean): string {
-    return `flex w-full items-start gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+    return `flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
         active ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
     }`;
 }
@@ -67,20 +67,13 @@ export function Sidebar({
                                 key={session.id}
                                 type="button"
                                 aria-current={active ? "page" : undefined}
-                                title={session.title ?? t("sessions.untitled")}
+                                title={session.name}
                                 onClick={() => onSelectSession(session.id)}
                                 disabled={busy}
                                 className={sessionItemClass(active)}
                             >
-                                <MessageSquare className="mt-0.5 size-4 shrink-0" />
-                                <span className="min-w-0 flex-1">
-                                    <span className="block truncate">
-                                        {session.title ?? t("sessions.untitled")}
-                                    </span>
-                                    <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">
-                                        {t("sessions.messageCount", { count: session.messageCount })}
-                                    </span>
-                                </span>
+                                <MessageSquare className="size-4 shrink-0" />
+                                <span className="min-w-0 flex-1 truncate">{session.name}</span>
                             </button>
                         );
                     })}

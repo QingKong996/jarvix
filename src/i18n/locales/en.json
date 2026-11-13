@@ -7,8 +7,7 @@
         "new": "New chat",
         "title": "Sessions",
         "empty": "No sessions yet",
-        "untitled": "Untitled session",
-        "messageCount": "{{count}} messages"
+        "untitled": "Untitled session"
     },
     "composer": {
         "placeholder": "Ask a question...",

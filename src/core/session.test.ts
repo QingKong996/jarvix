@@ -5,6 +5,7 @@ import { afterAll, expect, test, vi } from "vitest";
 import type { LlmAdapter, LlmAssistantMessage, LlmMessage, LlmModelInfo, LlmStreamEvent } from "../llm/index.ts";
 import { loadSession } from "../session/store.ts";
 import { Jarvix } from "./index.ts";
+import type { Language } from "../protocol/config.ts";
 
 const home = vi.hoisted(() => ({ path: "" }));
 
@@ -14,6 +15,7 @@ vi.mock("node:os", async (importOriginal) => {
 });
 
 const base = mkdtempSync(join(tmpdir(), "jarvix-core-session-"));
+const SESSION_NAME = "Untitled session";
 
 const MODEL: LlmModelInfo = {
     provider: "test",
@@ -91,7 +93,7 @@ test("persists each turn and resumes the stored history for the next request", a
     const requests: LlmMessage[][] = [];
 
     const first = new Jarvix({ llm: fakeLlm("first reply", requests) });
-    const firstSession = first.createSession();
+    const firstSession = first.createSession(SESSION_NAME);
     await first.request("first question", firstSession.meta.id);
 
     const stored = loadSession(firstSession.meta.id, directory);
@@ -111,19 +113,35 @@ test("persists each turn and resumes the stored history for the next request", a
     expect(reloaded?.messages.map((message) => message.role)).toEqual(["user", "assistant", "user", "assistant"]);
 });
 
-test("creates a session explicitly and persists messages", async () => {
-    home.path = join(base, "lazy-home");
+test.each<{ language: Language; name: string }>([
+    { language: "zh", name: "未命名会话" },
+    { language: "en", name: "Untitled session" }
+])("creates a session with the default name in $language and persists messages", async ({ language, name }) => {
+    home.path = join(base, `lazy-${language}-home`);
     const directory = join(home.path, ".jarvix", "sessions");
-    const jarvix = new Jarvix({ llm: fakeLlm("ok", []) });
+    const jarvix = new Jarvix({ llm: fakeLlm("ok", []), config: { language } });
 
     expect(jarvix.listSessions()).toEqual([]);
 
     const created = jarvix.createSession();
+    expect(created.meta.name).toBe(name);
     await jarvix.request("hello", created.meta.id);
 
     const session = jarvix.loadSession(created.meta.id);
+    expect(loadSession(created.meta.id, directory)?.meta.name).toBe(name);
     expect(session?.messages).toHaveLength(2);
     expect(loadSession(session?.meta.id ?? "", directory)?.messages).toHaveLength(2);
+});
+
+test("uses the current configured language when creating a session with a blank name", () => {
+    home.path = join(base, "default-name-home");
+    const jarvix = new Jarvix({ llm: fakeLlm("ok", []), config: { language: "zh" } });
+
+    expect(jarvix.createSession("   ").meta.name).toBe("未命名会话");
+
+    jarvix.setConfig({ language: "en" });
+
+    expect(jarvix.createSession("").meta.name).toBe("Untitled session");
 });
 
 test("runs separate sessions in parallel with isolated histories", async () => {
@@ -135,8 +153,8 @@ test("runs separate sessions in parallel with isolated histories", async () => {
         release = resolve;
     });
     const jarvix = new Jarvix({ llm: gatedLlm(requests, gate) });
-    const first = jarvix.createSession();
-    const second = jarvix.createSession();
+    const first = jarvix.createSession("First session");
+    const second = jarvix.createSession("Second session");
     expect(jarvix.listSessions()).toHaveLength(2);
     const eventSessions = new Set<string>();
     jarvix.subscribe((_event, sessionId) => {
@@ -164,8 +182,7 @@ test("runs separate sessions in parallel with isolated histories", async () => {
     expect(loadSession(first.meta.id, directory)?.messages).toHaveLength(2);
     expect(loadSession(second.meta.id, directory)?.messages).toHaveLength(2);
     const summaries = jarvix.listSessions();
-    expect(summaries.map((session) => session.title).sort()).toEqual(["first", "second"]);
-    expect(summaries.map((session) => session.messageCount)).toEqual([2, 2]);
+    expect(summaries.map((session) => session.name).sort()).toEqual(["First session", "Second session"]);
 });
 
 test("rejects a second request in the same session", async () => {
@@ -176,7 +193,7 @@ test("rejects a second request in the same session", async () => {
         release = resolve;
     });
     const jarvix = new Jarvix({ llm: gatedLlm(requests, gate) });
-    const session = jarvix.createSession();
+    const session = jarvix.createSession(SESSION_NAME);
 
     const firstRequest = jarvix.request("first", session.meta.id);
     await vi.waitFor(() => expect(requests).toHaveLength(1));
