@@ -1,4 +1,5 @@
-import type { AssistantBlock, JarvixEvent } from "../../protocol/event.ts";
+import type { LlmAssistantMessage, LlmContentBlock, LlmMessage } from "../../llm/types.ts";
+import type { JarvixEvent } from "../../protocol/event.ts";
 import type { CommittedBlock, CommittedTurn, LiveBlock, TranscriptState } from "./types.ts";
 
 export type TranscriptAction =
@@ -13,6 +14,9 @@ export type TranscriptAction =
     } | {
         type: "request.error";
         error: string;
+    } | {
+        type: "session.loaded";
+        messages: LlmMessage[];
     };
 
 export const initialTranscriptState: TranscriptState = {
@@ -42,26 +46,72 @@ export function transcriptReducer(state: TranscriptState, action: TranscriptActi
             return commitLive(state, action.error);
         case "events.batch":
             return action.events.reduce(applyEvent, state);
+        case "session.loaded":
+            return { committed: hydrateSession(action.messages), live: null };
+    }
+}
+
+/** Restore persisted messages as committed turns, in file order. */
+function hydrateSession(messages: LlmMessage[]): CommittedTurn[] {
+    return messages.map((message, index): CommittedTurn => {
+        const id = `history-${index}`;
+        if (message.role === "user") {
+            return {
+                id,
+                role: "user",
+                text: message.content,
+                blocks: [],
+                error: null,
+                reason: null
+            };
+        }
+        return {
+            id,
+            role: "assistant",
+            text: "",
+            blocks: message.content.flatMap(toHistoryBlock),
+            error: message.errorMessage ?? null,
+            reason: message.stopReason
+        };
+    });
+}
+
+function toHistoryBlock(block: LlmContentBlock): CommittedBlock[] {
+    switch (block.type) {
+        case "text":
+            return [{ type: "text", text: block.text }];
+        case "thinking":
+            return [{ type: "thinking", thinking: block.thinking }];
+        case "toolCall":
+            return [];
     }
 }
 
 function applyEvent(state: TranscriptState, event: JarvixEvent): TranscriptState {
     switch (event.type) {
         case "text.start":
-            return upsertLiveBlock(state, event.contentIndex, "text", "");
+            return upsertLiveBlock(state, event.index, "text", "");
         case "text.delta":
-            return upsertLiveBlock(state, event.contentIndex, "text", event.delta);
+            return upsertLiveBlock(state, event.index, "text", event.delta);
         case "thinking.start":
-            return upsertLiveBlock(state, event.contentIndex, "thinking", "");
+            return upsertLiveBlock(state, event.index, "thinking", "");
         case "thinking.delta":
-            return upsertLiveBlock(state, event.contentIndex, "thinking", event.delta);
+            return upsertLiveBlock(state, event.index, "thinking", event.delta);
         case "done":
-            return commitDone(state, event.blocks, event.reason);
         case "error":
-            return commitLive(state, event.error ?? "Unknown error");
+            return commitMessage(state, event.message);
+        case "request.error":
+            return commitLive(state, event.error);
+        case "start":
+            return state.live ? state : {
+                ...state,
+                live: { id: `stream-${state.committed.length}`, blocks: [] }
+            };
         case "text.end":
         case "thinking.end":
-        case "start":
+        case "toolCall.start":
+        case "toolCall.delta":
+        case "toolCall.end":
         case "log":
             return state;
     }
@@ -86,21 +136,19 @@ function upsertLiveBlock(
     return { ...state, live: { ...live, blocks } };
 }
 
-/** `done` is the only commit point: replace the live turn with authoritative blocks. */
-function commitDone(state: TranscriptState, blocks: AssistantBlock[], reason: string): TranscriptState {
+function commitMessage(state: TranscriptState, message: LlmAssistantMessage): TranscriptState {
     const live = state.live;
     if (!live) {
         return state;
     }
-    const sorted = [...blocks].sort((left, right) => left.index - right.index);
     return {
         committed: [...state.committed, {
             id: live.id,
             role: "assistant",
             text: "",
-            blocks: sorted.map(toCommittedBlock),
-            error: null,
-            reason
+            blocks: message.content.flatMap(toHistoryBlock),
+            error: message.errorMessage ?? null,
+            reason: message.stopReason
         }],
         live: null
     };
@@ -124,10 +172,4 @@ function commitLive(state: TranscriptState, error: string): TranscriptState {
         }],
         live: null
     };
-}
-
-function toCommittedBlock(block: AssistantBlock): CommittedBlock {
-    return block.type === "text"
-        ? { type: "text", text: block.text }
-        : { type: "thinking", thinking: block.thinking };
 }

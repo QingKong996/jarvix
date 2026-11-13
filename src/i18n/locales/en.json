@@ -3,6 +3,12 @@
         "chat": "Chat",
         "settings": "Settings"
     },
+    "sessions": {
+        "new": "New chat",
+        "title": "Sessions",
+        "empty": "No sessions yet",
+        "untitled": "Untitled session"
+    },
     "composer": {
         "placeholder": "Ask a question...",
         "send": "Send",
