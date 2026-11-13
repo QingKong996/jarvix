@@ -1,8 +1,8 @@
 import i18next from "i18next";
 import { initReactI18next } from "react-i18next";
 import type { Language } from "../../../protocol/config.ts";
-import { en } from "./locales/en.ts";
-import { zh } from "./locales/zh.ts";
+import en from "./locales/en.json";
+import zh from "./locales/zh.json";
 
 const resources = {
     zh: { translation: zh },
