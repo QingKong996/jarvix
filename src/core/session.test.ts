@@ -6,6 +6,7 @@ import type { LlmAdapter, LlmAssistantMessage, LlmMessage, LlmModelInfo, LlmStre
 import { loadSession } from "../session/store.ts";
 import { Jarvix } from "./index.ts";
 import type { Language } from "../protocol/config.ts";
+import { providerConfigSchema } from "../protocol/providers.ts";
 
 const home = vi.hoisted(() => ({ path: "" }));
 
@@ -24,6 +25,14 @@ const MODEL: LlmModelInfo = {
     reasoning: false,
     contextWindow: 1000,
     maxTokens: 100
+};
+const TEST_PROVIDER = providerConfigSchema.parse({
+    id: MODEL.provider, name: MODEL.name, protocol: "openai-completions", baseUrl: "http://localhost:8080/v1",
+    models: [{ id: MODEL.id, name: MODEL.name }]
+});
+const TEST_CONFIG = {
+    providers: [TEST_PROVIDER],
+    selectedModel: { provider: MODEL.provider, id: MODEL.id }
 };
 
 afterAll(() => {
@@ -92,7 +101,7 @@ test("persists each turn and resumes the stored history for the next request", a
     const directory = join(home.path, ".jarvix", "sessions");
     const requests: LlmMessage[][] = [];
 
-    const first = new Jarvix({ llm: fakeLlm("first reply", requests) });
+    const first = new Jarvix({ llm: fakeLlm("first reply", requests), config: TEST_CONFIG });
     const firstSession = first.createSession(SESSION_NAME);
     await first.request("first question", firstSession.meta.id);
 
@@ -103,7 +112,7 @@ test("persists each turn and resumes the stored history for the next request", a
     expect(stored?.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
     expect(stored?.messages[0]).toMatchObject({ role: "user", content: "first question" });
 
-    const second = new Jarvix({ llm: fakeLlm("second reply", requests) });
+    const second = new Jarvix({ llm: fakeLlm("second reply", requests), config: TEST_CONFIG });
     expect(second.loadSession(stored.meta.id)?.messages).toHaveLength(2);
     await second.request("second question", stored.meta.id);
 
@@ -119,7 +128,7 @@ test.each<{ language: Language; name: string }>([
 ])("creates a session with the default name in $language and persists messages", async ({ language, name }) => {
     home.path = join(base, `lazy-${language}-home`);
     const directory = join(home.path, ".jarvix", "sessions");
-    const jarvix = new Jarvix({ llm: fakeLlm("ok", []), config: { language } });
+    const jarvix = new Jarvix({ llm: fakeLlm("ok", []), config: { ...TEST_CONFIG, language } });
 
     expect(jarvix.listSessions()).toEqual([]);
 
@@ -152,7 +161,7 @@ test("runs separate sessions in parallel with isolated histories", async () => {
     const gate = new Promise<void>((resolve) => {
         release = resolve;
     });
-    const jarvix = new Jarvix({ llm: gatedLlm(requests, gate) });
+    const jarvix = new Jarvix({ llm: gatedLlm(requests, gate), config: TEST_CONFIG });
     const first = jarvix.createSession("First session");
     const second = jarvix.createSession("Second session");
     expect(jarvix.listSessions()).toHaveLength(2);
@@ -192,7 +201,7 @@ test("rejects a second request in the same session", async () => {
     const gate = new Promise<void>((resolve) => {
         release = resolve;
     });
-    const jarvix = new Jarvix({ llm: gatedLlm(requests, gate) });
+    const jarvix = new Jarvix({ llm: gatedLlm(requests, gate), config: TEST_CONFIG });
     const session = jarvix.createSession(SESSION_NAME);
 
     const firstRequest = jarvix.request("first", session.meta.id);

@@ -37,11 +37,6 @@
             "model": "模型",
             "general": "通用"
         },
-        "model": {
-            "apiKey": "DeepSeek API Key",
-            "revealKey": "显示 API Key",
-            "hideKey": "隐藏 API Key"
-        },
         "providers": {
             "loading": "加载中…",
             "refresh": "刷新目录",
@@ -69,6 +64,8 @@
             "name": "名称",
             "protocol": "API 协议",
             "apiKey": "API Key",
+            "revealKey": "显示 API Key",
+            "hideKey": "隐藏 API Key",
             "search": "搜索模型",
             "removeModel": "移除模型",
             "modelId": "模型 ID",

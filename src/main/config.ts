@@ -3,7 +3,6 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import {
-    DEFAULT_MODEL,
     REASONING_LEVELS,
     modelSelectionSchema,
     providerConfigSchema,
@@ -39,7 +38,7 @@ export function configPaths(directory = join(homedir(), CONFIG_DIRECTORY_NAME)):
     };
 }
 
-/** The complete default config set. Fields that have no sensible default (e.g. apiKey) stay absent. */
+/** The complete default config set. Fields that have no sensible default stay absent. */
 export function systemDefaults(locale = Intl.DateTimeFormat().resolvedOptions().locale): ConfigDefaults {
     return {
         language: detectLanguage(locale),
@@ -80,11 +79,6 @@ export function saveConfig(
 function configSchema(defaults: ConfigDefaults) {
     return z
         .object({
-            apiKey: z
-                .string()
-                .trim()
-                .transform((value) => (value.length > 0 ? value : undefined))
-                .optional(),
             providers: z.array(providerConfigSchema).refine(
                 (providers) => new Set(providers.map((provider) => provider.id)).size === providers.length,
                 "Duplicate provider IDs"
@@ -99,17 +93,15 @@ function configSchema(defaults: ConfigDefaults) {
             if (!selection) return;
             const provider = config.providers?.find((item) => item.id === selection.provider);
             if (provider?.models.some((model) => model.id === selection.id)) return;
-            if (!provider && selection.provider === DEFAULT_MODEL.provider && selection.id === DEFAULT_MODEL.id) return;
             context.addIssue({ code: "custom", path: ["selectedModel"], message: "Selected model is not configured" });
         })
-        .transform(({ apiKey, language, theme, providers, selectedModel, reasoning }) => {
+        .transform(({ language, theme, providers, selectedModel, reasoning }) => {
             const resolved = resolveConfiguredModel(providers, selectedModel);
             const nextSelection = resolved?.selection ?? selectedModel;
             const nextReasoning = resolved || reasoning
                 ? resolveReasoningLevel(resolved?.model, reasoning)
                 : undefined;
             return {
-                ...(apiKey ? { apiKey } : {}),
                 ...(providers ? { providers } : {}),
                 ...(nextSelection ? { selectedModel: nextSelection } : {}),
                 ...(nextReasoning ? { reasoning: nextReasoning } : {}),

@@ -37,11 +37,6 @@
             "model": "Model",
             "general": "General"
         },
-        "model": {
-            "apiKey": "DeepSeek API Key",
-            "revealKey": "Show API key",
-            "hideKey": "Hide API key"
-        },
         "providers": {
             "loading": "Loading…",
             "refresh": "Refresh catalog",
@@ -69,6 +64,8 @@
             "name": "Name",
             "protocol": "API protocol",
             "apiKey": "API key",
+            "revealKey": "Show API key",
+            "hideKey": "Hide API key",
             "search": "Search models",
             "removeModel": "Remove model",
             "modelId": "Model ID",

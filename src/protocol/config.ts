@@ -12,7 +12,6 @@ export const DEFAULT_THEME: Theme = "light";
 
 /** Config data object shared across IPC, the core runtime and the main-process store. */
 export type JarvixConfig = {
-    apiKey?: string;
     providers?: ProviderConfig[];
     selectedModel?: ModelSelection;
     reasoning?: ReasoningLevel;

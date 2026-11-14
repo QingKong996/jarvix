@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterAll, expect, test, vi } from "vitest";
 import type { LlmAdapter } from "../llm/index.ts";
 import type { LlmAssistantMessage, LlmModelInfo, LlmStreamEvent } from "../llm/types.ts";
+import { providerConfigSchema } from "../protocol/providers.ts";
 import { SessionManager } from "./manager.ts";
 
 const home = vi.hoisted(() => ({ path: "" }));
@@ -21,6 +22,14 @@ const MODEL: LlmModelInfo = {
     reasoning: false,
     contextWindow: 1000,
     maxTokens: 100
+};
+const TEST_PROVIDER = providerConfigSchema.parse({
+    id: MODEL.provider, name: MODEL.name, protocol: "openai-completions", baseUrl: "http://localhost:8080/v1",
+    models: [{ id: MODEL.id, name: MODEL.name }]
+});
+const TEST_CONFIG = {
+    providers: [TEST_PROVIDER],
+    selectedModel: { provider: MODEL.provider, id: MODEL.id }
 };
 
 afterAll(() => {
@@ -49,7 +58,7 @@ test("persists session messages and caches loaded sessions", async () => {
 
     await session.request("hello", {
         llm: fakeLlm(),
-        config: {},
+        config: TEST_CONFIG,
         emit: () => undefined
     });
 

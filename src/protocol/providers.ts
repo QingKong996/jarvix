@@ -81,7 +81,6 @@ export const providerDefinitionSchema = z.object({
 
 export const providerConfigSchema = providerDefinitionSchema.extend({ apiKey: z.string().trim().optional() });
 export const modelSelectionSchema = z.object({ provider: identifier, id: identifier });
-export const DEFAULT_MODEL = { provider: "deepseek", id: "deepseek-flash" };
 
 export type ReasoningCapabilities = Pick<ModelDefinition, "reasoning" | "reasoningLevels">;
 export type ModelDefinition = z.infer<typeof modelDefinitionSchema>;

@@ -265,7 +265,7 @@ export function ProviderConfigDialog({ provider, selectedModel, disabled, onClos
                                         variant="ghost"
                                         size="icon-xs"
                                         disabled={disabled}
-                                        aria-label={t(revealed ? "settings.model.hideKey" : "settings.model.revealKey")}
+                                        aria-label={t(revealed ? "settings.providers.hideKey" : "settings.providers.revealKey")}
                                         onClick={() => setRevealed(!revealed)}
                                         className="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground"
                                     >
