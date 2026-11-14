@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, nativeTheme, shell } from "electron";
 import type { IpcMainInvokeEvent } from "electron";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Jarvix } from "../core/index.ts";
 import { DEFAULT_THEME, type JarvixConfig, type Theme } from "../protocol/config.ts";
@@ -7,9 +8,13 @@ import type { JarvixEvent } from "../protocol/event.ts";
 import { IPC_CHANNELS, type JarvixEventBatch } from "../protocol/ipc.ts";
 import { configPaths, loadConfig, parseConfig, saveConfig, systemDefaults } from "./config.ts";
 import { createStreamBatcher } from "./stream-batcher.ts";
+import { ModelCatalogService } from "./model-catalog.ts";
 
 let config: JarvixConfig = {};
 const jarvix = new Jarvix();
+const paths = configPaths();
+const catalog = new ModelCatalogService(join(paths.directory, "tmp", "models-dev.json"));
+const legacyCatalogFile = join(paths.directory, "models-dev.json");
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -129,10 +134,16 @@ ipcMain.handle(IPC_CHANNELS.configGet, (event) => {
     return config;
 });
 
+ipcMain.handle(IPC_CHANNELS.catalogGet, (event, force: unknown) => {
+    assertSender(event);
+    return catalog.get(force === true);
+});
+
 ipcMain.handle(IPC_CHANNELS.configSet, (event, payload: unknown) => {
     assertSender(event);
-    config = parseConfig(payload, systemDefaults(app.getLocale()));
-    saveConfig(config);
+    const next = parseConfig(payload, systemDefaults(app.getLocale()));
+    saveConfig(next);
+    config = next;
     jarvix.setConfig(config);
     applyTheme(config.theme);
     return config;
@@ -154,7 +165,8 @@ ipcMain.handle(IPC_CHANNELS.sessionsList, (event) => {
 });
 
 app.whenReady().then(() => {
-    config = loadConfig(configPaths(), systemDefaults(app.getLocale()));
+    void rm(legacyCatalogFile, { force: true }).catch(() => undefined);
+    config = loadConfig(paths, systemDefaults(app.getLocale()));
     jarvix.setConfig(config);
     applyTheme(config.theme);
     mainWindow = createMainWindow();

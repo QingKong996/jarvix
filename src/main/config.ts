@@ -3,6 +3,14 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import {
+    DEFAULT_MODEL,
+    REASONING_LEVELS,
+    modelSelectionSchema,
+    providerConfigSchema,
+    resolveConfiguredModel,
+    resolveReasoningLevel
+} from "../protocol/providers.ts";
+import {
     DEFAULT_THEME,
     SUPPORTED_LANGUAGES,
     SUPPORTED_THEMES,
@@ -77,14 +85,37 @@ function configSchema(defaults: ConfigDefaults) {
                 .trim()
                 .transform((value) => (value.length > 0 ? value : undefined))
                 .optional(),
+            providers: z.array(providerConfigSchema).refine(
+                (providers) => new Set(providers.map((provider) => provider.id)).size === providers.length,
+                "Duplicate provider IDs"
+            ).optional(),
+            selectedModel: modelSelectionSchema.optional(),
+            reasoning: z.enum(REASONING_LEVELS).optional(),
             language: z.enum(SUPPORTED_LANGUAGES).catch(defaults.language),
             theme: z.enum(SUPPORTED_THEMES).catch(defaults.theme)
         })
-        .transform(({ apiKey, language, theme }) => ({
-            ...(apiKey ? { apiKey } : {}),
-            language,
-            theme
-        }));
+        .superRefine((config, context) => {
+            const selection = config.selectedModel ?? DEFAULT_MODEL;
+            const provider = config.providers?.find((item) => item.id === selection.provider);
+            if (provider?.models.some((model) => model.id === selection.id)) return;
+            if (!provider && selection.provider === DEFAULT_MODEL.provider && selection.id === DEFAULT_MODEL.id) return;
+            context.addIssue({ code: "custom", path: ["selectedModel"], message: "Selected model is not configured" });
+        })
+        .transform(({ apiKey, language, theme, providers, selectedModel, reasoning }) => {
+            const resolved = resolveConfiguredModel(providers, selectedModel);
+            const nextSelection = resolved?.selection ?? selectedModel;
+            const nextReasoning = resolved || reasoning
+                ? resolveReasoningLevel(resolved?.model, reasoning)
+                : undefined;
+            return {
+                ...(apiKey ? { apiKey } : {}),
+                ...(providers ? { providers } : {}),
+                ...(nextSelection ? { selectedModel: nextSelection } : {}),
+                ...(nextReasoning ? { reasoning: nextReasoning } : {}),
+                language,
+                theme
+            };
+        });
 }
 
 function detectLanguage(locale: string): Language {
