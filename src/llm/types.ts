@@ -1,5 +1,7 @@
+import type { ReasoningLevel } from "../protocol/providers.ts";
+
 /** Provider-neutral reasoning intensity. Adapters map it to the backend's own levels. */
-export type LlmReasoningLevel = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+export type LlmReasoningLevel = ReasoningLevel;
 
 /** Why an assistant response ended. `pending` only appears on unfinished partial messages. */
 export type LlmStopReason = "pending" | "stop" | "length" | "toolUse" | "error" | "aborted" | "deferred";

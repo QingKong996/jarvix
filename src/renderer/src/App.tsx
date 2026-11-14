@@ -40,6 +40,10 @@ export function App() {
         setConfig(next);
     }, []);
 
+    const handleConfigChange = useCallback(async (next: JarvixConfig) => {
+        if (bridge) setConfig(await bridge.setConfig(next));
+    }, []);
+
     const openSettings = useCallback(() => {
         setSettingsOpen(true);
     }, []);
@@ -76,7 +80,7 @@ export function App() {
                     <ResizablePanel id="content" minSize="50%" style={{ overflow: "hidden" }}>
                         <main className="flex h-full min-h-0 min-w-0 flex-col">
                             <Transcript key={activeSessionId ?? "new"} sessionId={activeSessionId} />
-                            <Composer disabled={!bridge || !ready || busy} onSubmit={send} />
+                            <Composer disabled={!bridge || !ready || busy} onSubmit={send} config={config} onConfigChange={handleConfigChange} />
                         </main>
                     </ResizablePanel>
                 </ResizablePanelGroup>

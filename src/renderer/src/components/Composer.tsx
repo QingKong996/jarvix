@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { Fragment, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Check, ChevronLeft, ChevronRight, ChevronUp, Send } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -6,39 +6,67 @@ import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
+    DropdownMenuLabel,
     DropdownMenuSeparator,
     DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
+import type { JarvixConfig } from "../../../protocol/config.ts";
+import {
+    DEFAULT_MODEL as DEFAULT_MODEL_REF,
+    availableReasoningLevels,
+    resolveConfiguredModel,
+    resolveReasoningLevel,
+    type ModelDefinition,
+    type ModelSelection,
+    type ReasoningLevel
+} from "../../../protocol/providers.ts";
 
 type ComposerProps = {
     disabled: boolean;
     onSubmit: (question: string) => void;
+    config: JarvixConfig | null;
+    onConfigChange: (config: JarvixConfig) => Promise<void>;
 };
 
 type MenuView = "root" | "model" | "reasoning";
 
-type ReasoningLevel = "low" | "high" | "max";
+type ComposerModel = {
+    selection: ModelSelection;
+    name: string;
+    reasoning: boolean;
+    reasoningLevels?: ModelDefinition["reasoningLevels"];
+};
 
-// Placeholder options until the composer is wired to the request config.
-const MODELS = ["DeepSeek V4.1 Flash", "DeepSeek V4 Pro"] as const;
+type ProviderGroup = {
+    id: string;
+    name: string;
+    models: ComposerModel[];
+};
 
-const REASONING_LEVELS: readonly ReasoningLevel[] = ["low", "high", "max"];
-
-const DEFAULT_MODEL: string = MODELS[0];
-
-const DEFAULT_REASONING_LEVEL: ReasoningLevel = "max";
-
-export function Composer({ disabled, onSubmit }: ComposerProps) {
+export function Composer({ disabled, onSubmit, config, onConfigChange }: ComposerProps) {
     const { t } = useTranslation();
     const [value, setValue] = useState("");
-    const [model, setModel] = useState(DEFAULT_MODEL);
-    const [reasoningLevel, setReasoningLevel] = useState<ReasoningLevel>(DEFAULT_REASONING_LEVEL);
+    const resolved = resolveConfiguredModel(config?.providers, config?.selectedModel);
+    const selection = resolved?.selection ?? config?.selectedModel ?? DEFAULT_MODEL_REF;
+    const providerGroups = providerGroupsFor(config);
+    const selectedModel = providerGroups
+        .flatMap((provider) => provider.models)
+        .find((item) => item.selection.provider === selection.provider && item.selection.id === selection.id);
+    const model = selectedModel?.name ?? (
+        selection.provider === DEFAULT_MODEL_REF.provider && selection.id === DEFAULT_MODEL_REF.id
+            ? "DeepSeek V4.1 Flash"
+            : selection.id
+    );
+    const reasoningLevels = availableReasoningLevels(selectedModel);
+    const reasoningLevel = resolveReasoningLevel(selectedModel, config?.reasoning);
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState("");
     const [menuOpen, setMenuOpen] = useState(false);
     const [menuView, setMenuView] = useState<MenuView>("root");
     const firstMenuItemRef = useRef<HTMLDivElement>(null);
 
-    const reasoningLabel = t(`composer.reasoningLevels.${reasoningLevel}`);
+    const reasoningLabel = reasoningLevel ? t(`composer.reasoningLevels.${reasoningLevel}`) : "";
 
     useLayoutEffect(() => {
         if (menuOpen) {
@@ -58,20 +86,38 @@ export function Composer({ disabled, onSubmit }: ComposerProps) {
         setMenuView(view);
     }
 
-    function selectModel(next: string): void {
-        setModel(next);
-        setMenuOpen(false);
+    async function save(next: JarvixConfig): Promise<void> {
+        setSaving(true);
+        setError("");
+        try {
+            await onConfigChange(next);
+            setMenuOpen(false);
+        } catch (cause) {
+            setError(String(cause));
+        } finally {
+            setSaving(false);
+        }
+    }
+
+    function selectModel(next: ComposerModel): void {
+        if (!config) return;
+        const reasoning = resolveReasoningLevel(next, config.reasoning);
+        if (reasoning) {
+            void save({ ...config, selectedModel: next.selection, reasoning });
+            return;
+        }
+        const { reasoning: _reasoning, ...withoutReasoning } = config;
+        void save({ ...withoutReasoning, selectedModel: next.selection });
     }
 
     function selectReasoningLevel(next: ReasoningLevel): void {
-        setReasoningLevel(next);
-        setMenuOpen(false);
+        if (config) void save({ ...config, reasoning: next });
     }
 
     function handleSubmit(event: FormEvent<HTMLFormElement>): void {
         event.preventDefault();
         const question = value.trim();
-        if (!question || disabled) {
+        if (!question || disabled || saving) {
             return;
         }
         setValue("");
@@ -112,16 +158,18 @@ export function Composer({ disabled, onSubmit }: ComposerProps) {
                                 type="button"
                                 variant="secondary"
                                 size="sm"
-                                disabled={disabled}
+                                disabled={disabled || !config || saving}
                                 className="h-8 gap-1 px-2 text-xs font-normal"
                             >
                                 {model}
-                                <span className="text-muted-foreground">{reasoningLabel}</span>
+                                {reasoningLabel ? (
+                                    <span className="text-muted-foreground">{reasoningLabel}</span>
+                                ) : null}
                                 <ChevronUp className="size-3.5 opacity-60" />
                             </Button>
                         </DropdownMenuTrigger>
 
-                        <DropdownMenuContent side="top" align="end" sideOffset={8} className="min-w-52">
+                        <DropdownMenuContent side="top" align="end" sideOffset={8} className="max-h-80 min-w-56 overflow-y-auto">
                             {menuView === "root" ? (
                                 <>
                                     <DropdownMenuItem
@@ -133,11 +181,13 @@ export function Composer({ disabled, onSubmit }: ComposerProps) {
                                         <ChevronRight className="size-3.5 opacity-60" />
                                     </DropdownMenuItem>
 
-                                    <DropdownMenuItem onSelect={(event) => showMenuView(event, "reasoning")}>
-                                        {t("composer.reasoning")}
-                                        <span className="ml-auto text-muted-foreground">{reasoningLabel}</span>
-                                        <ChevronRight className="size-3.5 opacity-60" />
-                                    </DropdownMenuItem>
+                                    {reasoningLevels.length > 0 ? (
+                                        <DropdownMenuItem onSelect={(event) => showMenuView(event, "reasoning")}>
+                                            {t("composer.reasoning")}
+                                            <span className="ml-auto text-muted-foreground">{reasoningLabel}</span>
+                                            <ChevronRight className="size-3.5 opacity-60" />
+                                        </DropdownMenuItem>
+                                    ) : null}
                                 </>
                             ) : (
                                 <>
@@ -153,16 +203,33 @@ export function Composer({ disabled, onSubmit }: ComposerProps) {
                                     <DropdownMenuSeparator />
 
                                     {menuView === "model"
-                                        ? MODELS.map((option) => (
-                                              <DropdownMenuItem key={option} onSelect={() => selectModel(option)}>
-                                                  {option}
-                                                  {option === model ? <Check className="ml-auto size-3.5" /> : null}
-                                              </DropdownMenuItem>
+                                        ? providerGroups.map((provider, index) => (
+                                              <Fragment key={provider.id}>
+                                                  {index > 0 ? <DropdownMenuSeparator /> : null}
+                                                  <DropdownMenuLabel>{provider.name}</DropdownMenuLabel>
+                                                  {provider.models.map((option) => (
+                                                      <DropdownMenuItem
+                                                          key={`${option.selection.provider}/${option.selection.id}`}
+                                                          disabled={saving}
+                                                          onSelect={(event) => {
+                                                              event.preventDefault();
+                                                              selectModel(option);
+                                                          }}
+                                                      >
+                                                          {option.name}
+                                                          {option.selection.provider === selection.provider
+                                                          && option.selection.id === selection.id
+                                                              ? <Check className="ml-auto size-3.5" />
+                                                              : null}
+                                                      </DropdownMenuItem>
+                                                  ))}
+                                              </Fragment>
                                           ))
-                                        : REASONING_LEVELS.map((level) => (
+                                        : reasoningLevels.map((level) => (
                                               <DropdownMenuItem
                                                   key={level}
-                                                  onSelect={() => selectReasoningLevel(level)}
+                                                  disabled={saving}
+                                                  onSelect={(event) => { event.preventDefault(); selectReasoningLevel(level); }}
                                               >
                                                   {t(`composer.reasoningLevels.${level}`)}
                                                   {level === reasoningLevel ? (
@@ -179,12 +246,40 @@ export function Composer({ disabled, onSubmit }: ComposerProps) {
                         type="submit"
                         size="icon-sm"
                         aria-label={t("composer.send")}
-                        disabled={disabled || value.trim().length === 0}
+                        disabled={disabled || saving || value.trim().length === 0}
                     >
                         <Send />
                     </Button>
                 </div>
             </div>
+            {error ? <p role="alert" className="mt-1 text-xs text-destructive">{error}</p> : null}
         </form>
     );
+}
+
+function providerGroupsFor(config: JarvixConfig | null): ProviderGroup[] {
+    const configured = config?.providers?.flatMap((provider) => {
+        if (provider.models.length === 0) return [];
+        return [{
+            id: provider.id,
+            name: provider.name,
+            models: provider.models.map((model) => ({
+                selection: { provider: provider.id, id: model.id },
+                name: model.name,
+                reasoning: model.reasoning,
+                reasoningLevels: model.reasoningLevels
+            }))
+        }];
+    }) ?? [];
+    if (configured.length > 0) return configured;
+
+    return [{
+        id: DEFAULT_MODEL_REF.provider,
+        name: "DeepSeek",
+        models: [{
+            selection: DEFAULT_MODEL_REF,
+            name: "DeepSeek V4.1 Flash",
+            reasoning: true
+        }]
+    }];
 }

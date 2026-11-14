@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, test } from "vitest";
 import { DEFAULT_THEME } from "../protocol/config.ts";
+import { providerConfigSchema } from "../protocol/providers.ts";
 import {
     configPaths,
     loadConfig,
@@ -16,6 +17,47 @@ import {
 const base = mkdtempSync(join(tmpdir(), "jarvix-config-"));
 
 const defaults: ConfigDefaults = { language: "zh", theme: "dark" };
+
+test("round-trips provider defaults and rejects invalid selections and duplicate identifiers", () => {
+    const provider = providerConfigSchema.parse({ id: "custom:test", name: "Test", protocol: "openai-completions",
+        baseUrl: "http://localhost:8080/v1/", apiKey: " key ", models: [{ id: "chat", name: "Chat", reasoning: true }] });
+    const config = { providers: [provider], selectedModel: { provider: provider.id, id: "chat" }, reasoning: "high" as const };
+    const paths = configPaths(join(base, "providers"));
+    saveConfig(config, paths, defaults);
+    expect(loadConfig(paths, defaults)).toMatchObject(config);
+    expect(provider.apiKey).toBe("key");
+    expect(() => parseConfig({ ...config, selectedModel: { provider: provider.id, id: "missing" } })).toThrow(/Selected model/);
+    expect(() => parseConfig({ ...config, providers: [provider, provider] })).toThrow(/Duplicate provider/);
+    expect(() => parseConfig({ providers: [{ ...provider, models: [provider.models[0], provider.models[0]] }] })).toThrow(/Duplicate model/);
+});
+
+test("syncs the selected model and reasoning with configured models", () => {
+    const provider = providerConfigSchema.parse({
+        id: "custom:test", name: "Test", protocol: "openai-completions", baseUrl: "http://localhost:8080/v1",
+        models: [
+            { id: "fast", name: "Fast", reasoning: true, reasoningLevels: ["low", "high"] },
+            { id: "plain", name: "Plain" }
+        ]
+    });
+
+    expect(parseConfig({ providers: [provider], reasoning: "max" }, defaults)).toMatchObject({
+        selectedModel: { provider: provider.id, id: "fast" },
+        reasoning: "high"
+    });
+    expect(parseConfig({
+        providers: [provider],
+        selectedModel: { provider: provider.id, id: "plain" },
+        reasoning: "high"
+    }, defaults)).not.toHaveProperty("reasoning");
+
+    const deepseek = providerConfigSchema.parse({
+        id: "deepseek", name: "DeepSeek", protocol: "openai-completions", baseUrl: "https://api.deepseek.com",
+        models: [{ id: "chat", name: "Chat" }]
+    });
+    expect(parseConfig({ providers: [deepseek] }, defaults)).toMatchObject({
+        selectedModel: { provider: deepseek.id, id: "chat" }
+    });
+});
 
 afterAll(() => {
     rmSync(base, { recursive: true, force: true });

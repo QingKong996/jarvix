@@ -1,3 +1,5 @@
+import type { ModelSelection, ProviderConfig, ReasoningLevel } from "./providers.ts";
+
 export const SUPPORTED_LANGUAGES = ["zh", "en"] as const;
 
 export type Language = (typeof SUPPORTED_LANGUAGES)[number];
@@ -11,6 +13,9 @@ export const DEFAULT_THEME: Theme = "light";
 /** Config data object shared across IPC, the core runtime and the main-process store. */
 export type JarvixConfig = {
     apiKey?: string;
+    providers?: ProviderConfig[];
+    selectedModel?: ModelSelection;
+    reasoning?: ReasoningLevel;
     language?: Language;
     theme?: Theme;
 };

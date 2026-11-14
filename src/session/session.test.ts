@@ -9,6 +9,7 @@ import type { JarvixEvent } from "../protocol/event.ts";
 import type { JarvixSessionMeta } from "../protocol/session.ts";
 import { Session } from "./session.ts";
 import { appendSessionMessage } from "./store.ts";
+import { providerConfigSchema } from "../protocol/providers.ts";
 
 vi.mock("./store.ts", () => ({
     appendSessionMessage: vi.fn()
@@ -33,6 +34,25 @@ const MODEL: LlmModelInfo = {
 
 beforeEach(() => {
     persist.mockReset();
+});
+
+test("uses the configured model, provider credential and reasoning for the request", async () => {
+    const provider = providerConfigSchema.parse({
+        id: "custom:local", name: "Local", protocol: "openai-completions", baseUrl: "http://localhost:8080/v1",
+        apiKey: "provider-key", models: [{ id: "local-chat", name: "Local Chat", reasoning: true }]
+    });
+    const getModel = vi.fn(() => ({ ...MODEL, provider: provider.id, id: "local-chat" }));
+    const stream = vi.fn(() => (async function* (): AsyncIterable<LlmStreamEvent> {})());
+    await new Session(meta).request("hello", {
+        llm: { getModel, stream },
+        config: { apiKey: "legacy-key", providers: [provider], selectedModel: { provider: provider.id, id: "local-chat" }, reasoning: "high" },
+        emit: () => undefined
+    });
+    expect(getModel).toHaveBeenCalledWith(provider.id, "local-chat");
+    expect(stream).toHaveBeenCalledWith(expect.objectContaining({
+        model: expect.objectContaining({ provider: provider.id, id: "local-chat" }),
+        apiKey: "provider-key", reasoning: "high"
+    }));
 });
 
 test("retries persistence once and dequeues the message on success", async () => {

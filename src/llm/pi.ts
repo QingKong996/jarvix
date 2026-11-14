@@ -13,6 +13,8 @@ import type {
     Usage
 } from "@earendil-works/pi-ai";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
+import type { ProviderConfig } from "../protocol/providers.ts";
+import { configuredModels } from "./providers.ts";
 import type { LlmAdapter, LlmRequest } from "./adapter.ts";
 import type {
     LlmAssistantMessage,
@@ -27,28 +29,41 @@ import type {
 export type PiAdapterOptions = {
     /** Model collection to talk to. Defaults to every built-in pi provider. */
     models?: Models;
+    providers?: () => readonly ProviderConfig[] | undefined;
 };
 
 /** Exposes pi-ai through the unified [`LlmAdapter`] contract. */
 export function createPiAdapter(options: PiAdapterOptions = {}): LlmAdapter {
     const models = options.models ?? builtinModels();
+    let previous: readonly ProviderConfig[] | undefined;
+    let configured: Models | undefined;
+    function collection(provider: string): Models {
+        const providers = options.providers?.();
+        if (providers !== previous) {
+            configured = providers ? configuredModels(providers) : undefined;
+            previous = providers;
+        }
+        return providers?.some((item) => item.id === provider) ? configured! : models;
+    }
 
     return {
         getModel(provider, id) {
-            const model = models.getModel(provider, id);
+            const model = collection(provider).getModel(provider, id);
             return model ? toModelInfo(model) : undefined;
         },
 
         stream(request) {
-            const model = models.getModel(request.model.provider, request.model.id);
+            const activeModels = collection(request.model.provider);
+            const model = activeModels.getModel(request.model.provider, request.model.id);
             if (!model) {
                 throw new Error(`Unknown model: ${request.model.provider}/${request.model.id}`);
             }
 
             return toLlmStream(
-                models.streamSimple(model, toPiContext(request), {
+                activeModels.streamSimple(model, toPiContext(request), {
                     apiKey: request.apiKey,
-                    reasoning: request.reasoning,
+                    // pi-ai's simple contract has no explicit "none" effort.
+                    reasoning: request.reasoning === "none" ? undefined : request.reasoning,
                     temperature: request.temperature,
                     maxTokens: request.maxTokens,
                     signal: request.signal

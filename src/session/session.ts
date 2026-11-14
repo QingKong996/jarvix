@@ -1,15 +1,18 @@
 import type {
     LlmAdapter,
     LlmMessage,
-    LlmModelRef,
     LlmUserMessage
 } from "../llm/index.ts";
 import type { JarvixConfig } from "../protocol/config.ts";
 import type { JarvixEvent } from "../protocol/event.ts";
 import type { JarvixSession, JarvixSessionMeta } from "../protocol/session.ts";
 import { appendSessionMessage } from "./store.ts";
+import {
+    DEFAULT_MODEL,
+    resolveConfiguredModel,
+    resolveReasoningLevel
+} from "../protocol/providers.ts";
 
-const DEFAULT_MODEL: LlmModelRef = { provider: "deepseek", id: "deepseek-flash" };
 const SYSTEM_PROMPT = "Response user in Chinese";
 const PERSIST_ATTEMPTS = 2;
 
@@ -38,9 +41,12 @@ export class Session {
         this.running = true;
 
         try {
-            const model = runtime.llm.getModel(DEFAULT_MODEL.provider, DEFAULT_MODEL.id);
+            const resolved = resolveConfiguredModel(runtime.config.providers, runtime.config.selectedModel);
+            const selected = resolved?.selection ?? runtime.config.selectedModel ?? DEFAULT_MODEL;
+            const provider = runtime.config.providers?.find((item) => item.id === selected.provider);
+            const model = runtime.llm.getModel(selected.provider, selected.id);
             if (!model) {
-                throw new Error(`Model not found: ${DEFAULT_MODEL.provider}/${DEFAULT_MODEL.id}`);
+                throw new Error(`Model not found: ${selected.provider}/${selected.id}`);
             }
 
             const questionMessage: LlmUserMessage = {
@@ -54,8 +60,8 @@ export class Session {
                 model,
                 messages: [...this.history],
                 systemPrompt: SYSTEM_PROMPT,
-                reasoning: "xhigh",
-                apiKey: runtime.config.apiKey
+                reasoning: resolveReasoningLevel(resolved?.model, runtime.config.reasoning),
+                apiKey: provider?.apiKey || (selected.provider === DEFAULT_MODEL.provider ? runtime.config.apiKey : undefined)
             });
 
             for await (const event of stream) {
