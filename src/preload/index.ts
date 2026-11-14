@@ -16,6 +16,7 @@ const bridge: JarvixBridge = {
     },
     getConfig: () => ipcRenderer.invoke(IPC_CHANNELS.configGet),
     getModelCatalog: (force = false) => ipcRenderer.invoke(IPC_CHANNELS.catalogGet, force),
+    syncProviderModels: (provider) => ipcRenderer.invoke(IPC_CHANNELS.providerModelsSync, provider),
     setConfig: (config) => ipcRenderer.invoke(IPC_CHANNELS.configSet, config),
     createSession: () => ipcRenderer.invoke(IPC_CHANNELS.sessionCreate),
     openSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.sessionOpen, sessionId),

@@ -9,6 +9,7 @@ import { IPC_CHANNELS, type JarvixEventBatch } from "../protocol/ipc.ts";
 import { configPaths, loadConfig, parseConfig, saveConfig, systemDefaults } from "./config.ts";
 import { createStreamBatcher } from "./stream-batcher.ts";
 import { ModelCatalogService } from "./model-catalog.ts";
+import { syncProviderModels } from "./provider-model-sync.ts";
 
 let config: JarvixConfig = {};
 const jarvix = new Jarvix();
@@ -137,6 +138,11 @@ ipcMain.handle(IPC_CHANNELS.configGet, (event) => {
 ipcMain.handle(IPC_CHANNELS.catalogGet, (event, force: unknown) => {
     assertSender(event);
     return catalog.get(force === true);
+});
+
+ipcMain.handle(IPC_CHANNELS.providerModelsSync, (event, provider: unknown) => {
+    assertSender(event);
+    return syncProviderModels(provider);
 });
 
 ipcMain.handle(IPC_CHANNELS.configSet, (event, payload: unknown) => {

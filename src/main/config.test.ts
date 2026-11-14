@@ -49,6 +49,14 @@ test("syncs the selected model and reasoning with configured models", () => {
         selectedModel: { provider: provider.id, id: "plain" },
         reasoning: "high"
     }, defaults)).not.toHaveProperty("reasoning");
+
+    const deepseek = providerConfigSchema.parse({
+        id: "deepseek", name: "DeepSeek", protocol: "openai-completions", baseUrl: "https://api.deepseek.com",
+        models: [{ id: "chat", name: "Chat" }]
+    });
+    expect(parseConfig({ providers: [deepseek] }, defaults)).toMatchObject({
+        selectedModel: { provider: deepseek.id, id: "chat" }
+    });
 });
 
 afterAll(() => {

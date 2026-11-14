@@ -1,5 +1,5 @@
 import type { JarvixConfig } from "./config.ts";
-import type { ModelCatalog } from "./providers.ts";
+import type { ModelCatalog, ModelDefinition, ProviderModelSyncRequest } from "./providers.ts";
 import type { JarvixEvent } from "./event.ts";
 import type { JarvixSession, JarvixSessionSummary } from "./session.ts";
 
@@ -9,6 +9,7 @@ export const IPC_CHANNELS = {
     configGet: "jarvix:config:get",
     configSet: "jarvix:config:set",
     catalogGet: "jarvix:catalog:get",
+    providerModelsSync: "jarvix:provider-models:sync",
     sessionCreate: "jarvix:session:create",
     sessionOpen: "jarvix:session:open",
     sessionsList: "jarvix:sessions:list"
@@ -24,6 +25,7 @@ export type JarvixBridge = {
     onEvents(listener: (batch: JarvixEventBatch) => void): () => void;
     getConfig(): Promise<JarvixConfig>;
     getModelCatalog(force?: boolean): Promise<ModelCatalog>;
+    syncProviderModels(provider: ProviderModelSyncRequest): Promise<ModelDefinition[]>;
     setConfig(config: JarvixConfig): Promise<JarvixConfig>;
     createSession(): Promise<JarvixSession>;
     openSession(sessionId: string): Promise<JarvixSession | null>;

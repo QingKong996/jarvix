@@ -95,7 +95,8 @@ function configSchema(defaults: ConfigDefaults) {
             theme: z.enum(SUPPORTED_THEMES).catch(defaults.theme)
         })
         .superRefine((config, context) => {
-            const selection = config.selectedModel ?? DEFAULT_MODEL;
+            const selection = config.selectedModel;
+            if (!selection) return;
             const provider = config.providers?.find((item) => item.id === selection.provider);
             if (provider?.models.some((model) => model.id === selection.id)) return;
             if (!provider && selection.provider === DEFAULT_MODEL.provider && selection.id === DEFAULT_MODEL.id) return;
