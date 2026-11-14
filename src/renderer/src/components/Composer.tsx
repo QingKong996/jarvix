@@ -13,7 +13,6 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import type { JarvixConfig } from "../../../protocol/config.ts";
 import {
-    DEFAULT_MODEL as DEFAULT_MODEL_REF,
     availableReasoningLevels,
     resolveConfiguredModel,
     resolveReasoningLevel,
@@ -48,18 +47,16 @@ export function Composer({ disabled, onSubmit, config, onConfigChange }: Compose
     const { t } = useTranslation();
     const [value, setValue] = useState("");
     const resolved = resolveConfiguredModel(config?.providers, config?.selectedModel);
-    const selection = resolved?.selection ?? config?.selectedModel ?? DEFAULT_MODEL_REF;
+    const selection = resolved?.selection;
     const providerGroups = providerGroupsFor(config);
-    const selectedModel = providerGroups
-        .flatMap((provider) => provider.models)
-        .find((item) => item.selection.provider === selection.provider && item.selection.id === selection.id);
-    const model = selectedModel?.name ?? (
-        selection.provider === DEFAULT_MODEL_REF.provider && selection.id === DEFAULT_MODEL_REF.id
-            ? "DeepSeek V4.1 Flash"
-            : selection.id
-    );
-    const reasoningLevels = availableReasoningLevels(selectedModel);
-    const reasoningLevel = resolveReasoningLevel(selectedModel, config?.reasoning);
+    const selectedModel = selection
+        ? providerGroups
+            .flatMap((provider) => provider.models)
+            .find((item) => item.selection.provider === selection.provider && item.selection.id === selection.id)
+        : undefined;
+    const model = selectedModel?.name ?? selection?.id ?? "";
+    const reasoningLevels = selectedModel ? availableReasoningLevels(selectedModel) : [];
+    const reasoningLevel = selectedModel ? resolveReasoningLevel(selectedModel, config?.reasoning) : undefined;
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
     const [menuOpen, setMenuOpen] = useState(false);
@@ -217,8 +214,8 @@ export function Composer({ disabled, onSubmit, config, onConfigChange }: Compose
                                                           }}
                                                       >
                                                           {option.name}
-                                                          {option.selection.provider === selection.provider
-                                                          && option.selection.id === selection.id
+                                                          {option.selection.provider === selection?.provider
+                                                          && option.selection.id === selection?.id
                                                               ? <Check className="ml-auto size-3.5" />
                                                               : null}
                                                       </DropdownMenuItem>
@@ -258,7 +255,7 @@ export function Composer({ disabled, onSubmit, config, onConfigChange }: Compose
 }
 
 function providerGroupsFor(config: JarvixConfig | null): ProviderGroup[] {
-    const configured = config?.providers?.flatMap((provider) => {
+    return config?.providers?.flatMap((provider) => {
         if (provider.models.length === 0) return [];
         return [{
             id: provider.id,
@@ -271,15 +268,4 @@ function providerGroupsFor(config: JarvixConfig | null): ProviderGroup[] {
             }))
         }];
     }) ?? [];
-    if (configured.length > 0) return configured;
-
-    return [{
-        id: DEFAULT_MODEL_REF.provider,
-        name: "DeepSeek",
-        models: [{
-            selection: DEFAULT_MODEL_REF,
-            name: "DeepSeek V4.1 Flash",
-            reasoning: true
-        }]
-    }];
 }

@@ -31,6 +31,14 @@ const MODEL: LlmModelInfo = {
     contextWindow: 1000,
     maxTokens: 100
 };
+const TEST_PROVIDER = providerConfigSchema.parse({
+    id: "test", name: "Test", protocol: "openai-completions", baseUrl: "http://localhost:8080/v1",
+    models: [{ id: "test-model", name: "Test" }]
+});
+const TEST_CONFIG = {
+    providers: [TEST_PROVIDER],
+    selectedModel: { provider: TEST_PROVIDER.id, id: "test-model" }
+};
 
 beforeEach(() => {
     persist.mockReset();
@@ -45,7 +53,7 @@ test("uses the configured model, provider credential and reasoning for the reque
     const stream = vi.fn(() => (async function* (): AsyncIterable<LlmStreamEvent> {})());
     await new Session(meta).request("hello", {
         llm: { getModel, stream },
-        config: { apiKey: "legacy-key", providers: [provider], selectedModel: { provider: provider.id, id: "local-chat" }, reasoning: "high" },
+        config: { providers: [provider], selectedModel: { provider: provider.id, id: "local-chat" }, reasoning: "high" },
         emit: () => undefined
     });
     expect(getModel).toHaveBeenCalledWith(provider.id, "local-chat");
@@ -63,7 +71,7 @@ test("retries persistence once and dequeues the message on success", async () =>
 
     await session.request("first", {
         llm: fakeLlm(assistantMessage()),
-        config: {},
+        config: TEST_CONFIG,
         emit: () => undefined
     });
 
@@ -87,7 +95,7 @@ test("keeps failed messages queued and flushes them in order", async () => {
     const session = new Session(meta);
     const runtime = {
         llm: fakeLlm(assistantMessage()),
-        config: {},
+        config: TEST_CONFIG,
         emit: () => undefined
     };
 
@@ -100,7 +108,7 @@ test("keeps failed messages queued and flushes them in order", async () => {
     persist.mockReset();
     await session.request("second", {
         llm: fakeLlm(assistantMessage()),
-        config: {},
+        config: TEST_CONFIG,
         emit: () => undefined
     });
 
@@ -125,7 +133,7 @@ test("forwards done before persisting its complete assistant message", async () 
 
     await session.request("hello", {
         llm: fakeLlm(assistantMessage()),
-        config: {},
+        config: TEST_CONFIG,
         emit: (event) => {
             timeline.push(`event:${event.type}`);
             events.push(event);
@@ -147,7 +155,7 @@ test("retains the forwarded done and in-memory message when persistence fails", 
 
     await expect(session.request("hello", {
         llm: fakeLlm(assistantMessage()),
-        config: {},
+        config: TEST_CONFIG,
         emit: (event) => {
             events.push(event);
         }
@@ -187,7 +195,7 @@ test("forwards all events and persists only complete done messages in order", as
             ]);
             expect(persist.mock.calls.map(([, message]) => message)).toEqual(session.snapshot().messages);
         })()),
-        config: {},
+        config: TEST_CONFIG,
         emit: (event) => { events.push(event); }
     });
 });
@@ -202,7 +210,7 @@ test("retains a completed message when the iterator subsequently throws", async 
             yield { type: "done", message };
             throw new Error("stream failed");
         })()),
-        config: {},
+        config: TEST_CONFIG,
         emit: (event) => { events.push(event); }
     })).rejects.toThrow("stream failed");
 

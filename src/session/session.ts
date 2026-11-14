@@ -8,7 +8,6 @@ import type { JarvixEvent } from "../protocol/event.ts";
 import type { JarvixSession, JarvixSessionMeta } from "../protocol/session.ts";
 import { appendSessionMessage } from "./store.ts";
 import {
-    DEFAULT_MODEL,
     resolveConfiguredModel,
     resolveReasoningLevel
 } from "../protocol/providers.ts";
@@ -42,11 +41,14 @@ export class Session {
 
         try {
             const resolved = resolveConfiguredModel(runtime.config.providers, runtime.config.selectedModel);
-            const selected = resolved?.selection ?? runtime.config.selectedModel ?? DEFAULT_MODEL;
-            const provider = runtime.config.providers?.find((item) => item.id === selected.provider);
-            const model = runtime.llm.getModel(selected.provider, selected.id);
+            if (!resolved) {
+                throw new Error("No model configured");
+            }
+            const { selection, model: definition } = resolved;
+            const provider = runtime.config.providers?.find((item) => item.id === selection.provider);
+            const model = runtime.llm.getModel(selection.provider, selection.id);
             if (!model) {
-                throw new Error(`Model not found: ${selected.provider}/${selected.id}`);
+                throw new Error(`Model not found: ${selection.provider}/${selection.id}`);
             }
 
             const questionMessage: LlmUserMessage = {
@@ -60,8 +62,8 @@ export class Session {
                 model,
                 messages: [...this.history],
                 systemPrompt: SYSTEM_PROMPT,
-                reasoning: resolveReasoningLevel(resolved?.model, runtime.config.reasoning),
-                apiKey: provider?.apiKey || (selected.provider === DEFAULT_MODEL.provider ? runtime.config.apiKey : undefined)
+                reasoning: resolveReasoningLevel(definition, runtime.config.reasoning),
+                apiKey: provider?.apiKey
             });
 
             for await (const event of stream) {

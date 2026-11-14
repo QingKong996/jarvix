@@ -128,7 +128,6 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
                             <ProviderSettings
                                 providers={providers}
                                 selectedModel={selectedModel}
-                                legacyApiKey={config?.apiKey}
                                 disabled={disabled}
                                 onChange={(next, selection) => {
                                     setProviders(next);

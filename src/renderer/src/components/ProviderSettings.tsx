@@ -7,7 +7,6 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collap
 import { ProviderConfigDialog } from "./ProviderConfigDialog.tsx";
 import { ProviderIcon } from "./ProviderIcon.tsx";
 import {
-    DEFAULT_MODEL,
     type ModelCatalog,
     type ProviderCatalogEntry,
     type ProviderConfig,
@@ -17,7 +16,6 @@ import {
 type ProviderSettingsProps = {
     providers: ProviderConfig[];
     selectedModel?: ModelSelection;
-    legacyApiKey?: string;
     disabled: boolean;
     onChange: (providers: ProviderConfig[], selection?: ModelSelection) => void;
 };
@@ -27,7 +25,7 @@ type ProviderEditorState = {
     originalId?: string;
 };
 
-export function ProviderSettings({ providers, selectedModel, legacyApiKey, disabled, onChange }: ProviderSettingsProps) {
+export function ProviderSettings({ providers, selectedModel, disabled, onChange }: ProviderSettingsProps) {
     const { t } = useTranslation();
     const [catalog, setCatalog] = useState<ModelCatalog>();
     const [loading, setLoading] = useState(false);
@@ -62,10 +60,7 @@ export function ProviderSettings({ providers, selectedModel, legacyApiKey, disab
 
     function edit(provider: ProviderConfig): void {
         setEditor({
-            provider: {
-                ...provider,
-                apiKey: provider.apiKey ?? (provider.id === DEFAULT_MODEL.provider ? legacyApiKey : undefined)
-            },
+            provider,
             originalId: provider.id
         });
     }
