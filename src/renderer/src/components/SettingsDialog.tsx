@@ -1,10 +1,11 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { Cpu, Eye, EyeOff, LoaderCircle, Settings2 } from "lucide-react";
+import { Cpu, LoaderCircle, Settings2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ProviderSettings } from "./ProviderSettings.tsx";
+import type { ProviderConfig, ModelSelection } from "../../../protocol/providers.ts";
 import {
     DEFAULT_THEME,
     SUPPORTED_LANGUAGES,
@@ -45,7 +46,8 @@ function activeLanguage(i18nLanguage: string): Language {
 export function SettingsDialog({ open, onOpenChange, config, onSaved }: SettingsDialogProps) {
     const { t, i18n } = useTranslation();
     const [section, setSection] = useState<SettingsSection>("model");
-    const [apiKey, setApiKey] = useState(config?.apiKey ?? "");
+    const [providers, setProviders] = useState<ProviderConfig[]>(config?.providers ?? []);
+    const [selectedModel, setSelectedModel] = useState<ModelSelection | undefined>(config?.selectedModel);
     const [language, setLanguage] = useState<Language>(activeLanguage(i18n.language));
     const [theme, setTheme] = useState<Theme>(config?.theme ?? DEFAULT_THEME);
     const [saving, setSaving] = useState(false);
@@ -56,15 +58,11 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
             setError(null);
             return;
         }
-        setApiKey(config?.apiKey ?? "");
+        setProviders(config?.providers ?? []);
+        setSelectedModel(config?.selectedModel);
         setLanguage(config?.language ?? activeLanguage(i18n.language));
         setTheme(config?.theme ?? DEFAULT_THEME);
     }, [open, config, i18n.language]);
-
-    function handleApiKeyChange(value: string): void {
-        setApiKey(value);
-        setError(null);
-    }
 
     function handleLanguageChange(value: Language): void {
         setLanguage(value);
@@ -84,9 +82,8 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
         setSaving(true);
         setError(null);
         try {
-            const next = await bridge.setConfig({ ...config, apiKey, language, theme });
+            const next = await bridge.setConfig({ ...config, language, theme, providers, selectedModel });
             onSaved(next);
-            setApiKey(next.apiKey ?? "");
             setLanguage(next.language ?? language);
             setTheme(next.theme ?? DEFAULT_THEME);
             await i18n.changeLanguage(next.language ?? language);
@@ -102,12 +99,15 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-2xl">
+            <DialogContent
+                aria-describedby={undefined}
+                className="h-[clamp(28rem,72dvh,46rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-5xl"
+            >
                 <DialogHeader className="border-b px-6 py-4">
                     <DialogTitle>{t("settings.title")}</DialogTitle>
                 </DialogHeader>
 
-                <form id="settings-form" onSubmit={handleSave} className="flex min-h-[380px]">
+                <form id="settings-form" onSubmit={handleSave} className="flex h-full min-h-0 min-w-0">
                     <nav className="flex w-44 shrink-0 flex-col gap-1 border-r bg-secondary/20 p-3">
                         <SettingsSectionButton
                             active={section === "model"}
@@ -123,12 +123,18 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
                         />
                     </nav>
 
-                    <div className="min-w-0 flex-1 overflow-y-auto p-6">
+                    <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-6">
                         <div className={section === "model" ? undefined : "hidden"}>
-                            <ModelSettings
-                                apiKey={apiKey}
+                            <ProviderSettings
+                                providers={providers}
+                                selectedModel={selectedModel}
+                                legacyApiKey={config?.apiKey}
                                 disabled={disabled}
-                                onChange={handleApiKeyChange}
+                                onChange={(next, selection) => {
+                                    setProviders(next);
+                                    setSelectedModel(selection);
+                                    setError(null);
+                                }}
                             />
                         </div>
                         <div className={section === "general" ? undefined : "hidden"}>
@@ -180,47 +186,6 @@ function SettingsSectionButton({ active, icon, label, onClick }: SettingsSection
             {icon}
             {label}
         </button>
-    );
-}
-
-type ModelSettingsProps = {
-    apiKey: string;
-    disabled: boolean;
-    onChange: (value: string) => void;
-};
-
-function ModelSettings({ apiKey, disabled, onChange }: ModelSettingsProps) {
-    const { t } = useTranslation();
-    const [revealed, setRevealed] = useState(false);
-
-    return (
-        <div className="flex flex-col gap-2 text-sm">
-            <label htmlFor="settings-api-key" className="font-medium">
-                {t("settings.model.apiKey")}
-            </label>
-            <div className="relative">
-                <Input
-                    id="settings-api-key"
-                    type={revealed ? "text" : "password"}
-                    autoComplete="off"
-                    placeholder="sk-..."
-                    value={apiKey}
-                    disabled={disabled}
-                    onChange={(event) => onChange(event.target.value)}
-                    className="pr-10"
-                />
-                <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label={revealed ? t("settings.model.hideKey") : t("settings.model.revealKey")}
-                    onClick={() => setRevealed((current) => !current)}
-                    className="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground"
-                >
-                    {revealed ? <EyeOff /> : <Eye />}
-                </Button>
-            </div>
-        </div>
     );
 }
 

@@ -18,7 +18,7 @@ export class Jarvix {
 
     constructor(options: JarvixOptions = {}) {
         this.config = options.config ?? {};
-        this.llm = options.llm ?? createLlm();
+        this.llm = options.llm ?? createLlm(() => this.config.providers);
     }
 
     setConfig(config: JarvixConfig): void {
