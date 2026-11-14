@@ -45,7 +45,6 @@
         "providers": {
             "loading": "加载中…",
             "refresh": "刷新目录",
-            "add": "添加供应商",
             "custom": "自定义供应商",
             "stale": "使用缓存目录 · {{date}}",
             "catalog": "models.dev 供应商",
@@ -60,7 +59,7 @@
             "searchProviders": "搜索供应商",
             "noResults": "没有匹配的供应商",
             "models": "模型",
-            "noModels": "没有可显示的模型",
+            "noModels": "没有已知模型",
             "invalidConfig": "请检查名称、API 地址和模型配置，至少添加一个有效模型。",
             "invalidModel": "请检查模型名称、ID 和长度设置。",
             "duplicateModelId": "该模型 ID 已存在。",
@@ -82,7 +81,7 @@
             "syncModels": "同步模型",
             "syncingModels": "同步中...",
             "syncEmpty": "供应商未返回模型，当前模型列表保持不变。",
-            "syncFailed": "获取模型失败，当前模型列表保持不变。",
+            "syncFailed": "获取模型失败。",
             "applyModel": "应用",
             "remove": "移除供应商"
         },

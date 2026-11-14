@@ -298,8 +298,8 @@ export function ProviderConfigDialog({ provider, selectedModel, disabled, onClos
                                     value={query}
                                     onChange={(event) => setQuery(event.target.value)}
                                 />
-                                <ul className="max-h-44 overflow-y-auto rounded-md border">
-                                    {visibleModels.map((model) => (
+                                <ul className="min-h-28 max-h-44 overflow-y-auto rounded-md border [scrollbar-width:thin]">
+                                    {visibleModels.length > 0 ? visibleModels.map((model) => (
                                         <ModelListItem
                                             key={model.id}
                                             model={model}
@@ -309,9 +309,12 @@ export function ProviderConfigDialog({ provider, selectedModel, disabled, onClos
                                             onSelect={() => openModelPanel({ model, originalId: model.id })}
                                             onRemove={() => removeModel(model)}
                                         />
-                                    ))}
+                                    )) : (
+                                        <li role="status" className="flex min-h-28 items-center justify-center px-4 text-center text-muted-foreground">
+                                            {t("settings.providers.noModels")}
+                                        </li>
+                                    )}
                                 </ul>
-                                {visibleModels.length === 0 ? <p className="text-muted-foreground">{t("settings.providers.noModels")}</p> : null}
                             </fieldset>
                         </form>
 
@@ -381,24 +384,27 @@ function ModelListItem({ model, active, disabled, removeDisabled, onSelect, onRe
     const { t } = useTranslation();
 
     return (
-        <li className="flex items-center gap-1 px-1 py-1">
+        <li
+            data-state={active ? "open" : "closed"}
+            className="group flex items-center gap-1 rounded-md px-1 py-1 transition-colors data-[state=closed]:hover:bg-accent data-[state=open]:bg-accent data-[state=open]:text-accent-foreground"
+        >
             <button
                 type="button"
                 disabled={disabled}
                 aria-pressed={active}
-                data-state={active ? "open" : "closed"}
                 onClick={onSelect}
-                className="min-w-0 flex-1 rounded-sm px-2 py-1.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed data-[state=closed]:hover:bg-accent data-[state=open]:bg-accent data-[state=open]:text-accent-foreground"
+                className="min-w-0 flex-1 rounded-sm px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed"
             >
                 <span className="block truncate" title={model.id}>{model.name}</span>
             </button>
             <Button
                 type="button"
                 size="icon-xs"
-                variant="ghost"
+                variant="secondary"
                 disabled={removeDisabled}
                 aria-label={t("settings.providers.removeModel")}
                 onClick={onRemove}
+                className="mr-1 border border-border bg-muted/40 hover:bg-muted/60"
             >
                 <Minus />
             </Button>

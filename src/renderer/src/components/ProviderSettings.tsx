@@ -22,13 +22,18 @@ type ProviderSettingsProps = {
     onChange: (providers: ProviderConfig[], selection?: ModelSelection) => void;
 };
 
+type ProviderEditorState = {
+    provider: ProviderConfig;
+    originalId?: string;
+};
+
 export function ProviderSettings({ providers, selectedModel, legacyApiKey, disabled, onChange }: ProviderSettingsProps) {
     const { t } = useTranslation();
     const [catalog, setCatalog] = useState<ModelCatalog>();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [query, setQuery] = useState("");
-    const [editing, setEditing] = useState<ProviderConfig>();
+    const [editor, setEditor] = useState<ProviderEditorState>();
 
     useEffect(() => {
         let active = true;
@@ -56,27 +61,30 @@ export function ProviderSettings({ providers, selectedModel, legacyApiKey, disab
     }
 
     function edit(provider: ProviderConfig): void {
-        setEditing({
-            ...provider,
-            apiKey: provider.apiKey ?? (provider.id === DEFAULT_MODEL.provider ? legacyApiKey : undefined)
+        setEditor({
+            provider: {
+                ...provider,
+                apiKey: provider.apiKey ?? (provider.id === DEFAULT_MODEL.provider ? legacyApiKey : undefined)
+            },
+            originalId: provider.id
         });
     }
 
     function addFromCatalog(provider: ProviderCatalogEntry): void {
-        setEditing({
-            ...provider,
-            protocol: provider.protocol ?? "openai-completions",
-            baseUrl: provider.baseUrl ?? ""
+        setEditor({
+            provider: {
+                ...provider,
+                id: createProviderInstanceId(provider.id, providers),
+                protocol: provider.protocol ?? "openai-completions",
+                baseUrl: provider.baseUrl ?? ""
+            }
         });
     }
 
     function save(provider: ProviderConfig, selection?: ModelSelection): void {
-        const exists = providers.some((item) => item.id === provider.id);
-        const next = exists
-            ? providers.map((item) => item.id === provider.id ? provider : item)
-            : [...providers, provider];
+        const next = applyProviderSave(providers, editor?.originalId, provider);
         onChange(next, selection);
-        setEditing(undefined);
+        setEditor(undefined);
     }
 
     function remove(provider: ProviderConfig): void {
@@ -94,16 +102,18 @@ export function ProviderSettings({ providers, selectedModel, legacyApiKey, disab
             <section aria-labelledby="configured-providers-title" className="flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-3">
                     <h3 id="configured-providers-title" className="font-medium">{t("settings.providers.configured")}</h3>
-                    <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => setEditing({
-                        id: `custom:${crypto.randomUUID()}`,
-                        name: t("settings.providers.custom"),
-                        protocol: "openai-completions",
-                        baseUrl: "http://localhost:8080/v1",
-                        env: [],
-                        models: []
+                    <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => setEditor({
+                        provider: {
+                            id: `custom:${crypto.randomUUID()}`,
+                            name: t("settings.providers.custom"),
+                            protocol: "openai-completions",
+                            baseUrl: "http://localhost:8080/v1",
+                            env: [],
+                            models: []
+                        }
                     })}>
                         <Plus />
-                        {t("settings.providers.add")}
+                        {t("settings.providers.custom")}
                     </Button>
                 </div>
                 {providers.length > 0 ? (
@@ -171,37 +181,53 @@ export function ProviderSettings({ providers, selectedModel, legacyApiKey, disab
                     {error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null}
                     {loading && !catalog ? <p role="status" className="text-muted-foreground">{t("settings.providers.loading")}</p> : null}
                     <div className="grid grid-cols-2 gap-x-3 gap-y-1 @min-[34rem]:grid-cols-3">
-                        {available?.map((provider) => {
-                            const configured = providers.find((item) => item.id === provider.id);
-                            return (
-                                <button
-                                    key={provider.id}
-                                    type="button"
-                                    disabled={disabled}
-                                    onClick={() => configured ? edit(configured) : addFromCatalog(provider)}
-                                    title={provider.name}
-                                    className="flex min-w-0 items-center gap-3 rounded-md px-2 py-2.5 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-                                >
-                                    <ProviderIcon id={provider.id} name={provider.name} />
-                                    <span className="truncate">{provider.name}</span>
-                                    {configured ? <span aria-label={t("settings.providers.added")} className="size-1.5 shrink-0 rounded-full bg-emerald-500" /> : null}
-                                </button>
-                            );
-                        })}
+                        {available?.map((provider) => (
+                            <button
+                                key={provider.id}
+                                type="button"
+                                disabled={disabled}
+                                onClick={() => addFromCatalog(provider)}
+                                title={provider.name}
+                                className="flex min-w-0 items-center gap-3 rounded-md px-2 py-2.5 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                            >
+                                <ProviderIcon id={provider.id} name={provider.name} />
+                                <span className="truncate">{provider.name}</span>
+                            </button>
+                        ))}
                     </div>
                     {available?.length === 0 ? <p className="text-muted-foreground">{t("settings.providers.noResults")}</p> : null}
                 </CollapsibleContent>
             </Collapsible>
 
-            {editing ? (
+            {editor ? (
                 <ProviderConfigDialog
-                    provider={editing}
+                    provider={editor.provider}
                     selectedModel={selectedModel}
                     disabled={disabled}
-                    onClose={() => setEditing(undefined)}
+                    onClose={() => setEditor(undefined)}
                     onSave={save}
                 />
             ) : null}
         </div>
     );
+}
+
+export function applyProviderSave(
+    providers: readonly ProviderConfig[],
+    originalId: string | undefined,
+    provider: ProviderConfig
+): ProviderConfig[] {
+    if (originalId === undefined) return [...providers, provider];
+    return providers.map((item) => item.id === originalId ? provider : item);
+}
+
+export function createProviderInstanceId(baseId: string, providers: readonly ProviderConfig[]): string {
+    const ids = new Set(providers.map((provider) => provider.id));
+    let candidate = baseId;
+    let suffix = 2;
+    while (ids.has(candidate)) {
+        candidate = `${baseId}-${suffix}`;
+        suffix += 1;
+    }
+    return candidate;
 }

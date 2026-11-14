@@ -45,7 +45,6 @@
         "providers": {
             "loading": "Loading…",
             "refresh": "Refresh catalog",
-            "add": "Add provider",
             "custom": "Custom provider",
             "stale": "Using cached catalog · {{date}}",
             "catalog": "models.dev provider",
@@ -60,7 +59,7 @@
             "searchProviders": "Search providers",
             "noResults": "No matching providers",
             "models": "Models",
-            "noModels": "No models to display",
+            "noModels": "No known models",
             "invalidConfig": "Check the name, API URL and model settings. Add at least one valid model.",
             "invalidModel": "Check the model name, ID and token limits.",
             "duplicateModelId": "A model with this ID already exists.",
@@ -82,7 +81,7 @@
             "syncModels": "Sync models",
             "syncingModels": "Syncing...",
             "syncEmpty": "The provider returned no models. The current model list was kept.",
-            "syncFailed": "Could not retrieve models. The current model list was kept.",
+            "syncFailed": "Could not retrieve models.",
             "applyModel": "Apply",
             "remove": "Remove provider"
         },

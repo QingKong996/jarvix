@@ -99,12 +99,15 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent aria-describedby={undefined} className="gap-0 overflow-hidden p-0 sm:max-w-5xl">
+            <DialogContent
+                aria-describedby={undefined}
+                className="h-[clamp(28rem,72dvh,46rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-5xl"
+            >
                 <DialogHeader className="border-b px-6 py-4">
                     <DialogTitle>{t("settings.title")}</DialogTitle>
                 </DialogHeader>
 
-                <form id="settings-form" onSubmit={handleSave} className="flex min-h-[380px] max-h-[65vh]">
+                <form id="settings-form" onSubmit={handleSave} className="flex h-full min-h-0 min-w-0">
                     <nav className="flex w-44 shrink-0 flex-col gap-1 border-r bg-secondary/20 p-3">
                         <SettingsSectionButton
                             active={section === "model"}
@@ -120,7 +123,7 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
                         />
                     </nav>
 
-                    <div className="min-w-0 flex-1 overflow-y-auto p-6">
+                    <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-6">
                         <div className={section === "model" ? undefined : "hidden"}>
                             <ProviderSettings
                                 providers={providers}
