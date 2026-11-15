@@ -1,5 +1,16 @@
-import type { LlmAssistantMessage, LlmContentBlock, LlmMessage } from "../../llm/types.ts";
+import type {
+    LlmAssistantMessage,
+    LlmContentBlock,
+    LlmMessage,
+    LlmSystemMessage
+} from "../../llm/types.ts";
 import type { JarvixEvent } from "../../protocol/event.ts";
+import {
+    appendToolOutput,
+    createToolCallViewData,
+    isToolCallViewData,
+    type ToolCallViewData
+} from "../../tools/view.ts";
 import type { CommittedBlock, CommittedTurn, LiveBlock, TranscriptState } from "./types.ts";
 
 export type TranscriptAction =
@@ -53,27 +64,38 @@ export function transcriptReducer(state: TranscriptState, action: TranscriptActi
 
 /** Restore persisted messages as committed turns, in file order. */
 function hydrateSession(messages: LlmMessage[]): CommittedTurn[] {
-    return messages.map((message, index): CommittedTurn => {
+    const turns: CommittedTurn[] = [];
+    for (const [index, message] of messages.entries()) {
         const id = `history-${index}`;
         if (message.role === "user") {
-            return {
+            turns.push({
                 id,
                 role: "user",
                 text: message.content,
                 blocks: [],
                 error: null,
                 reason: null
-            };
+            });
+            continue;
         }
-        return {
-            id,
-            role: "assistant",
-            text: "",
-            blocks: message.content.flatMap(toHistoryBlock),
-            error: message.errorMessage ?? null,
-            reason: message.stopReason
-        };
-    });
+        if (message.role === "assistant") {
+            turns.push({
+                id,
+                role: "assistant",
+                text: "",
+                blocks: message.content.flatMap(toHistoryBlock),
+                error: message.errorMessage ?? null,
+                reason: message.stopReason
+            });
+            continue;
+        }
+        if (message.role === "system") {
+            turns.push(systemTurn(id, message));
+            continue;
+        }
+        applyHistoryToolResult(turns, message.toolCallId, message.content, message.details, message.isError);
+    }
+    return turns;
 }
 
 function toHistoryBlock(block: LlmContentBlock): CommittedBlock[] {
@@ -83,7 +105,49 @@ function toHistoryBlock(block: LlmContentBlock): CommittedBlock[] {
         case "thinking":
             return [{ type: "thinking", thinking: block.thinking }];
         case "toolCall":
-            return [];
+            return [{
+                type: "tool",
+                toolCallId: block.id,
+                toolName: block.name,
+                data: createToolCallViewData(block.name, block.arguments),
+                isError: false
+            }];
+    }
+}
+
+function applyHistoryToolResult(
+    turns: CommittedTurn[],
+    toolCallId: string,
+    content: string,
+    details: unknown,
+    isError: boolean
+): void {
+    for (let turnIndex = turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
+        const turn = turns[turnIndex];
+        if (!turn || turn.role !== "assistant") {
+            continue;
+        }
+        const blockIndex = turn.blocks.findIndex(
+            (block) => block.type === "tool" && block.toolCallId === toolCallId
+        );
+        if (blockIndex === -1) {
+            continue;
+        }
+        const block = turn.blocks[blockIndex];
+        if (!block || block.type !== "tool") {
+            return;
+        }
+        const data: ToolCallViewData = isToolCallViewData(details)
+            ? details
+            : {
+                ...block.data,
+                output: content,
+                status: isError ? "failed" : "completed"
+            };
+        const blocks = [...turn.blocks];
+        blocks[blockIndex] = { ...block, data, isError };
+        turns[turnIndex] = { ...turn, blocks };
+        return;
     }
 }
 
@@ -114,7 +178,67 @@ function applyEvent(state: TranscriptState, event: JarvixEvent): TranscriptState
         case "toolCall.end":
         case "log":
             return state;
+        case "tool.start":
+            return updateToolBlock(state, event.toolCallId, (block) => ({
+                ...block,
+                data: event.data,
+                isError: false
+            }));
+        case "tool.output":
+            return updateToolBlock(state, event.toolCallId, (block) => ({
+                ...block,
+                data: appendToolOutput(block.data, event.data)
+            }));
+        case "tool.end":
+            return updateToolBlock(state, event.toolCallId, (block) => ({
+                ...block,
+                data: event.data,
+                isError: event.isError
+            }));
+        case "system.message":
+            return appendSystemMessage(state, event.message);
     }
+}
+
+function appendSystemMessage(state: TranscriptState, message: LlmSystemMessage): TranscriptState {
+    const id = `system-${message.timestamp}-${message.notice?.sessionId ?? "message"}`;
+    return {
+        ...state,
+        committed: [...state.committed, systemTurn(id, message)]
+    };
+}
+
+function systemTurn(id: string, message: LlmSystemMessage): CommittedTurn {
+    return {
+        id,
+        role: "system",
+        text: message.content,
+        blocks: [],
+        error: null,
+        reason: null,
+        notice: message.notice ?? null
+    };
+}
+
+function updateToolBlock(
+    state: TranscriptState,
+    toolCallId: string,
+    update: (block: Extract<CommittedBlock, { type: "tool" }>) => Extract<CommittedBlock, { type: "tool" }>
+): TranscriptState {
+    let changed = false;
+    const committed = state.committed.map((turn) => {
+        let turnChanged = false;
+        const blocks = turn.blocks.map((block) => {
+            if (block.type !== "tool" || block.toolCallId !== toolCallId) {
+                return block;
+            }
+            changed = true;
+            turnChanged = true;
+            return update(block);
+        });
+        return turnChanged ? { ...turn, blocks } : turn;
+    });
+    return changed ? { ...state, committed } : state;
 }
 
 function upsertLiveBlock(

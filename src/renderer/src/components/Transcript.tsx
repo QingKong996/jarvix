@@ -3,8 +3,10 @@ import { useTranslation } from "react-i18next";
 import { useCommitted, useLive } from "../transcript-hooks.ts";
 import { subscribeCommitted, subscribeLive } from "../transcript-store.ts";
 import type { CommittedTurn, LiveTurn } from "../types.ts";
+import { BackgroundTaskNotice } from "./BackgroundTaskNotice.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { ThinkingBlock } from "./ThinkingBlock.tsx";
+import { ToolCallBlock } from "./ToolCallBlock.tsx";
 
 const CommittedTurnView = memo(function CommittedTurnView({ turn }: { turn: CommittedTurn }) {
     if (turn.role === "user") {
@@ -14,14 +16,30 @@ const CommittedTurnView = memo(function CommittedTurnView({ turn }: { turn: Comm
             </p>
         );
     }
+    if (turn.role === "system") {
+        return turn.notice
+            ? <BackgroundTaskNotice notice={turn.notice} />
+            : <Markdown text={turn.text} />;
+    }
 
     return (
         <div className="flex min-w-0 flex-col gap-3">
-            {turn.blocks.map((block, index) => block.type === "thinking" ? (
-                <ThinkingBlock key={index} text={block.thinking} />
-            ) : (
-                <Markdown key={index} text={block.text} />
-            ))}
+            {turn.blocks.map((block, index) => {
+                if (block.type === "thinking") {
+                    return <ThinkingBlock key={index} text={block.thinking} />;
+                }
+                if (block.type === "tool") {
+                    return (
+                        <ToolCallBlock
+                            key={block.toolCallId}
+                            toolName={block.toolName}
+                            data={block.data}
+                            isError={block.isError}
+                        />
+                    );
+                }
+                return <Markdown key={index} text={block.text} />;
+            })}
             {turn.error ? <p className="text-[13px] text-destructive">{turn.error}</p> : null}
         </div>
     );

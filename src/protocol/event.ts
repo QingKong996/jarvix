@@ -1,9 +1,34 @@
-import type { LlmStreamEvent } from "../llm/types.ts";
+import type { LlmStreamEvent, LlmSystemMessage } from "../llm/types.ts";
+import type { ToolCallOutputDelta, ToolCallViewData } from "../tools/view.ts";
 
 export const LOG_LEVELS = ["log", "info", "warn", "error", "debug"] as const;
 export type LogLevel = typeof LOG_LEVELS[number];
 
+export type JarvixToolEvent =
+  | {
+    type: "tool.start";
+    toolCallId: string;
+    toolName: string;
+    data: ToolCallViewData;
+  } | {
+    type: "tool.output";
+    toolCallId: string;
+    toolName: string;
+    data: ToolCallOutputDelta;
+  } | {
+    type: "tool.end";
+    toolCallId: string;
+    toolName: string;
+    data: ToolCallViewData;
+    isError: boolean;
+  };
+
 export type JarvixEvent = LlmStreamEvent
+  | JarvixToolEvent
+  | {
+    type: "system.message";
+    message: LlmSystemMessage;
+  }
   | {
     type: "log";
     level: LogLevel;

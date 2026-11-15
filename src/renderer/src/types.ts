@@ -1,3 +1,6 @@
+import type { LlmSystemNotice } from "../../llm/types.ts";
+import type { ToolCallViewData } from "../../tools/view.ts";
+
 export type CommittedBlock =
     | {
         type: "text";
@@ -5,16 +8,23 @@ export type CommittedBlock =
     } | {
         type: "thinking";
         thinking: string;
+    } | {
+        type: "tool";
+        toolCallId: string;
+        toolName: string;
+        data: ToolCallViewData;
+        isError: boolean;
     };
 
 /** Immutable history entry. Only `done` commits an assistant turn here. */
 export type CommittedTurn = {
     id: string;
-    role: "user" | "assistant";
+    role: "user" | "assistant" | "system";
     text: string;
     blocks: CommittedBlock[];
     error: string | null;
     reason: string | null;
+    notice?: LlmSystemNotice | null;
 };
 
 /** Streaming state for the single in-flight assistant turn. */

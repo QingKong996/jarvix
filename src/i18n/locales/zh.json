@@ -27,9 +27,26 @@
     "transcript": {
         "generating": "生成中…"
     },
+    "backgroundTask": {
+        "ended": "后台任务已结束",
+        "exitCode": "退出码 {{code}}",
+        "unknownExitCode": "退出码未知",
+        "buffered": "模型仍有 {{count}} 个字符未读取，可在后续请求中通过 write_stdin 获取。"
+    },
     "thinking": {
         "streaming": "思考中…",
         "label": "思考过程"
+    },
+    "tools": {
+        "execCommand": "执行命令",
+        "writeStdin": "写入 Shell",
+        "generic": "调用工具",
+        "status": {
+            "running": "运行中…",
+            "completed": "已完成",
+            "timedOut": "仍在运行",
+            "failed": "失败"
+        }
     },
     "settings": {
         "title": "设置",

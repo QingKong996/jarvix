@@ -17,9 +17,13 @@ export type {
     LlmReasoningLevel,
     LlmStopReason,
     LlmStreamEvent,
+    LlmSystemMessage,
+    LlmSystemNotice,
     LlmTextBlock,
     LlmThinkingBlock,
     LlmToolCallBlock,
+    LlmToolDefinition,
+    LlmToolResultMessage,
     LlmUsage,
     LlmUserMessage
 } from "./types.ts";

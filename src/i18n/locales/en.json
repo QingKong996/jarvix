@@ -27,9 +27,26 @@
     "transcript": {
         "generating": "Generating…"
     },
+    "backgroundTask": {
+        "ended": "Background task ended",
+        "exitCode": "Exit code {{code}}",
+        "unknownExitCode": "Unknown exit code",
+        "buffered": "{{count}} characters remain unread by the model and can be retrieved with write_stdin on a later request."
+    },
     "thinking": {
         "streaming": "Thinking…",
         "label": "Thought process"
+    },
+    "tools": {
+        "execCommand": "Run command",
+        "writeStdin": "Write to shell",
+        "generic": "Tool call",
+        "status": {
+            "running": "Running…",
+            "completed": "Completed",
+            "timedOut": "Still running",
+            "failed": "Failed"
+        }
     },
     "settings": {
         "title": "Settings",

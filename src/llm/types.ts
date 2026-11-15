@@ -6,6 +6,16 @@ export type LlmReasoningLevel = ReasoningLevel;
 /** Why an assistant response ended. `pending` only appears on unfinished partial messages. */
 export type LlmStopReason = "pending" | "stop" | "length" | "toolUse" | "error" | "aborted" | "deferred";
 
+export type LlmJsonValue =
+    | null
+    | boolean
+    | number
+    | string
+    | LlmJsonValue[]
+    | { [key: string]: LlmJsonValue };
+
+export type LlmJsonObject = { [key: string]: LlmJsonValue };
+
 /** Identifies one model within the set exposed by an adapter. */
 export type LlmModelRef = {
     provider: string;
@@ -45,12 +55,19 @@ export type LlmThinkingBlock = {
     redacted?: boolean;
 };
 
+export type LlmToolDefinition = {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+};
+
 export type LlmToolCallBlock = {
     type: "toolCall";
     id: string;
     name: string;
     arguments: Record<string, unknown>;
     signature?: string;
+    argumentsError?: string;
 };
 
 export type LlmContentBlock = LlmTextBlock | LlmThinkingBlock | LlmToolCallBlock;
@@ -79,7 +96,33 @@ export type LlmAssistantMessage = {
     errorMessage?: string;
 };
 
-export type LlmMessage = LlmUserMessage | LlmAssistantMessage;
+/** A tool result is sent back to the model as its own message. */
+export type LlmToolResultMessage = {
+    role: "toolResult";
+    toolCallId: string;
+    toolName: string;
+    content: string;
+    details?: LlmJsonObject;
+    isError: boolean;
+    timestamp: number;
+};
+
+export type LlmSystemNotice = {
+    kind: "background.task_exit";
+    sessionId: string;
+    exitCode: number | null;
+    errorMessage: string | null;
+    unreadCharacters: number;
+};
+
+export type LlmSystemMessage = {
+    role: "system";
+    content: string;
+    timestamp: number;
+    notice?: LlmSystemNotice;
+};
+
+export type LlmMessage = LlmUserMessage | LlmAssistantMessage | LlmToolResultMessage | LlmSystemMessage;
 
 /** One increment of a streamed response. `index` is the position of the content block. */
 export type LlmStreamEvent =

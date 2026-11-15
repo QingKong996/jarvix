@@ -32,6 +32,13 @@ export class SessionManager {
         return session;
     }
 
+    dispose(): void {
+        for (const session of this.sessions.values()) {
+            session.dispose();
+        }
+        this.sessions.clear();
+    }
+
     private track(session: JarvixSession): Session {
         const instance = new Session(session.meta, session.messages);
         this.sessions.set(instance.meta.id, instance);

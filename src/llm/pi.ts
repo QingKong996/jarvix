@@ -4,11 +4,13 @@ import type {
     AssistantMessageEvent,
     Context,
     JsonObject,
+    JsonValue,
     Message,
     Model,
     Models,
     TextContent,
     ThinkingContent,
+    Tool,
     ToolCall,
     Usage
 } from "@earendil-works/pi-ai";
@@ -87,7 +89,12 @@ function toModelInfo(model: Model<Api>): LlmModelInfo {
 function toPiContext(request: LlmRequest): Context {
     return {
         systemPrompt: request.systemPrompt,
-        messages: request.messages.map(toPiMessage)
+        messages: request.messages.map(toPiMessage),
+        tools: request.tools?.map((tool): Tool => ({
+            name: tool.name,
+            description: tool.description,
+            parameters: tool.parameters
+        }))
     };
 }
 
@@ -95,6 +102,24 @@ function toPiMessage(message: LlmMessage): Message {
     if (message.role === "user") {
         return {
             role: "user",
+            content: message.content,
+            timestamp: message.timestamp
+        };
+    }
+    if (message.role === "toolResult") {
+        return {
+            role: "toolResult",
+            toolCallId: message.toolCallId,
+            toolName: message.toolName,
+            content: [{ type: "text", text: message.content }],
+            details: message.details as JsonValue | undefined,
+            isError: message.isError,
+            timestamp: message.timestamp
+        };
+    }
+    if (message.role === "system") {
+        return {
+            role: "system",
             content: message.content,
             timestamp: message.timestamp
         };
@@ -132,7 +157,8 @@ function toPiContentBlock(block: LlmContentBlock): TextContent | ThinkingContent
                 id: block.id,
                 name: block.name,
                 arguments: block.arguments as JsonObject,
-                thoughtSignature: block.signature
+                thoughtSignature: block.signature,
+                argumentsError: block.argumentsError
             };
     }
 }
@@ -188,7 +214,8 @@ function toLlmContentBlock(block: TextContent | ThinkingContent | ToolCall): Llm
                 id: block.id,
                 name: block.name,
                 arguments: block.arguments,
-                signature: block.thoughtSignature
+                signature: block.thoughtSignature,
+                argumentsError: block.argumentsError
             };
     }
 }
@@ -199,7 +226,8 @@ function toLlmToolCall(toolCall: ToolCall): LlmToolCallBlock {
         id: toolCall.id,
         name: toolCall.name,
         arguments: toolCall.arguments,
-        signature: toolCall.thoughtSignature
+        signature: toolCall.thoughtSignature,
+        argumentsError: toolCall.argumentsError
     };
 }
 
