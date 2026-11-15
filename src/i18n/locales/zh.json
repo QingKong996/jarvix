@@ -6,6 +6,13 @@
     "sessions": {
         "new": "新建会话",
         "untitled": "未命名会话",
+        "archive": "归档",
+        "delete": "永久删除",
+        "deleteTitle": "永久删除会话",
+        "deleteDescription": "确定要永久删除“{{name}}”吗？此操作无法撤销。",
+        "deleteConfirm": "永久删除",
+        "deleting": "删除中…",
+        "deleteFailed": "无法删除该会话。",
         "rename": "重命名",
         "autoName": "自动命名",
         "renameTitle": "重命名会话",
@@ -97,7 +104,17 @@
         "title": "设置",
         "sections": {
             "model": "模型",
+            "archived": "已归档",
             "general": "通用"
+        },
+        "archived": {
+            "title": "已归档会话",
+            "description": "已归档会话不会显示在侧边栏中。",
+            "archivedAt": "归档于 {{date}}",
+            "empty": "暂无已归档会话",
+            "restore": "恢复",
+            "restoring": "恢复中…",
+            "restoreFailed": "无法恢复该会话。"
         },
         "providers": {
             "loading": "加载中…",

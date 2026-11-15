@@ -38,8 +38,12 @@ const bridge: JarvixBridge = {
         IPC_CHANNELS.sessionAutoName,
         { sessionId, firstPrompt }
     ),
+    archiveSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.sessionArchive, sessionId),
+    unarchiveSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.sessionUnarchive, sessionId),
+    deleteSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.sessionDelete, sessionId),
     openSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.sessionOpen, sessionId),
-    listSessions: () => ipcRenderer.invoke(IPC_CHANNELS.sessionsList)
+    listSessions: () => ipcRenderer.invoke(IPC_CHANNELS.sessionsList),
+    listArchivedSessions: () => ipcRenderer.invoke(IPC_CHANNELS.sessionsListArchived)
 };
 
 contextBridge.exposeInMainWorld("jarvix", bridge);

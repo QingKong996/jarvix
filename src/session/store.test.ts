@@ -8,11 +8,14 @@ import {
     SESSION_FORMAT_VERSION,
     appendSessionMessage,
     createSession,
+    deleteSession,
+    listArchivedSessionSummaries,
     listSessionSummaries,
     loadSession,
     sessionFile,
     updateSessionContext,
-    updateSessionName
+    updateSessionName,
+    updateSessionStatus
 } from "./store.ts";
 
 const base = mkdtempSync(join(tmpdir(), "jarvix-session-"));
@@ -171,7 +174,8 @@ test("listSessionSummaries reads names from headers without loading messages", (
         version: SESSION_FORMAT_VERSION,
         id: "named-session",
         name: "Named session",
-        createdAt: 1_700_000_000_000
+        createdAt: 1_700_000_000_000,
+        status: "active"
     };
     mkdirSync(directory, { recursive: true });
     writeFileSync(sessionFile(firstMeta.id, directory), `${JSON.stringify(firstMeta)}\n`, "utf8");
@@ -200,6 +204,7 @@ test("listSessionSummaries reads names from headers without loading messages", (
         "id",
         "name",
         "projectId",
+        "status",
         "updatedAt"
     ]);
     expect(listSessionSummaries(join(base, "missing-summaries"))).toEqual([]);
@@ -247,6 +252,46 @@ test("updateSessionName rewrites the header and preserves messages", () => {
     });
     expect(listSessionSummaries(directory)[0]?.name).toBe("Renamed session");
     expect(() => updateSessionName(created.meta.id, "   ", directory)).toThrow();
+});
+
+test("updateSessionStatus archives in the header and sorts archives by archive time", () => {
+    const directory = join(base, "archive");
+    const first = createSession({ projectId: PROJECT_ID }, "First archived", directory);
+    const second = createSession({}, "Second archived", directory);
+    appendSessionMessage(first.meta.id, userMessage, directory);
+
+    const firstArchived = updateSessionStatus(first.meta.id, "archived", directory, 1_700_000_500_000);
+    updateSessionStatus(second.meta.id, "archived", directory, 1_700_000_600_000);
+
+    expect(firstArchived).toMatchObject({
+        status: "archived",
+        archivedAt: 1_700_000_500_000
+    });
+    expect(loadSession(first.meta.id, directory)).toEqual({
+        meta: firstArchived,
+        messages: [userMessage]
+    });
+    expect(listArchivedSessionSummaries(directory).map((session) => session.id))
+        .toEqual([second.meta.id, first.meta.id]);
+
+    const restored = updateSessionStatus(first.meta.id, "active", directory);
+
+    expect(restored.status).toBe("active");
+    expect(restored.archivedAt).toBeUndefined();
+    expect(listArchivedSessionSummaries(directory).map((session) => session.id))
+        .toEqual([second.meta.id]);
+});
+
+test("deleteSession permanently removes the session file", () => {
+    const directory = join(base, "delete");
+    const session = createSession({}, "Delete me", directory);
+    appendSessionMessage(session.meta.id, userMessage, directory);
+
+    deleteSession(session.meta.id, directory);
+
+    expect(loadSession(session.meta.id, directory)).toBeNull();
+    expect(listSessionSummaries(directory)).toEqual([]);
+    expect(() => deleteSession(session.meta.id, directory)).toThrow("Session not found");
 });
 
 test("listSessionSummaries sorts by the last message timestamp", () => {

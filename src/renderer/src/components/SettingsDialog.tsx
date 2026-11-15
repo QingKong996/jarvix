@@ -1,11 +1,12 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { Cpu, LoaderCircle, Settings2 } from "lucide-react";
+import { Archive, ArchiveRestore, Cpu, LoaderCircle, Settings2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ProviderSettings } from "./ProviderSettings.tsx";
 import type { ProviderConfig, ModelSelection } from "../../../protocol/providers.ts";
+import type { JarvixSessionSummary } from "../../../protocol/session.ts";
 import {
     DEFAULT_THEME,
     SUPPORTED_LANGUAGES,
@@ -20,9 +21,11 @@ type SettingsDialogProps = {
     onOpenChange: (open: boolean) => void;
     config: JarvixConfig | null;
     onSaved: (config: JarvixConfig) => void;
+    archivedSessions: JarvixSessionSummary[];
+    onUnarchiveSession: (sessionId: string) => Promise<boolean>;
 };
 
-type SettingsSection = "model" | "general";
+type SettingsSection = "model" | "archived" | "general";
 
 const bridge = window.jarvix;
 
@@ -43,7 +46,14 @@ function activeLanguage(i18nLanguage: string): Language {
     return i18nLanguage === "en" ? "en" : "zh";
 }
 
-export function SettingsDialog({ open, onOpenChange, config, onSaved }: SettingsDialogProps) {
+export function SettingsDialog({
+    open,
+    onOpenChange,
+    config,
+    onSaved,
+    archivedSessions,
+    onUnarchiveSession
+}: SettingsDialogProps) {
     const { t, i18n } = useTranslation();
     const [section, setSection] = useState<SettingsSection>("model");
     const [providers, setProviders] = useState<ProviderConfig[]>(config?.providers ?? []);
@@ -121,6 +131,12 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
                             label={t("settings.sections.general")}
                             onClick={() => setSection("general")}
                         />
+                        <SettingsSectionButton
+                            active={section === "archived"}
+                            icon={<Archive />}
+                            label={t("settings.sections.archived")}
+                            onClick={() => setSection("archived")}
+                        />
                     </nav>
 
                     <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-6">
@@ -145,6 +161,13 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
                                 onThemeChange={handleThemeChange}
                             />
                         </div>
+                        <div className={section === "archived" ? undefined : "hidden"}>
+                            <ArchivedSettings
+                                sessions={archivedSessions}
+                                disabled={!bridge || saving}
+                                onRestore={onUnarchiveSession}
+                            />
+                        </div>
                     </div>
                 </form>
 
@@ -160,6 +183,86 @@ export function SettingsDialog({ open, onOpenChange, config, onSaved }: Settings
                 </div>
             </DialogContent>
         </Dialog>
+    );
+}
+
+type ArchivedSettingsProps = {
+    sessions: JarvixSessionSummary[];
+    disabled: boolean;
+    onRestore: (sessionId: string) => Promise<boolean>;
+};
+
+function ArchivedSettings({ sessions, disabled, onRestore }: ArchivedSettingsProps) {
+    const { t, i18n } = useTranslation();
+    const [restoringId, setRestoringId] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    async function restore(sessionId: string): Promise<void> {
+        if (disabled || restoringId) {
+            return;
+        }
+        setRestoringId(sessionId);
+        setError(null);
+        try {
+            if (!await onRestore(sessionId)) {
+                setError(t("settings.archived.restoreFailed"));
+            }
+        } catch {
+            setError(t("settings.archived.restoreFailed"));
+        } finally {
+            setRestoringId(null);
+        }
+    }
+
+    return (
+        <section aria-labelledby="archived-sessions-title" className="flex flex-col gap-3 text-sm">
+            <div>
+                <h3 id="archived-sessions-title" className="font-medium">
+                    {t("settings.archived.title")}
+                </h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                    {t("settings.archived.description")}
+                </p>
+            </div>
+
+            {error ? <p className="text-xs text-destructive">{error}</p> : null}
+
+            {sessions.length > 0 ? (
+                <ul className="divide-y rounded-md border">
+                    {sessions.map((session) => (
+                        <li key={session.id} className="flex items-center gap-3 px-3 py-2.5">
+                            <div className="min-w-0 flex-1">
+                                <p className="truncate" title={session.name}>{session.name}</p>
+                                <p className="mt-0.5 text-xs text-muted-foreground">
+                                    {t("settings.archived.archivedAt", {
+                                        date: new Date(session.archivedAt ?? session.updatedAt)
+                                            .toLocaleString(i18n.language)
+                                    })}
+                                </p>
+                            </div>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                disabled={disabled || restoringId !== null}
+                                onClick={() => void restore(session.id)}
+                            >
+                                {restoringId === session.id
+                                    ? <LoaderCircle className="animate-spin" />
+                                    : <ArchiveRestore />}
+                                {restoringId === session.id
+                                    ? t("settings.archived.restoring")
+                                    : t("settings.archived.restore")}
+                            </Button>
+                        </li>
+                    ))}
+                </ul>
+            ) : (
+                <div className="rounded-md border border-dashed px-4 py-8 text-center text-xs text-muted-foreground">
+                    {t("settings.archived.empty")}
+                </div>
+            )}
+        </section>
     );
 }
 

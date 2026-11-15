@@ -21,7 +21,7 @@ export function App() {
     const { t } = useTranslation();
     const [createProjectOpen, setCreateProjectOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
-    const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
+    const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
     const [config, setConfig] = useState<JarvixConfig | null>(null);
     const { defaultLayout, onLayoutChanged } = useDefaultLayout({
         id: LAYOUT_ID,
@@ -30,6 +30,7 @@ export function App() {
     const {
         projects,
         sessions,
+        archivedSessions,
         sessionContext,
         activeSessionId,
         busy,
@@ -39,6 +40,9 @@ export function App() {
         updateSessionContext,
         renameSession,
         autoNameSession,
+        archiveSession,
+        unarchiveSession,
+        deleteSession,
         moveSessionToProject,
         selectSession,
         send
@@ -100,6 +104,8 @@ export function App() {
                                 onMoveSession={moveSessionToProject}
                                 onRenameSession={renameSession}
                                 onAutoNameSession={autoNameSession}
+                                onArchiveSession={archiveSession}
+                                onDeleteSession={deleteSession}
                                 onOpenSettings={openSettings}
                             />
                         </ResizablePanel>
@@ -153,6 +159,8 @@ export function App() {
                 onOpenChange={setSettingsOpen}
                 config={config}
                 onSaved={handleSaved}
+                archivedSessions={archivedSessions}
+                onUnarchiveSession={unarchiveSession}
             />
         </>
     );

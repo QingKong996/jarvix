@@ -15,6 +15,7 @@ const bridge = window.jarvix;
 export function useSessions() {
     const [projects, setProjects] = useState<JarvixProject[]>([]);
     const [sessions, setSessions] = useState<JarvixSessionSummary[]>([]);
+    const [archivedSessions, setArchivedSessions] = useState<JarvixSessionSummary[]>([]);
     const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
     const [sessionContext, setSessionContext] = useState<JarvixSessionContext>({});
     const [busy, setBusy] = useState(false);
@@ -53,6 +54,17 @@ export function useSessions() {
         }
     }, []);
 
+    const refreshArchivedSessions = useCallback(async (): Promise<void> => {
+        if (!bridge) {
+            return;
+        }
+        try {
+            setArchivedSessions(await bridge.listArchivedSessions());
+        } catch {
+            return;
+        }
+    }, []);
+
     const refreshProjects = useCallback(async (): Promise<void> => {
         if (!bridge) {
             return;
@@ -86,15 +98,17 @@ export function useSessions() {
 
         void (async () => {
             try {
-                const [loadedProjects, summaries] = await Promise.all([
+                const [loadedProjects, summaries, archived] = await Promise.all([
                     bridge.listProjects(),
-                    bridge.listSessions()
+                    bridge.listSessions(),
+                    bridge.listArchivedSessions()
                 ]);
                 if (cancelled) {
                     return;
                 }
                 setProjects(loadedProjects);
                 setSessions(summaries);
+                setArchivedSessions(archived);
                 const latest = summaries[0];
                 const session = latest ? await bridge.openSession(latest.id) : null;
                 if (!cancelled) {
@@ -219,6 +233,60 @@ export function useSessions() {
         }
     }, [busy, ready, updateSessionName]);
 
+    const archiveSession = useCallback(async (sessionId: string): Promise<boolean> => {
+        if (!bridge || !ready || busy) {
+            return false;
+        }
+        setBusy(true);
+        try {
+            await bridge.archiveSession(sessionId);
+            if (activeSessionIdRef.current === sessionId) {
+                activateSession(null);
+            }
+            await Promise.all([refreshSessions(), refreshArchivedSessions()]);
+            return true;
+        } catch {
+            return false;
+        } finally {
+            setBusy(false);
+        }
+    }, [activateSession, busy, ready, refreshArchivedSessions, refreshSessions]);
+
+    const unarchiveSession = useCallback(async (sessionId: string): Promise<boolean> => {
+        if (!bridge || !ready || busy) {
+            return false;
+        }
+        setBusy(true);
+        try {
+            await bridge.unarchiveSession(sessionId);
+            await Promise.all([refreshSessions(), refreshArchivedSessions()]);
+            return true;
+        } catch {
+            return false;
+        } finally {
+            setBusy(false);
+        }
+    }, [busy, ready, refreshArchivedSessions, refreshSessions]);
+
+    const deleteSession = useCallback(async (sessionId: string): Promise<boolean> => {
+        if (!bridge || !ready || busy) {
+            return false;
+        }
+        setBusy(true);
+        try {
+            await bridge.deleteSession(sessionId);
+            if (activeSessionIdRef.current === sessionId) {
+                activateSession(null);
+            }
+            await Promise.all([refreshSessions(), refreshArchivedSessions()]);
+            return true;
+        } catch {
+            return false;
+        } finally {
+            setBusy(false);
+        }
+    }, [activateSession, busy, ready, refreshArchivedSessions, refreshSessions]);
+
     const selectSession = useCallback(async (sessionId: string): Promise<void> => {
         if (!bridge || !ready || busy || sessionId === activeSessionIdRef.current) {
             return;
@@ -276,6 +344,7 @@ export function useSessions() {
     return {
         projects,
         sessions,
+        archivedSessions,
         sessionContext,
         activeSessionId,
         busy,
@@ -285,6 +354,9 @@ export function useSessions() {
         updateSessionContext,
         renameSession,
         autoNameSession,
+        archiveSession,
+        unarchiveSession,
+        deleteSession,
         moveSessionToProject,
         selectSession,
         send
