@@ -253,5 +253,26 @@ function isLlmMessage(value: unknown): value is LlmMessage {
             typeof value.stopReason === "string"
         );
     }
+    if (value.role === "toolResult") {
+        return (
+            typeof value.toolCallId === "string" &&
+            typeof value.toolName === "string" &&
+            typeof value.content === "string" &&
+            typeof value.isError === "boolean"
+        );
+    }
+    if (value.role === "system") {
+        return typeof value.content === "string" && (
+            value.notice === undefined ||
+            (
+                isRecord(value.notice) &&
+                value.notice.kind === "background.task_exit" &&
+                typeof value.notice.sessionId === "string" &&
+                (value.notice.exitCode === null || typeof value.notice.exitCode === "number") &&
+                (value.notice.errorMessage === null || typeof value.notice.errorMessage === "string") &&
+                typeof value.notice.unreadCharacters === "number"
+            )
+        );
+    }
     return false;
 }

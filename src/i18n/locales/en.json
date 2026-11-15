@@ -27,9 +27,37 @@
     "transcript": {
         "generating": "Generating…"
     },
+    "system": {
+        "message": "System message"
+    },
+    "rightSidebar": {
+        "open": "Expand right sidebar",
+        "close": "Collapse right sidebar",
+        "empty": "No background tasks",
+        "tabs": {
+            "background": "Background tasks"
+        },
+        "status": {
+            "running": "Running",
+            "completed": "Completed",
+            "pendingRead": "Unread output",
+            "failed": "Failed"
+        }
+    },
     "thinking": {
         "streaming": "Thinking…",
         "label": "Thought process"
+    },
+    "tools": {
+        "execCommand": "Run command",
+        "writeStdin": "Write to shell",
+        "generic": "Tool call",
+        "status": {
+            "running": "Running…",
+            "completed": "Completed",
+            "background": "Running in background",
+            "failed": "Failed"
+        }
     },
     "settings": {
         "title": "Settings",

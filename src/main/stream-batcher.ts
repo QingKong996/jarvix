@@ -57,6 +57,41 @@ export function createStreamBatcher(flush: Flush): { push(event: JarvixEvent): v
                 return;
             }
 
+            if (event.type === "tool.output") {
+                const last = pending[pending.length - 1];
+                if (
+                    last?.type === "tool.output" &&
+                    last.toolCallId === event.toolCallId &&
+                    last.data.kind === event.data.kind
+                ) {
+                    pending[pending.length - 1] = {
+                        ...event,
+                        data: {
+                            ...event.data,
+                            output: last.data.output + event.data.output
+                        } as typeof event.data
+                    };
+                } else {
+                    pending.push(event);
+                }
+                timer ??= setTimeout(emit, FLUSH_INTERVAL_MS);
+                return;
+            }
+
+            if (event.type === "backgroundTask.output") {
+                const last = pending[pending.length - 1];
+                if (last?.type === "backgroundTask.output" && last.taskId === event.taskId) {
+                    pending[pending.length - 1] = {
+                        ...event,
+                        output: last.output + event.output
+                    };
+                } else {
+                    pending.push(event);
+                }
+                timer ??= setTimeout(emit, FLUSH_INTERVAL_MS);
+                return;
+            }
+
             pending.push(event);
             emit();
         }

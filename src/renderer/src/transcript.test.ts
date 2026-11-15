@@ -54,3 +54,145 @@ test("keeps streamed content when a request fails before a complete message", ()
         reason: null
     });
 });
+
+test("hydrates and updates shell tool output", () => {
+    const toolCall = {
+        type: "toolCall" as const,
+        id: "call-1",
+        name: "exec_command",
+        arguments: { command: "echo hi", cwd: "/tmp", timeoutMs: 1000 }
+    };
+    const hydrated = transcriptReducer(initialTranscriptState, {
+        type: "session.loaded",
+        messages: [{
+            role: "user",
+            content: "run it",
+            timestamp: 1
+        }, {
+            ...message,
+            content: [toolCall],
+            stopReason: "toolUse"
+        }, {
+            role: "toolResult",
+            toolCallId: "call-1",
+            toolName: "exec_command",
+            content: "Command exited with code 0.",
+            details: {
+                kind: "shell.exec_command",
+                command: "echo hi",
+                output: "hi\n",
+                status: "completed"
+            },
+            isError: false,
+            timestamp: 2
+        }]
+    });
+
+    expect(hydrated.committed[1]?.blocks).toEqual([{
+        type: "tool",
+        toolCallId: "call-1",
+        toolName: "exec_command",
+        data: {
+            kind: "shell.exec_command",
+            command: "echo hi",
+            output: "hi\n",
+            status: "completed"
+        },
+        isError: false,
+        endReason: "exited"
+    }]);
+
+    const live = transcriptReducer(initialTranscriptState, {
+        type: "events.batch",
+        events: [
+            { type: "start" },
+            { type: "done", message: { ...message, content: [toolCall], stopReason: "toolUse" } },
+            {
+                type: "tool.start",
+                toolCallId: "call-1",
+                toolName: "exec_command",
+                data: {
+                    kind: "shell.exec_command",
+                    command: "echo hi",
+                    output: "",
+                    status: "running"
+                }
+            },
+            {
+                type: "tool.output",
+                toolCallId: "call-1",
+                toolName: "exec_command",
+                data: { kind: "shell.exec_command", output: "hi\n" }
+            },
+            {
+                type: "tool.end",
+                toolCallId: "call-1",
+                toolName: "exec_command",
+                data: {
+                    kind: "shell.exec_command",
+                    command: "echo hi",
+                    output: "hi\n",
+                    status: "timed_out"
+                },
+                isError: false,
+                endReason: "background"
+            }
+        ]
+    });
+
+    expect(live.committed[0]?.blocks[0]).toMatchObject({
+        type: "tool",
+        data: { output: "hi\n", status: "timed_out" },
+        endReason: "background"
+    });
+
+    const afterEnd = transcriptReducer(live, {
+        type: "events.batch",
+        events: [{
+            type: "tool.output",
+            toolCallId: "call-1",
+            toolName: "exec_command",
+            data: { kind: "shell.exec_command", output: "later\n" }
+        }]
+    });
+
+    expect(afterEnd.committed[0]?.blocks[0]).toMatchObject({
+        type: "tool",
+        data: { output: "hi\n", status: "timed_out" },
+        endReason: "background"
+    });
+});
+
+test("renders background task exit notices from events and history", () => {
+    const notice = {
+        kind: "background.task_exit" as const,
+        sessionId: "shell-1",
+        exitCode: 1,
+        errorMessage: null,
+        unreadCharacters: 24
+    };
+    const systemMessage = {
+        role: "system" as const,
+        content: "Background task exited.",
+        timestamp: 3,
+        notice
+    };
+    const live = transcriptReducer(initialTranscriptState, {
+        type: "events.batch",
+        events: [{ type: "system.message", message: systemMessage }]
+    });
+
+    expect(live.committed).toEqual([expect.objectContaining({
+        role: "system",
+        text: "Background task exited."
+    })]);
+
+    const hydrated = transcriptReducer(initialTranscriptState, {
+        type: "session.loaded",
+        messages: [systemMessage]
+    });
+    expect(hydrated.committed).toEqual([expect.objectContaining({
+        role: "system",
+        text: "Background task exited."
+    })]);
+});

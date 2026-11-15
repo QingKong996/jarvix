@@ -59,4 +59,8 @@ export class Jarvix {
             emit: (event) => this.emit(session.meta.id, event)
         });
     }
+
+    dispose(): void {
+        this.sessions.dispose();
+    }
 }

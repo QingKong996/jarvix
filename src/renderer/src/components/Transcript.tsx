@@ -5,8 +5,11 @@ import { subscribeCommitted, subscribeLive } from "../transcript-store.ts";
 import type { CommittedTurn, LiveTurn } from "../types.ts";
 import { Markdown } from "./Markdown.tsx";
 import { ThinkingBlock } from "./ThinkingBlock.tsx";
+import { ToolCallBlock } from "./ToolCallBlock.tsx";
 
 const CommittedTurnView = memo(function CommittedTurnView({ turn }: { turn: CommittedTurn }) {
+    const { t } = useTranslation();
+
     if (turn.role === "user") {
         return (
             <p className="max-w-[85%] self-end rounded-lg bg-primary px-3 py-2 text-sm leading-relaxed break-words whitespace-pre-wrap text-primary-foreground">
@@ -14,14 +17,29 @@ const CommittedTurnView = memo(function CommittedTurnView({ turn }: { turn: Comm
             </p>
         );
     }
+    if (turn.role === "system") {
+        return <ThinkingBlock text={turn.text} label={t("system.message")} />;
+    }
 
     return (
         <div className="flex min-w-0 flex-col gap-3">
-            {turn.blocks.map((block, index) => block.type === "thinking" ? (
-                <ThinkingBlock key={index} text={block.thinking} />
-            ) : (
-                <Markdown key={index} text={block.text} />
-            ))}
+            {turn.blocks.map((block, index) => {
+                if (block.type === "thinking") {
+                    return <ThinkingBlock key={index} text={block.thinking} />;
+                }
+                if (block.type === "tool") {
+                    return (
+                        <ToolCallBlock
+                            key={block.toolCallId}
+                            toolName={block.toolName}
+                            data={block.data}
+                            isError={block.isError}
+                            endReason={block.endReason}
+                        />
+                    );
+                }
+                return <Markdown key={index} text={block.text} />;
+            })}
             {turn.error ? <p className="text-[13px] text-destructive">{turn.error}</p> : null}
         </div>
     );

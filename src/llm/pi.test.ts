@@ -1,4 +1,10 @@
-import { createModels, fauxAssistantMessage, fauxProvider, fauxText, fauxThinking } from "@earendil-works/pi-ai";
+import {
+    createModels,
+    fauxAssistantMessage,
+    fauxProvider,
+    fauxText,
+    fauxThinking
+} from "@earendil-works/pi-ai";
 import type { Context } from "@earendil-works/pi-ai";
 import { expect, test } from "vitest";
 import { createPiAdapter } from "./pi.ts";
@@ -114,4 +120,94 @@ test("replays assistant messages with their provider metadata", async () => {
         ]
     });
     expect(seen.context?.messages[0]).toMatchObject({ role: "system", content: "Be brief." });
+});
+
+test("passes tool definitions and tool results to the provider context", async () => {
+    const { faux, adapter, model } = createFixture();
+    let context: Context | undefined;
+    faux.setResponses([
+        (next) => {
+            context = next;
+            return fauxAssistantMessage("done");
+        }
+    ]);
+
+    for await (const _event of adapter.stream({
+        model,
+        messages: [userMessage("run it"), {
+            role: "assistant",
+            content: [{
+                type: "toolCall",
+                id: "call-1",
+                name: "exec_command",
+                arguments: { command: "echo hi", cwd: "/tmp", timeoutMs: 1000 }
+            }],
+            provider: model.provider,
+            model: model.id,
+            api: "test",
+            usage: {
+                inputTokens: 0,
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+                totalTokens: 0,
+                cost: 0
+            },
+            stopReason: "toolUse",
+            timestamp: 2
+        }, {
+            role: "toolResult",
+            toolCallId: "call-1",
+            toolName: "exec_command",
+            content: "hi\n",
+            isError: false,
+            timestamp: 3
+        }],
+        tools: [{
+            name: "exec_command",
+            description: "Run a command",
+            parameters: { type: "object", properties: {} }
+        }]
+    })) {
+        // Drain the stream; the provider context is captured above.
+    }
+
+    expect(context?.messages[0]).toMatchObject({
+        role: "system",
+        toolsAdded: [{
+            name: "exec_command",
+            description: "Run a command",
+            parameters: { type: "object", properties: {} }
+        }]
+    });
+    expect(context?.messages.map((message) => message.role)).toEqual([
+        "system",
+        "user",
+        "assistant",
+        "toolResult"
+    ]);
+});
+
+test("passes background task notices through system messages", async () => {
+    const { faux, adapter, model } = createFixture();
+    let context: Context | undefined;
+    faux.setResponses([
+        (next) => {
+            context = next;
+            return fauxAssistantMessage("done");
+        }
+    ]);
+
+    for await (const _event of adapter.stream({
+        model,
+        messages: [userMessage("run it"), {
+            role: "system",
+            content: "Background task shell-1 exited with code 0.",
+            timestamp: 2
+        }]
+    })) {
+        // Drain the stream; the provider context is captured above.
+    }
+
+    expect(JSON.stringify(context?.messages)).toContain("Background task shell-1 exited with code 0.");
 });

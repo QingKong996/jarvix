@@ -1,7 +1,11 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { beforeEach, expect, test, vi } from "vitest";
 import type { LlmAdapter } from "../llm/index.ts";
 import type {
     LlmAssistantMessage,
+    LlmMessage,
     LlmModelInfo,
     LlmStreamEvent
 } from "../llm/types.ts";
@@ -10,6 +14,7 @@ import type { JarvixSessionMeta } from "../protocol/session.ts";
 import { Session } from "./session.ts";
 import { appendSessionMessage } from "./store.ts";
 import { providerConfigSchema } from "../protocol/providers.ts";
+import { BackgroundTaskManager, type ToolExecutor } from "../tools/index.ts";
 
 vi.mock("./store.ts", () => ({
     appendSessionMessage: vi.fn()
@@ -220,6 +225,240 @@ test("retains a completed message when the iterator subsequently throws", async 
         { type: "done", message },
         { type: "request.error", error: "stream failed" }
     ]);
+});
+
+test("executes tool calls, streams tool data, and resumes with the tool result", async () => {
+    const toolCall = {
+        type: "toolCall" as const,
+        id: "call-1",
+        name: "exec_command",
+        arguments: { command: "echo hi", cwd: process.cwd(), timeoutMs: 1000 }
+    };
+    const toolUseMessage: LlmAssistantMessage = {
+        ...assistantMessage(),
+        content: [toolCall],
+        stopReason: "toolUse"
+    };
+    const finalMessage = assistantMessage();
+    const requests: LlmMessage[][] = [];
+    let response = 0;
+    const llm: LlmAdapter = {
+        getModel: () => MODEL,
+        stream(request) {
+            requests.push([...request.messages]);
+            const message = response === 0 ? toolUseMessage : finalMessage;
+            response += 1;
+            return (async function* (): AsyncIterable<LlmStreamEvent> {
+                yield { type: "start" };
+                yield { type: "done", message };
+            })();
+        }
+    };
+    const tools: ToolExecutor = {
+        definitions: [{
+            name: "exec_command",
+            description: "Run a command",
+            parameters: { type: "object", properties: {} }
+        }],
+        handles: (name) => name === "exec_command",
+        execute: async (_call, observer) => {
+            observer.onOutput({ kind: "shell.exec_command", output: "hi\n" });
+            return {
+                content: "Command exited with code 0.",
+                data: {
+                    kind: "shell.exec_command",
+                    command: "echo hi",
+                    output: "hi\n",
+                    status: "completed"
+                },
+                isError: false,
+                endReason: "exited"
+            };
+        },
+        dispose: () => undefined
+    };
+    const events: JarvixEvent[] = [];
+    const session = new Session(meta, [], tools);
+
+    await session.request("run it", {
+        llm,
+        config: TEST_CONFIG,
+        emit: (event) => { events.push(event); }
+    });
+
+    expect(events.map((event) => event.type)).toEqual([
+        "start",
+        "done",
+        "tool.start",
+        "tool.output",
+        "tool.end",
+        "start",
+        "done"
+    ]);
+    expect(events[3]).toEqual({
+        type: "tool.output",
+        toolCallId: "call-1",
+        toolName: "exec_command",
+        data: { kind: "shell.exec_command", output: "hi\n" }
+    });
+    expect(requests[1]?.map((message) => message.role)).toEqual([
+        "user",
+        "assistant",
+        "toolResult"
+    ]);
+    expect(requests[1]?.at(-1)).toMatchObject({
+        role: "toolResult",
+        toolCallId: "call-1",
+        toolName: "exec_command",
+        content: "Command exited with code 0."
+    });
+    expect(session.snapshot().messages.map((message) => message.role)).toEqual([
+        "user",
+        "assistant",
+        "toolResult",
+        "assistant"
+    ]);
+});
+
+test("routes background task output outside the tool call after timeout", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-session-task-"));
+    const script = join(directory, "task.mjs");
+    writeFileSync(script, [
+        "process.stdout.write('start\\n');",
+        "setTimeout(() => process.stdout.write('later\\n', () => process.exit(0)), 700);"
+    ].join("\n"), "utf8");
+    const command = process.platform === "win32"
+        ? `& ${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`
+        : `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`;
+    const toolCall = {
+        type: "toolCall" as const,
+        id: "call-background",
+        name: "exec_command",
+        arguments: { command, cwd: directory, timeoutMs: 50 }
+    };
+    const toolUseMessage: LlmAssistantMessage = {
+        ...assistantMessage(),
+        content: [toolCall],
+        stopReason: "toolUse"
+    };
+    const finalMessage = assistantMessage();
+    let response = 0;
+    let shellSessionId: string | undefined;
+    const llm: LlmAdapter = {
+        getModel: () => MODEL,
+        stream(request) {
+            if (response === 1) {
+                const result = request.messages.findLast((message) => message.role === "toolResult");
+                shellSessionId = result?.role === "toolResult"
+                    ? /sessionId: ([0-9a-f-]+)/.exec(result.content)?.[1]
+                    : undefined;
+                expect(shellSessionId).toBeTruthy();
+            }
+            const message = response === 0
+                ? toolUseMessage
+                : response === 1
+                    ? {
+                        ...assistantMessage(),
+                        content: [{
+                            type: "toolCall" as const,
+                            id: "call-poll",
+                            name: "write_stdin",
+                            arguments: { sessionId: shellSessionId, command: "" }
+                        }],
+                        stopReason: "toolUse" as const
+                    }
+                    : finalMessage;
+            response += 1;
+            return (async function* (): AsyncIterable<LlmStreamEvent> {
+                yield { type: "done", message };
+            })();
+        }
+    };
+    const events: JarvixEvent[] = [];
+    const session = new Session(meta, [], new BackgroundTaskManager());
+
+    try {
+        await session.request("run in the background", {
+            llm,
+            config: TEST_CONFIG,
+            emit: (event) => { events.push(event); }
+        });
+
+        const finalDone = events.findLastIndex((event) => event.type === "done");
+        expect(finalDone).toBeGreaterThan(-1);
+        expect(events).toContainEqual(expect.objectContaining({
+            type: "backgroundTask.start",
+            task: expect.objectContaining({
+                id: shellSessionId,
+                command
+            })
+        }));
+        expect(events).toContainEqual(expect.objectContaining({
+            type: "tool.end",
+            toolCallId: "call-background",
+            endReason: "background",
+            data: expect.objectContaining({ status: "timed_out" })
+        }));
+        await vi.waitFor(() => {
+            const laterOutput = events.findIndex((event, index) => (
+                index > finalDone &&
+                event.type === "backgroundTask.output" &&
+                event.taskId === shellSessionId &&
+                event.output.includes("later")
+            ));
+            expect(laterOutput).toBeGreaterThan(finalDone);
+            const toolOutput = events.findIndex((event, index) => (
+                index > finalDone &&
+                event.type === "tool.output"
+            ));
+            expect(toolOutput).toBe(-1);
+            const execCompleted = events.findIndex((event, index) => (
+                index > finalDone &&
+                event.type === "tool.end" &&
+                event.toolCallId === "call-background" &&
+                event.data.status === "completed"
+            ));
+            expect(execCompleted).toBeGreaterThan(finalDone);
+            const writeCompleted = events.findIndex((event, index) => (
+                index > finalDone &&
+                event.type === "tool.end" &&
+                event.toolCallId === "call-poll" &&
+                event.data.status === "completed"
+            ));
+            expect(writeCompleted).toBeGreaterThan(finalDone);
+            const notices = events.filter((event) => (
+                event.type === "system.message" &&
+                event.message.notice?.kind === "background.task_exit" &&
+                event.message.notice.sessionId === shellSessionId
+            ));
+            expect(notices).toHaveLength(1);
+            expect(notices[0]).toMatchObject({
+                message: {
+                    notice: {
+                        unreadCharacters: expect.any(Number)
+                    }
+                }
+            });
+            expect(events).toContainEqual(expect.objectContaining({
+                type: "backgroundTask.end",
+                task: expect.objectContaining({
+                    id: shellSessionId,
+                    status: "completed"
+                })
+            }));
+        }, { timeout: 5_000 });
+        expect(session.snapshot().messages.at(-1)).toMatchObject({
+            role: "system",
+            notice: {
+                kind: "background.task_exit",
+                exitCode: 0
+            }
+        });
+    } finally {
+        session.dispose();
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
 });
 
 function fakeLlm(message: LlmAssistantMessage): LlmAdapter {

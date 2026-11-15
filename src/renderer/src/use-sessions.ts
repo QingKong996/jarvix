@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { JarvixSession, JarvixSessionSummary } from "../../protocol/session.ts";
+import { ingestBackgroundTasks } from "./background-task-store.ts";
 import { beginTurn, failRequest, hydrate, ingest } from "./transcript-store.ts";
 
 const bridge = window.jarvix;
@@ -37,6 +38,7 @@ export function useSessions() {
 
         let cancelled = false;
         const unsubscribe = bridge.onEvents((batch) => {
+            ingestBackgroundTasks(batch.sessionId, batch.events);
             if (batch.sessionId === activeSessionIdRef.current) {
                 ingest(batch.events);
             }

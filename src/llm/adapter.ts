@@ -1,4 +1,11 @@
-import type { LlmMessage, LlmModelInfo, LlmModelRef, LlmReasoningLevel, LlmStreamEvent } from "./types.ts";
+import type {
+    LlmMessage,
+    LlmModelInfo,
+    LlmModelRef,
+    LlmReasoningLevel,
+    LlmStreamEvent,
+    LlmToolDefinition
+} from "./types.ts";
 
 /** One assistant response request. */
 export type LlmRequest = {
@@ -10,6 +17,7 @@ export type LlmRequest = {
     maxTokens?: number;
     /** Provider credential. Adapters that resolve credentials themselves may ignore it. */
     apiKey?: string;
+    tools?: readonly LlmToolDefinition[];
     signal?: AbortSignal;
 };
 
