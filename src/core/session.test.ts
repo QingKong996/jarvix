@@ -224,6 +224,36 @@ test("rejects a second request in the same session", async () => {
     expect(jarvix.loadSession(session.meta.id)?.messages).toHaveLength(2);
 });
 
+test("renames sessions manually and from the first user prompt", async () => {
+    home.path = join(base, "rename-home");
+    const directory = join(home.path, ".jarvix", "sessions");
+    const requests: LlmMessage[][] = [];
+    const jarvix = new Jarvix({
+        llm: fakeLlm('  **"Focused title".**  ', requests),
+        config: TEST_CONFIG
+    });
+    const session = jarvix.createSession({}, SESSION_NAME);
+    await jarvix.request("Explain the session naming flow", session.meta.id);
+
+    const renamed: string[] = [];
+    jarvix.subscribe((event) => {
+        if (event.type === "session.renamed") {
+            renamed.push(event.name);
+        }
+    });
+
+    expect(jarvix.renameSession(session.meta.id, "  Manual title  ")).toBe("Manual title");
+    expect(loadSession(session.meta.id, directory)?.meta.name).toBe("Manual title");
+
+    expect(await jarvix.autoNameSession(session.meta.id)).toBe("Focused title");
+    expect(requests.at(-1)?.[0]).toMatchObject({
+        role: "user",
+        content: "Explain the session naming flow"
+    });
+    expect(loadSession(session.meta.id, directory)?.meta.name).toBe("Focused title");
+    expect(renamed).toEqual(["Manual title", "Focused title"]);
+});
+
 test("creates temporary sessions by default and validates explicit project context", () => {
     home.path = join(base, "project-required-home");
     const jarvix = new Jarvix({ llm: fakeLlm("ok", []), config: TEST_CONFIG });

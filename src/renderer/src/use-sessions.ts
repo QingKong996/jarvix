@@ -21,14 +21,22 @@ export function useSessions() {
     const [ready, setReady] = useState(false);
     const activeSessionIdRef = useRef<string | null>(null);
     const sessionContextRef = useRef<JarvixSessionContext>({});
+    const hasUserMessagesRef = useRef(false);
 
     const updateContextState = useCallback((context: JarvixSessionContext): void => {
         sessionContextRef.current = context;
         setSessionContext(context);
     }, []);
 
+    const updateSessionName = useCallback((sessionId: string, name: string): void => {
+        setSessions((current) => current.map((session) => (
+            session.id === sessionId ? { ...session, name } : session
+        )));
+    }, []);
+
     const activateSession = useCallback((session: JarvixSession | null): void => {
         activeSessionIdRef.current = session?.meta.id ?? null;
+        hasUserMessagesRef.current = session?.messages.some((message) => message.role === "user") ?? false;
         setActiveSessionId(session?.meta.id ?? null);
         updateContextState(session ? sessionContextFrom(session.meta) : {});
         hydrate(session?.messages ?? []);
@@ -65,6 +73,12 @@ export function useSessions() {
         let cancelled = false;
         const unsubscribe = bridge.onEvents((batch) => {
             ingestBackgroundTasks(batch.sessionId, batch.events);
+            for (const event of batch.events) {
+                if (event.type === "session.renamed") {
+                    updateSessionName(batch.sessionId, event.name);
+                    break;
+                }
+            }
             if (batch.sessionId === activeSessionIdRef.current) {
                 ingest(batch.events);
             }
@@ -101,13 +115,14 @@ export function useSessions() {
             cancelled = true;
             unsubscribe();
         };
-    }, [activateSession]);
+    }, [activateSession, updateSessionName]);
 
     const startNewSession = useCallback((projectId?: string | null): void => {
         if (!bridge || !ready || busy) {
             return;
         }
         activeSessionIdRef.current = null;
+        hasUserMessagesRef.current = false;
         setActiveSessionId(null);
         updateContextState(projectId ? { projectId } : {});
         hydrate([]);
@@ -172,6 +187,38 @@ export function useSessions() {
         }
     }, [busy, ready, refreshSessions, updateContextState]);
 
+    const renameSession = useCallback(async (sessionId: string, name: string): Promise<boolean> => {
+        if (!bridge || !ready || busy) {
+            return false;
+        }
+        setBusy(true);
+        try {
+            const renamed = await bridge.renameSession(sessionId, name);
+            updateSessionName(sessionId, renamed);
+            return true;
+        } catch {
+            return false;
+        } finally {
+            setBusy(false);
+        }
+    }, [busy, ready, updateSessionName]);
+
+    const autoNameSession = useCallback(async (sessionId: string): Promise<boolean> => {
+        if (!bridge || !ready || busy) {
+            return false;
+        }
+        setBusy(true);
+        try {
+            const name = await bridge.autoNameSession(sessionId);
+            updateSessionName(sessionId, name);
+            return true;
+        } catch {
+            return false;
+        } finally {
+            setBusy(false);
+        }
+    }, [busy, ready, updateSessionName]);
+
     const selectSession = useCallback(async (sessionId: string): Promise<void> => {
         if (!bridge || !ready || busy || sessionId === activeSessionIdRef.current) {
             return;
@@ -194,22 +241,33 @@ export function useSessions() {
             return;
         }
         setBusy(true);
+        let naming: Promise<unknown> | undefined;
 
         try {
             const sessionId = activeSessionIdRef.current;
+            const shouldAutoName = !hasUserMessagesRef.current;
             if (!sessionId) {
                 const created = await bridge.createSession(sessionContextRef.current);
                 activateSession(created);
                 await refreshSessions();
                 beginTurn(question);
+                hasUserMessagesRef.current = true;
+                if (shouldAutoName) {
+                    naming = bridge.autoNameSession(created.meta.id, question).catch(() => undefined);
+                }
                 await bridge.request(question, created.meta.id);
             } else {
                 beginTurn(question);
+                hasUserMessagesRef.current = true;
+                if (shouldAutoName) {
+                    naming = bridge.autoNameSession(sessionId, question).catch(() => undefined);
+                }
                 await bridge.request(question, sessionId);
             }
         } catch (error) {
             failRequest(error instanceof Error ? error.message : String(error));
         } finally {
+            await naming;
             setBusy(false);
             await refreshSessions();
         }
@@ -225,6 +283,8 @@ export function useSessions() {
         createProject,
         startNewSession,
         updateSessionContext,
+        renameSession,
+        autoNameSession,
         moveSessionToProject,
         selectSession,
         send

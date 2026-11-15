@@ -30,6 +30,14 @@ const bridge: JarvixBridge = {
         IPC_CHANNELS.sessionUpdateContext,
         { sessionId, context }
     ),
+    renameSession: (sessionId, name) => ipcRenderer.invoke(
+        IPC_CHANNELS.sessionRename,
+        { sessionId, name }
+    ),
+    autoNameSession: (sessionId, firstPrompt) => ipcRenderer.invoke(
+        IPC_CHANNELS.sessionAutoName,
+        { sessionId, firstPrompt }
+    ),
     openSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.sessionOpen, sessionId),
     listSessions: () => ipcRenderer.invoke(IPC_CHANNELS.sessionsList)
 };

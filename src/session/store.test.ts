@@ -11,7 +11,8 @@ import {
     listSessionSummaries,
     loadSession,
     sessionFile,
-    updateSessionContext
+    updateSessionContext,
+    updateSessionName
 } from "./store.ts";
 
 const base = mkdtempSync(join(tmpdir(), "jarvix-session-"));
@@ -230,6 +231,22 @@ test("updateSessionContext switches between a project and a custom working direc
         meta: temporary,
         messages: [userMessage]
     });
+});
+
+test("updateSessionName rewrites the header and preserves messages", () => {
+    const directory = join(base, "rename");
+    const created = createSession({ projectId: PROJECT_ID }, SESSION_NAME, directory);
+    appendSessionMessage(created.meta.id, userMessage, directory);
+
+    const meta = updateSessionName(created.meta.id, "  Renamed session  ", directory);
+
+    expect(meta.name).toBe("Renamed session");
+    expect(loadSession(created.meta.id, directory)).toEqual({
+        meta,
+        messages: [userMessage]
+    });
+    expect(listSessionSummaries(directory)[0]?.name).toBe("Renamed session");
+    expect(() => updateSessionName(created.meta.id, "   ", directory)).toThrow();
 });
 
 test("listSessionSummaries sorts by the last message timestamp", () => {

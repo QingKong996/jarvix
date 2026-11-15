@@ -8,7 +8,7 @@ import type { JarvixEvent } from "../protocol/event.ts";
 import { IPC_CHANNELS, type JarvixEventBatch } from "../protocol/ipc.ts";
 import { createProjectInputSchema } from "../protocol/project.ts";
 import type { JarvixSessionContext } from "../protocol/session.ts";
-import { sessionContextSchema } from "../protocol/session.ts";
+import { sessionContextSchema, sessionNameSchema } from "../protocol/session.ts";
 import { configPaths, loadConfig, parseConfig, saveConfig, systemDefaults } from "./config.ts";
 import { createStreamBatcher } from "./stream-batcher.ts";
 import { ModelCatalogService } from "./model-catalog.ts";
@@ -106,6 +106,14 @@ function parseSessionContext(value: unknown): JarvixSessionContext {
     const parsed = sessionContextSchema.safeParse(value ?? {});
     if (!parsed.success) {
         throw new Error("Invalid session context");
+    }
+    return parsed.data;
+}
+
+function parseSessionName(value: unknown): string {
+    const parsed = sessionNameSchema.safeParse(value);
+    if (!parsed.success) {
+        throw new Error("Invalid session name");
     }
     return parsed.data;
 }
@@ -220,6 +228,27 @@ ipcMain.handle(IPC_CHANNELS.sessionUpdateContext, (event, payload: unknown) => {
         requireSessionId(sessionId),
         parseSessionContext(context)
     );
+});
+
+ipcMain.handle(IPC_CHANNELS.sessionRename, (event, payload: unknown) => {
+    assertSender(event);
+    if (typeof payload !== "object" || payload === null) {
+        throw new Error("Invalid session rename payload");
+    }
+    const { sessionId, name } = payload as Record<string, unknown>;
+    return jarvix.renameSession(requireSessionId(sessionId), parseSessionName(name));
+});
+
+ipcMain.handle(IPC_CHANNELS.sessionAutoName, (event, payload: unknown) => {
+    assertSender(event);
+    if (typeof payload !== "object" || payload === null) {
+        throw new Error("Invalid session auto-name payload");
+    }
+    const { sessionId, firstPrompt } = payload as Record<string, unknown>;
+    if (firstPrompt !== undefined && typeof firstPrompt !== "string") {
+        throw new Error("Invalid first prompt");
+    }
+    return jarvix.autoNameSession(requireSessionId(sessionId), firstPrompt);
 });
 
 ipcMain.handle(IPC_CHANNELS.sessionOpen, (event, sessionId: unknown) => {
