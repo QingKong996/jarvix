@@ -30,6 +30,7 @@ const MAX_TOOL_ROUNDS = 32;
 export type SessionRuntime = {
     llm: LlmAdapter;
     config: JarvixConfig;
+    workingDirectories?: readonly string[];
     emit(event: JarvixEvent): void;
 };
 
@@ -87,7 +88,7 @@ export class Session {
                 const stream = runtime.llm.stream({
                     model,
                     messages: [...this.history],
-                    systemPrompt: SYSTEM_PROMPT,
+                    systemPrompt: systemPromptFor(runtime.workingDirectories),
                     reasoning: resolveReasoningLevel(definition, runtime.config.reasoning),
                     apiKey: provider?.apiKey,
                     tools: this.tools.definitions
@@ -299,6 +300,19 @@ export class Session {
             { cause: lastError }
         );
     }
+}
+
+function systemPromptFor(workingDirectories: readonly string[] = []): string {
+    if (workingDirectories.length === 0) {
+        return SYSTEM_PROMPT;
+    }
+    return [
+        SYSTEM_PROMPT,
+        "",
+        "Session working directories:",
+        ...workingDirectories.map((directory) => `- ${directory}`),
+        "Use one of these directories as cwd for shell commands when appropriate."
+    ].join("\n");
 }
 
 function failedToolResult(toolCall: LlmToolCallBlock, output: string): ToolExecutionResult {

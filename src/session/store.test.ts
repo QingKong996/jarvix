@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterAll, expect, test } from "vitest";
 import type { LlmAssistantMessage, LlmUserMessage } from "../llm/types.ts";
 import type { JarvixSessionMeta } from "../protocol/session.ts";
@@ -10,11 +10,13 @@ import {
     createSession,
     listSessionSummaries,
     loadSession,
-    sessionFile
+    sessionFile,
+    updateSessionContext
 } from "./store.ts";
 
 const base = mkdtempSync(join(tmpdir(), "jarvix-session-"));
 const SESSION_NAME = "Untitled session";
+const PROJECT_ID = "10000000-0000-4000-8000-000000000001";
 
 const userMessage: LlmUserMessage = {
     role: "user",
@@ -55,14 +57,15 @@ test("sessionFile places <id>.jsonl in the given directory", () => {
     expect(sessionFile("abc", base)).toBe(join(base, "abc.jsonl"));
 });
 
-test("createSession writes a v1 header to a <uuid>.jsonl file", () => {
+test("createSession writes a v2 header to a <uuid>.jsonl file", () => {
     const directory = join(base, "create");
-    const session = createSession(SESSION_NAME, directory);
+    const session = createSession({ projectId: PROJECT_ID }, SESSION_NAME, directory);
 
     expect(session.messages).toEqual([]);
     expect(session.meta.type).toBe("session");
     expect(session.meta.version).toBe(SESSION_FORMAT_VERSION);
     expect(session.meta.name).toBe(SESSION_NAME);
+    expect(session.meta.projectId).toBe(PROJECT_ID);
     expect(typeof session.meta.createdAt).toBe("number");
 
     const fileName = `${session.meta.id}.jsonl`;
@@ -74,9 +77,21 @@ test("createSession writes a v1 header to a <uuid>.jsonl file", () => {
     expect(JSON.parse(lines[0] ?? "")).toEqual(session.meta);
 });
 
+test("createSession defaults to a temporary session", () => {
+    const directory = join(base, "temporary");
+    const session = createSession({}, SESSION_NAME, directory);
+
+    expect(session.meta.projectId).toBeUndefined();
+    expect(session.meta.workingDirectory).toBeUndefined();
+    const summary = listSessionSummaries(directory)[0];
+    expect(summary?.id).toBe(session.meta.id);
+    expect(summary?.projectId).toBeUndefined();
+    expect(summary?.workingDirectory).toBeUndefined();
+});
+
 test.each([undefined, "", "   "])("createSession gives %j the default name", (name) => {
     const directory = join(base, "default-name");
-    const session = createSession(name, directory);
+    const session = createSession({ projectId: PROJECT_ID }, name, directory);
 
     expect(session.meta.name).toBe("未命名会话");
     expect(loadSession(session.meta.id, directory)?.meta.name).toBe("未命名会话");
@@ -84,7 +99,7 @@ test.each([undefined, "", "   "])("createSession gives %j the default name", (na
 
 test("appendSessionMessage then loadSession round-trips messages and meta", () => {
     const directory = join(base, "round-trip");
-    const created = createSession(SESSION_NAME, directory);
+    const created = createSession({ projectId: PROJECT_ID }, SESSION_NAME, directory);
 
     appendSessionMessage(created.meta.id, userMessage, directory);
     appendSessionMessage(created.meta.id, assistantMessage, directory);
@@ -102,7 +117,7 @@ test("appendSessionMessage then loadSession round-trips messages and meta", () =
 
 test("loadSession ignores corrupt and blank lines between valid records", () => {
     const directory = join(base, "corrupt");
-    const created = createSession(SESSION_NAME, directory);
+    const created = createSession({ projectId: PROJECT_ID }, SESSION_NAME, directory);
     const file = sessionFile(created.meta.id, directory);
 
     appendSessionMessage(created.meta.id, userMessage, directory);
@@ -164,7 +179,7 @@ test("listSessionSummaries reads names from headers without loading messages", (
     const past = new Date(Date.now() - 60_000);
     utimesSync(sessionFile(firstMeta.id, directory), past, past);
 
-    const second = createSession("Another session", directory);
+    const second = createSession({ projectId: PROJECT_ID }, "Another session", directory);
     mkdirSync(join(directory, "decoy.jsonl"));
 
     const summaries = listSessionSummaries(directory);
@@ -179,8 +194,78 @@ test("listSessionSummaries reads names from headers without loading messages", (
         name: "Another session",
         createdAt: second.meta.createdAt
     });
-    expect(Object.keys(summaries[0]!).sort()).toEqual(["createdAt", "id", "name", "updatedAt"]);
+    expect(Object.keys(summaries[0]!).sort()).toEqual([
+        "createdAt",
+        "id",
+        "name",
+        "projectId",
+        "updatedAt"
+    ]);
     expect(listSessionSummaries(join(base, "missing-summaries"))).toEqual([]);
+});
+
+test("updateSessionContext switches between a project and a custom working directory", () => {
+    const directory = join(base, "context");
+    const workspace = join(base, "custom-workspace");
+    const created = createSession({}, SESSION_NAME, directory);
+    appendSessionMessage(created.meta.id, userMessage, directory);
+
+    const custom = updateSessionContext(created.meta.id, {
+        workingDirectory: workspace
+    }, directory);
+    expect(custom.workingDirectory).toBe(resolve(workspace));
+    expect(custom.projectId).toBeUndefined();
+
+    const project = updateSessionContext(created.meta.id, {
+        projectId: PROJECT_ID
+    }, directory);
+    expect(project.projectId).toBe(PROJECT_ID);
+    expect(project.workingDirectory).toBeUndefined();
+    expect(loadSession(created.meta.id, directory)?.meta).toEqual(project);
+
+    const temporary = updateSessionContext(created.meta.id, {}, directory);
+    expect(temporary.projectId).toBeUndefined();
+    expect(temporary.workingDirectory).toBeUndefined();
+    expect(loadSession(created.meta.id, directory)).toEqual({
+        meta: temporary,
+        messages: [userMessage]
+    });
+});
+
+test("listSessionSummaries sorts by the last message timestamp", () => {
+    const directory = join(base, "message-sort");
+    const older = createSession({ projectId: PROJECT_ID }, "Older activity", directory);
+    const newer = createSession({ projectId: PROJECT_ID }, "Newer activity", directory);
+    appendSessionMessage(older.meta.id, {
+        ...userMessage,
+        timestamp: 1_700_000_100_000
+    }, directory);
+    appendSessionMessage(newer.meta.id, {
+        ...userMessage,
+        timestamp: 1_700_000_200_000
+    }, directory);
+
+    const past = new Date(Date.now() - 120_000);
+    const future = new Date(Date.now() + 120_000);
+    utimesSync(sessionFile(older.meta.id, directory), future, future);
+    utimesSync(sessionFile(newer.meta.id, directory), past, past);
+
+    const summaries = listSessionSummaries(directory);
+    expect(summaries.map((summary) => summary.id)).toEqual([newer.meta.id, older.meta.id]);
+    expect(summaries.map((summary) => summary.updatedAt)).toEqual([1_700_000_200_000, 1_700_000_100_000]);
+});
+
+test("listSessionSummaries finds a last message larger than the tail chunk", () => {
+    const directory = join(base, "large-tail");
+    const session = createSession({ projectId: PROJECT_ID }, "Large message", directory);
+    const timestamp = 1_700_000_300_000;
+    appendSessionMessage(session.meta.id, {
+        ...userMessage,
+        content: "x".repeat(70 * 1024),
+        timestamp
+    }, directory);
+
+    expect(listSessionSummaries(directory)[0]?.updatedAt).toBe(timestamp);
 });
 
 test("loadSession rejects headers without a non-empty name", () => {

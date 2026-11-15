@@ -68,6 +68,20 @@ test("uses the configured model, provider credential and reasoning for the reque
     }));
 });
 
+test("adds the session working directories to the system prompt", async () => {
+    const stream = vi.fn(() => (async function* (): AsyncIterable<LlmStreamEvent> {})());
+    await new Session(meta).request("hello", {
+        llm: { getModel: () => MODEL, stream },
+        config: TEST_CONFIG,
+        workingDirectories: ["C:\\workspace-a", "C:\\workspace-b"],
+        emit: () => undefined
+    });
+
+    expect(stream).toHaveBeenCalledWith(expect.objectContaining({
+        systemPrompt: expect.stringContaining("C:\\workspace-a\n- C:\\workspace-b")
+    }));
+});
+
 test("retries persistence once and dequeues the message on success", async () => {
     persist.mockImplementationOnce(() => {
         throw new Error("disk full");

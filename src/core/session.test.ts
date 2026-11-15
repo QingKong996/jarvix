@@ -59,6 +59,10 @@ function assistantMessage(text: string): LlmAssistantMessage {
     };
 }
 
+function createProject(jarvix: Jarvix, name = "Test project") {
+    return jarvix.createProject(name, [join(home.path, "workspace")]);
+}
+
 function fakeLlm(reply: string, seen: LlmMessage[][]): LlmAdapter {
     return {
         getModel: () => MODEL,
@@ -102,7 +106,8 @@ test("persists each turn and resumes the stored history for the next request", a
     const requests: LlmMessage[][] = [];
 
     const first = new Jarvix({ llm: fakeLlm("first reply", requests), config: TEST_CONFIG });
-    const firstSession = first.createSession(SESSION_NAME);
+    const project = createProject(first);
+    const firstSession = first.createSession({ projectId: project.id }, SESSION_NAME);
     await first.request("first question", firstSession.meta.id);
 
     const stored = loadSession(firstSession.meta.id, directory);
@@ -129,10 +134,11 @@ test.each<{ language: Language; name: string }>([
     home.path = join(base, `lazy-${language}-home`);
     const directory = join(home.path, ".jarvix", "sessions");
     const jarvix = new Jarvix({ llm: fakeLlm("ok", []), config: { ...TEST_CONFIG, language } });
+    const project = createProject(jarvix);
 
     expect(jarvix.listSessions()).toEqual([]);
 
-    const created = jarvix.createSession();
+    const created = jarvix.createSession({ projectId: project.id });
     expect(created.meta.name).toBe(name);
     await jarvix.request("hello", created.meta.id);
 
@@ -145,12 +151,13 @@ test.each<{ language: Language; name: string }>([
 test("uses the current configured language when creating a session with a blank name", () => {
     home.path = join(base, "default-name-home");
     const jarvix = new Jarvix({ llm: fakeLlm("ok", []), config: { language: "zh" } });
+    const project = createProject(jarvix);
 
-    expect(jarvix.createSession("   ").meta.name).toBe("未命名会话");
+    expect(jarvix.createSession({ projectId: project.id }, "   ").meta.name).toBe("未命名会话");
 
     jarvix.setConfig({ language: "en" });
 
-    expect(jarvix.createSession("").meta.name).toBe("Untitled session");
+    expect(jarvix.createSession({ projectId: project.id }, "").meta.name).toBe("Untitled session");
 });
 
 test("runs separate sessions in parallel with isolated histories", async () => {
@@ -162,8 +169,9 @@ test("runs separate sessions in parallel with isolated histories", async () => {
         release = resolve;
     });
     const jarvix = new Jarvix({ llm: gatedLlm(requests, gate), config: TEST_CONFIG });
-    const first = jarvix.createSession("First session");
-    const second = jarvix.createSession("Second session");
+    const project = createProject(jarvix);
+    const first = jarvix.createSession({ projectId: project.id }, "First session");
+    const second = jarvix.createSession({ projectId: project.id }, "Second session");
     expect(jarvix.listSessions()).toHaveLength(2);
     const eventSessions = new Set<string>();
     jarvix.subscribe((_event, sessionId) => {
@@ -202,7 +210,8 @@ test("rejects a second request in the same session", async () => {
         release = resolve;
     });
     const jarvix = new Jarvix({ llm: gatedLlm(requests, gate), config: TEST_CONFIG });
-    const session = jarvix.createSession(SESSION_NAME);
+    const project = createProject(jarvix);
+    const session = jarvix.createSession({ projectId: project.id }, SESSION_NAME);
 
     const firstRequest = jarvix.request("first", session.meta.id);
     await vi.waitFor(() => expect(requests).toHaveLength(1));
@@ -213,4 +222,39 @@ test("rejects a second request in the same session", async () => {
     release();
     await firstRequest;
     expect(jarvix.loadSession(session.meta.id)?.messages).toHaveLength(2);
+});
+
+test("creates temporary sessions by default and validates explicit project context", () => {
+    home.path = join(base, "project-required-home");
+    const jarvix = new Jarvix({ llm: fakeLlm("ok", []), config: TEST_CONFIG });
+
+    expect(() => jarvix.createSession({ projectId: "30000000-0000-4000-8000-000000000003" }))
+        .toThrow("Project not found");
+
+    const temporary = jarvix.createSession();
+    expect(temporary.meta.projectId).toBeUndefined();
+    expect(jarvix.listSessions().find((item) => item.id === temporary.meta.id)?.projectId).toBeUndefined();
+
+    const project = createProject(jarvix);
+    const session = jarvix.createSession({ projectId: project.id }, SESSION_NAME);
+    expect(session.meta.projectId).toBe(project.id);
+    expect(jarvix.listSessions().find((item) => item.id === session.meta.id)?.projectId).toBe(project.id);
+
+    jarvix.updateSessionContext(session.meta.id, {});
+    expect(jarvix.loadSession(session.meta.id)?.meta.projectId).toBeUndefined();
+    expect(jarvix.listSessions().find((item) => item.id === session.meta.id)?.projectId).toBeUndefined();
+});
+
+test("updates a session to a custom working directory", () => {
+    home.path = join(base, "custom-context-home");
+    const jarvix = new Jarvix({ llm: fakeLlm("ok", []), config: TEST_CONFIG });
+    const session = jarvix.createSession();
+    const workspace = join(home.path, "custom-workspace");
+
+    jarvix.updateSessionContext(session.meta.id, { workingDirectory: workspace });
+
+    expect(jarvix.loadSession(session.meta.id)?.meta.workingDirectory).toBe(workspace);
+    const summary = jarvix.listSessions()[0];
+    expect(summary?.projectId).toBeUndefined();
+    expect(summary?.workingDirectory).toBe(workspace);
 });

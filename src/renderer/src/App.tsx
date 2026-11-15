@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 import { Composer } from "./components/Composer.tsx";
+import { CreateProjectDialog } from "./components/CreateProjectDialog.tsx";
 import { RightSidebar } from "./components/RightSidebar.tsx";
 import { SettingsDialog } from "./components/SettingsDialog.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
@@ -14,6 +15,7 @@ const bridge = window.jarvix;
 const LAYOUT_ID = "jarvix:main";
 
 export function App() {
+    const [createProjectOpen, setCreateProjectOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
     const [config, setConfig] = useState<JarvixConfig | null>(null);
@@ -22,11 +24,16 @@ export function App() {
         onlySaveAfterUserInteractions: true
     });
     const {
+        projects,
         sessions,
+        sessionContext,
         activeSessionId,
         busy,
         ready,
-        createSession,
+        createProject,
+        startNewSession,
+        updateSessionContext,
+        moveSessionToProject,
         selectSession,
         send
     } = useSessions();
@@ -48,6 +55,10 @@ export function App() {
 
     const openSettings = useCallback(() => {
         setSettingsOpen(true);
+    }, []);
+
+    const openCreateProject = useCallback(() => {
+        setCreateProjectOpen(true);
     }, []);
 
     const toggleRightSidebar = useCallback(() => {
@@ -73,11 +84,14 @@ export function App() {
                             style={{ overflow: "hidden" }}
                         >
                             <Sidebar
+                                projects={projects}
                                 sessions={sessions}
                                 activeSessionId={activeSessionId}
                                 busy={busy || !ready}
                                 onSelectSession={selectSession}
-                                onNewSession={createSession}
+                                onNewProject={openCreateProject}
+                                onNewSession={startNewSession}
+                                onMoveSession={moveSessionToProject}
                                 onOpenSettings={openSettings}
                             />
                         </ResizablePanel>
@@ -87,7 +101,15 @@ export function App() {
                         <ResizablePanel id="content" minSize="50%" style={{ overflow: "hidden" }}>
                             <main className="flex h-full min-h-0 min-w-0 flex-col">
                                 <Transcript key={activeSessionId ?? "new"} sessionId={activeSessionId} />
-                                <Composer disabled={!bridge || !ready || busy} onSubmit={send} config={config} onConfigChange={handleConfigChange} />
+                                <Composer
+                                    disabled={!bridge || !ready || busy}
+                                    projects={projects}
+                                    sessionContext={sessionContext}
+                                    onSubmit={send}
+                                    config={config}
+                                    onConfigChange={handleConfigChange}
+                                    onContextChange={updateSessionContext}
+                                />
                             </main>
                         </ResizablePanel>
                     </ResizablePanelGroup>
@@ -98,6 +120,12 @@ export function App() {
                     onToggle={toggleRightSidebar}
                 />
             </div>
+
+            <CreateProjectDialog
+                open={createProjectOpen}
+                onOpenChange={setCreateProjectOpen}
+                onCreate={createProject}
+            />
 
             <SettingsDialog
                 open={settingsOpen}

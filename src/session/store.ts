@@ -2,30 +2,36 @@ import { randomUUID } from "node:crypto";
 import {
     appendFileSync,
     closeSync,
+    fstatSync,
     mkdirSync,
     openSync,
     readFileSync,
     readdirSync,
     readSync,
+    renameSync,
     statSync,
+    unlinkSync,
     writeFileSync
 } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { i18n } from "../i18n/index.ts";
 import type { LlmMessage } from "../llm/types.ts";
 import {
     type JarvixSession,
+    type JarvixSessionContext,
     type JarvixSessionMeta,
-    type JarvixSessionSummary
+    type JarvixSessionSummary,
+    sessionContextSchema
 } from "../protocol/session.ts";
 
-export const SESSION_FORMAT_VERSION = 1;
+export const SESSION_FORMAT_VERSION = 2;
 
 const SESSION_FILE_EXTENSION = ".jsonl";
 const SESSION_FILE_MODE = 0o600;
 const SESSION_HEADER_CHUNK_SIZE = 4 * 1024;
+const SESSION_TAIL_CHUNK_SIZE = 64 * 1024;
 
 type SessionMessageRecord = {
     type: "message";
@@ -39,14 +45,20 @@ export function sessionFile(id: string, directory = defaultSessionDirectory()): 
     return join(directory, `${id}${SESSION_FILE_EXTENSION}`);
 }
 
-/** Create a new empty session on disk and return it. */
-export function createSession(name = "", directory = defaultSessionDirectory()): JarvixSession {
+/** Create a new empty session with an optional project or custom working directory. */
+export function createSession(
+    context: JarvixSessionContext = {},
+    name = "",
+    directory = defaultSessionDirectory()
+): JarvixSession {
+    const normalizedContext = normalizeSessionContext(context);
     const meta: JarvixSessionMeta = {
         type: "session",
         version: SESSION_FORMAT_VERSION,
         id: randomUUID(),
         name: name.trim() || i18n.t("sessions.untitled"),
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        ...normalizedContext
     };
 
     mkdirSync(directory, { recursive: true });
@@ -56,6 +68,48 @@ export function createSession(name = "", directory = defaultSessionDirectory()):
     });
 
     return { meta, messages: [] };
+}
+
+/** Replace a session's project or custom working directory. */
+export function updateSessionContext(
+    id: string,
+    context: JarvixSessionContext,
+    directory = defaultSessionDirectory()
+): JarvixSessionMeta {
+    const file = sessionFile(id, directory);
+    const current = readSessionMeta(file);
+    if (!current || current.id !== id) {
+        throw new Error(`Session not found: ${id}`);
+    }
+
+    const normalizedContext = normalizeSessionContext(context);
+    const meta: JarvixSessionMeta = {
+        ...current,
+        version: SESSION_FORMAT_VERSION
+    };
+    delete meta.projectId;
+    delete meta.workingDirectory;
+    Object.assign(meta, normalizedContext);
+
+    const content = readFileSync(file, "utf8");
+    const newline = content.indexOf("\n");
+    const remainder = newline === -1 ? "" : content.slice(newline + 1);
+    const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+        writeFileSync(temporary, `${serializeRecord(meta)}${remainder}`, {
+            encoding: "utf8",
+            mode: SESSION_FILE_MODE
+        });
+        renameSync(temporary, file);
+    } catch (error) {
+        try {
+            unlinkSync(temporary);
+        } catch {
+            // The temporary file may not have been created.
+        }
+        throw error;
+    }
+    return meta;
 }
 
 /** Append one message to an existing session file as a new JSONL line. */
@@ -95,7 +149,7 @@ export function loadSession(id: string, directory = defaultSessionDirectory()): 
     return meta ? { meta, messages } : null;
 }
 
-/** List session summaries newest first by reading only each session header. */
+/** List session summaries newest first by their last message timestamp. */
 export function listSessionSummaries(directory = defaultSessionDirectory()): JarvixSessionSummary[] {
     let entries: string[];
     try {
@@ -104,7 +158,7 @@ export function listSessionSummaries(directory = defaultSessionDirectory()): Jar
         return [];
     }
 
-    const candidates: { id: string; file: string; updatedAt: number }[] = [];
+    const candidates: { id: string; file: string }[] = [];
     for (const entry of entries) {
         if (!entry.endsWith(SESSION_FILE_EXTENSION)) {
             continue;
@@ -121,27 +175,27 @@ export function listSessionSummaries(directory = defaultSessionDirectory()): Jar
         }
         candidates.push({
             id: entry.slice(0, -SESSION_FILE_EXTENSION.length),
-            file,
-            updatedAt: stats.mtimeMs
+            file
         });
     }
 
-    candidates.sort((left, right) => right.updatedAt - left.updatedAt);
     const summaries: JarvixSessionSummary[] = [];
     for (const candidate of candidates) {
-        const summary = readSessionSummary(candidate.file, candidate.id, candidate.updatedAt);
+        const summary = readSessionSummary(candidate.file, candidate.id);
         if (summary) {
             summaries.push(summary);
         }
     }
-    return summaries;
+    return summaries.sort(
+        (left, right) => right.updatedAt - left.updatedAt || right.createdAt - left.createdAt
+    );
 }
 
 function defaultSessionDirectory(): string {
     return join(homedir(), ".jarvix", "sessions");
 }
 
-function readSessionSummary(file: string, id: string, updatedAt: number): JarvixSessionSummary | null {
+function readSessionSummary(file: string, id: string): JarvixSessionSummary | null {
     const meta = readSessionMeta(file);
     if (!meta || meta.id !== id) {
         return null;
@@ -150,8 +204,49 @@ function readSessionSummary(file: string, id: string, updatedAt: number): Jarvix
         id: meta.id,
         name: meta.name,
         createdAt: meta.createdAt,
-        updatedAt
+        updatedAt: readLastMessageTimestamp(file) ?? meta.createdAt,
+        ...(meta.projectId ? { projectId: meta.projectId } : {}),
+        ...(meta.workingDirectory ? { workingDirectory: meta.workingDirectory } : {})
     };
+}
+
+function readLastMessageTimestamp(file: string): number | null {
+    let descriptor: number;
+    try {
+        descriptor = openSync(file, "r");
+    } catch {
+        return null;
+    }
+
+    try {
+        let position = fstatSync(descriptor).size;
+        let suffix = Buffer.alloc(0);
+        while (position > 0) {
+            const length = Math.min(SESSION_TAIL_CHUNK_SIZE, position);
+            position -= length;
+            const chunk = Buffer.allocUnsafe(length);
+            readSync(descriptor, chunk, 0, length, position);
+            suffix = Buffer.concat([chunk, suffix]);
+
+            let lineEnd = suffix.length;
+            while (lineEnd > 0) {
+                const lineStart = suffix.lastIndexOf(0x0a, lineEnd - 1) + 1;
+                if (lineStart === 0 && position > 0) {
+                    break;
+                }
+                const record = parseRecord(suffix.subarray(lineStart, lineEnd).toString("utf8"));
+                if (isSessionMessage(record)) {
+                    return record.message.timestamp;
+                }
+                lineEnd = lineStart - 1;
+            }
+        }
+        return null;
+    } catch {
+        return null;
+    } finally {
+        closeSync(descriptor);
+    }
 }
 
 /** Read only the first JSONL record, which holds the session meta. */
@@ -223,13 +318,25 @@ function parseSessionMeta(value: unknown): JarvixSessionMeta | null {
     if (name.length === 0) {
         return null;
     }
+    const parsedContext = sessionContextSchema.safeParse({
+        projectId: typeof value.projectId === "string" ? value.projectId : undefined,
+        workingDirectory: typeof value.workingDirectory === "string" ? value.workingDirectory : undefined
+    });
     return {
         type: "session",
         version: value.version,
         id: value.id,
         name,
-        createdAt: value.createdAt
+        createdAt: value.createdAt,
+        ...(parsedContext.success ? parsedContext.data : {})
     };
+}
+
+function normalizeSessionContext(context: JarvixSessionContext): JarvixSessionContext {
+    const normalized = sessionContextSchema.parse(context);
+    return normalized.workingDirectory
+        ? { workingDirectory: resolve(normalized.workingDirectory) }
+        : normalized;
 }
 
 function isSessionMessage(value: unknown): value is SessionMessageRecord {

@@ -4,10 +4,28 @@
         "settings": "设置"
     },
     "sessions": {
-        "new": "新对话",
-        "title": "会话",
-        "empty": "暂无会话",
+        "new": "新建会话",
         "untitled": "未命名会话"
+    },
+    "projects": {
+        "title": "项目",
+        "new": "新建项目",
+        "empty": "暂无项目",
+        "temporary": "临时会话",
+        "newSession": "新会话",
+        "newSessionIn": "在 {{name}} 中新建会话",
+        "createTitle": "新建项目",
+        "workingDirectoriesDescription": "添加一个或多个工作目录，新建会话将归属于该项目。",
+        "name": "项目名称",
+        "namePlaceholder": "例如：jarvix",
+        "workingDirectories": "工作目录",
+        "addDirectories": "添加目录",
+        "noDirectories": "尚未添加工作目录",
+        "removeDirectory": "移除工作目录",
+        "chooseDirectoryFailed": "无法打开目录选择器。",
+        "createFailed": "无法创建项目。",
+        "create": "创建",
+        "cancel": "取消"
     },
     "composer": {
         "placeholder": "输入问题...",
@@ -22,6 +40,14 @@
             "high": "高",
             "xhigh": "极高",
             "max": "最高"
+        },
+        "contextDialog": {
+            "title": "选择项目或工作目录",
+            "description": "项目会使用其全部工作目录；也可以为当前会话指定自定义目录。",
+            "customDirectory": "自定义工作目录",
+            "chooseDirectory": "选择目录",
+            "chooseDirectoryFailed": "无法选择工作目录。",
+            "updateFailed": "无法更新会话上下文。"
         }
     },
     "transcript": {
