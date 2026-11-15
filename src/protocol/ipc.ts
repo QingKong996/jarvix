@@ -17,6 +17,8 @@ export const IPC_CHANNELS = {
     pickWorkingDirectory: "jarvix:working-directory:pick",
     sessionCreate: "jarvix:session:create",
     sessionUpdateContext: "jarvix:session:update-context",
+    sessionRename: "jarvix:session:rename",
+    sessionAutoName: "jarvix:session:auto-name",
     sessionOpen: "jarvix:session:open",
     sessionsList: "jarvix:sessions:list"
 } as const;
@@ -42,6 +44,8 @@ export type JarvixBridge = {
         sessionId: string,
         context: JarvixSessionContext
     ): Promise<JarvixSessionContext>;
+    renameSession(sessionId: string, name: string): Promise<string>;
+    autoNameSession(sessionId: string, firstPrompt?: string): Promise<string>;
     openSession(sessionId: string): Promise<JarvixSession | null>;
     listSessions(): Promise<JarvixSessionSummary[]>;
 };

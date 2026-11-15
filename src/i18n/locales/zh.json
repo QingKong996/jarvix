@@ -5,7 +5,15 @@
     },
     "sessions": {
         "new": "新建会话",
-        "untitled": "未命名会话"
+        "untitled": "未命名会话",
+        "rename": "重命名",
+        "autoName": "自动命名",
+        "renameTitle": "重命名会话",
+        "name": "会话名称",
+        "namePlaceholder": "输入会话名称",
+        "renameFailed": "无法重命名会话。",
+        "save": "保存",
+        "cancel": "取消"
     },
     "projects": {
         "title": "项目",

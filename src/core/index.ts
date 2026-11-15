@@ -8,13 +8,14 @@ import type {
     JarvixSessionContext,
     JarvixSessionSummary
 } from "../protocol/session.ts";
-import { sessionContextSchema } from "../protocol/session.ts";
+import { sessionContextSchema, sessionNameSchema } from "../protocol/session.ts";
 import {
     createProject as createStoredProject,
     listProjects as listStoredProjects,
     loadProject
 } from "../project/store.ts";
 import { SessionManager } from "../session/manager.ts";
+import { generateSessionName } from "../session/naming.ts";
 
 export type JarvixOptions = {
     llm?: LlmAdapter;
@@ -70,6 +71,28 @@ export class Jarvix {
             throw new Error(`Project not found: ${normalizedContext.projectId}`);
         }
         return this.sessions.updateContext(sessionId, normalizedContext);
+    }
+
+    renameSession(sessionId: string, name: string): string {
+        const renamed = this.sessions.rename(sessionId, sessionNameSchema.parse(name));
+        this.emit(sessionId, { type: "session.renamed", name: renamed });
+        return renamed;
+    }
+
+    async autoNameSession(sessionId: string, firstPrompt?: string): Promise<string> {
+        const session = this.sessions.require(sessionId);
+        const currentName = session.meta.name;
+        const prompt = firstPrompt?.trim() || session.snapshot().messages
+            .find((message) => message.role === "user")?.content;
+        if (!prompt) {
+            throw new Error("The session has no user prompt to name");
+        }
+
+        const name = await generateSessionName(this.llm, this.config, prompt);
+        if (session.meta.name !== currentName) {
+            return session.meta.name;
+        }
+        return this.renameSession(sessionId, name);
     }
 
     private emit(sessionId: string, event: JarvixEvent): void {

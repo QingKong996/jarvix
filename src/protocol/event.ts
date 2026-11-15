@@ -39,6 +39,9 @@ export type JarvixEvent = LlmStreamEvent
   } | {
     type: "request.error";
     error: string;
+  } | {
+    type: "session.renamed";
+    name: string;
   };
 
 export type JarvixListener = (jarvixEvent: JarvixEvent, sessionId: string) => void;

@@ -1,6 +1,10 @@
 import { z } from "zod";
 import type { LlmMessage } from "../llm/types.ts";
 
+export const SESSION_NAME_MAX_LENGTH = 80;
+
+export const sessionNameSchema = z.string().trim().min(1).max(SESSION_NAME_MAX_LENGTH);
+
 /** Project or one-off working directory associated with a session. */
 export const sessionContextSchema = z
     .object({

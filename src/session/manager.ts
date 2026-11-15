@@ -9,7 +9,8 @@ import {
     createSession,
     listSessionSummaries,
     loadSession,
-    updateSessionContext
+    updateSessionContext,
+    updateSessionName
 } from "./store.ts";
 
 /** Owns the session instances currently loaded by the app. */
@@ -40,6 +41,13 @@ export class SessionManager {
         const updated = sessionContextFrom(meta);
         this.applyContext(session, updated);
         return updated;
+    }
+
+    rename(id: string, name: string): string {
+        const session = this.require(id);
+        const meta = updateSessionName(id, name);
+        session.meta.name = meta.name;
+        return meta.name;
     }
 
     require(id: string): Session {

@@ -5,7 +5,15 @@
     },
     "sessions": {
         "new": "New session",
-        "untitled": "Untitled session"
+        "untitled": "Untitled session",
+        "rename": "Rename",
+        "autoName": "Auto name",
+        "renameTitle": "Rename session",
+        "name": "Session name",
+        "namePlaceholder": "Enter a session name",
+        "renameFailed": "Could not rename the session.",
+        "save": "Save",
+        "cancel": "Cancel"
     },
     "projects": {
         "title": "Projects",

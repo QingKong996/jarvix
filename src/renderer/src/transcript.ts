@@ -187,6 +187,7 @@ function applyEvent(state: TranscriptState, event: JarvixEvent): TranscriptState
         case "backgroundTask.end":
         case "backgroundTask.consume":
         case "log":
+        case "session.renamed":
             return state;
         case "tool.start":
             return updateToolBlock(state, event.toolCallId, (block) => ({

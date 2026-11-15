@@ -37,6 +37,8 @@ export function App() {
         createProject,
         startNewSession,
         updateSessionContext,
+        renameSession,
+        autoNameSession,
         moveSessionToProject,
         selectSession,
         send
@@ -96,6 +98,8 @@ export function App() {
                                 onNewProject={openCreateProject}
                                 onNewSession={startNewSession}
                                 onMoveSession={moveSessionToProject}
+                                onRenameSession={renameSession}
+                                onAutoNameSession={autoNameSession}
                                 onOpenSettings={openSettings}
                             />
                         </ResizablePanel>

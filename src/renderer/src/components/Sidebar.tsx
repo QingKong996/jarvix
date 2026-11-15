@@ -11,12 +11,29 @@ import {
     type DragEndEvent,
     type DragStartEvent
 } from "@dnd-kit/core";
-import { ChevronRight, Folder, FolderPlus, Inbox, MessageSquare, Plus, Settings } from "lucide-react";
+import {
+    ChevronRight,
+    Folder,
+    FolderPlus,
+    Inbox,
+    MessageSquare,
+    Pencil,
+    Plus,
+    Settings,
+    Sparkles
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { JarvixProject } from "../../../protocol/project.ts";
 import type { JarvixSessionSummary } from "../../../protocol/session.ts";
+import { RenameSessionDialog } from "./RenameSessionDialog.tsx";
 import { Button } from "./ui/button.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible.tsx";
+import {
+    ContextMenu,
+    ContextMenuContent,
+    ContextMenuItem,
+    ContextMenuTrigger
+} from "./ui/context-menu.tsx";
 
 type SidebarProps = {
     projects: JarvixProject[];
@@ -27,6 +44,8 @@ type SidebarProps = {
     onNewProject(): void;
     onNewSession(projectId?: string | null): void;
     onMoveSession(sessionId: string, projectId: string | null): void;
+    onRenameSession(sessionId: string, name: string): Promise<boolean>;
+    onAutoNameSession(sessionId: string): Promise<boolean>;
     onOpenSettings(): void;
 };
 
@@ -98,13 +117,18 @@ function SessionItem({
     session,
     active,
     busy,
-    onSelect
+    onSelect,
+    onRename,
+    onAutoName
 }: {
     session: JarvixSessionSummary;
     active: boolean;
     busy: boolean;
     onSelect(sessionId: string): void;
+    onRename(session: JarvixSessionSummary): void;
+    onAutoName(sessionId: string): void;
 }) {
+    const { t } = useTranslation();
     const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
         id: session.id,
         data: { session },
@@ -112,21 +136,35 @@ function SessionItem({
     });
 
     return (
-        <button
-            ref={setNodeRef}
-            type="button"
-            aria-current={active ? "page" : undefined}
-            title={session.name}
-            onClick={() => onSelect(session.id)}
-            disabled={busy}
-            style={{ opacity: isDragging ? 0.35 : undefined }}
-            className={`${sessionItemClass(active)} cursor-grab active:cursor-grabbing`}
-            {...attributes}
-            {...listeners}
-        >
-            <MessageSquare className="size-3.5 shrink-0" />
-            <span className="min-w-0 flex-1 truncate">{session.name}</span>
-        </button>
+        <ContextMenu>
+            <ContextMenuTrigger asChild disabled={busy}>
+                <button
+                    ref={setNodeRef}
+                    type="button"
+                    aria-current={active ? "page" : undefined}
+                    title={session.name}
+                    onClick={() => onSelect(session.id)}
+                    disabled={busy}
+                    style={{ opacity: isDragging ? 0.35 : undefined }}
+                    className={`${sessionItemClass(active)} cursor-grab active:cursor-grabbing`}
+                    {...attributes}
+                    {...listeners}
+                >
+                    <MessageSquare className="size-3.5 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">{session.name}</span>
+                </button>
+            </ContextMenuTrigger>
+            <ContextMenuContent className="w-44">
+                <ContextMenuItem onSelect={() => onRename(session)}>
+                    <Pencil />
+                    {t("sessions.rename")}
+                </ContextMenuItem>
+                <ContextMenuItem onSelect={() => void onAutoName(session.id)}>
+                    <Sparkles />
+                    {t("sessions.autoName")}
+                </ContextMenuItem>
+            </ContextMenuContent>
+        </ContextMenu>
     );
 }
 
@@ -135,13 +173,17 @@ function SessionGroupView({
     activeSessionId,
     busy,
     onSelectSession,
-    onNewSession
+    onNewSession,
+    onRenameSession,
+    onAutoNameSession
 }: {
     group: SessionGroup;
     activeSessionId: string | null;
     busy: boolean;
     onSelectSession(sessionId: string): void;
     onNewSession(projectId?: string | null): void;
+    onRenameSession(session: JarvixSessionSummary): void;
+    onAutoNameSession(sessionId: string): void;
 }) {
     const { t } = useTranslation();
     const [open, setOpen] = useState(true);
@@ -195,6 +237,8 @@ function SessionGroupView({
                                 active={session.id === activeSessionId}
                                 busy={busy}
                                 onSelect={onSelectSession}
+                                onRename={onRenameSession}
+                                onAutoName={onAutoNameSession}
                             />
                         ))}
                     </div>
@@ -213,6 +257,8 @@ export function Sidebar({
     onNewProject,
     onNewSession,
     onMoveSession,
+    onRenameSession,
+    onAutoNameSession,
     onOpenSettings
 }: SidebarProps) {
     const { t } = useTranslation();
@@ -222,6 +268,7 @@ export function Sidebar({
     }));
     const groups = projectGroups(projects, sessions);
     const knownProjectIds = new Set(projects.map((project) => project.id));
+    const [renameTarget, setRenameTarget] = useState<JarvixSessionSummary | null>(null);
 
     function handleDragStart(event: DragStartEvent): void {
         const session = event.active.data.current?.session;
@@ -301,6 +348,10 @@ export function Sidebar({
                                 busy={busy}
                                 onSelectSession={onSelectSession}
                                 onNewSession={onNewSession}
+                                onRenameSession={setRenameTarget}
+                                onAutoNameSession={(sessionId) => {
+                                    void onAutoNameSession(sessionId);
+                                }}
                             />
                         ))}
                     </nav>
@@ -322,6 +373,16 @@ export function Sidebar({
                     {t("nav.settings")}
                 </button>
             </div>
+
+            <RenameSessionDialog
+                session={renameTarget}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setRenameTarget(null);
+                    }
+                }}
+                onRename={onRenameSession}
+            />
         </aside>
     );
 }

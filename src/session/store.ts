@@ -23,7 +23,8 @@ import {
     type JarvixSessionContext,
     type JarvixSessionMeta,
     type JarvixSessionSummary,
-    sessionContextSchema
+    sessionContextSchema,
+    sessionNameSchema
 } from "../protocol/session.ts";
 
 export const SESSION_FORMAT_VERSION = 2;
@@ -91,6 +92,32 @@ export function updateSessionContext(
     delete meta.workingDirectory;
     Object.assign(meta, normalizedContext);
 
+    writeSessionMeta(file, meta);
+    return meta;
+}
+
+/** Replace a session's display name while preserving its messages. */
+export function updateSessionName(
+    id: string,
+    name: string,
+    directory = defaultSessionDirectory()
+): JarvixSessionMeta {
+    const file = sessionFile(id, directory);
+    const current = readSessionMeta(file);
+    if (!current || current.id !== id) {
+        throw new Error(`Session not found: ${id}`);
+    }
+
+    const meta: JarvixSessionMeta = {
+        ...current,
+        version: SESSION_FORMAT_VERSION,
+        name: sessionNameSchema.parse(name)
+    };
+    writeSessionMeta(file, meta);
+    return meta;
+}
+
+function writeSessionMeta(file: string, meta: JarvixSessionMeta): void {
     const content = readFileSync(file, "utf8");
     const newline = content.indexOf("\n");
     const remainder = newline === -1 ? "" : content.slice(newline + 1);
@@ -109,7 +136,6 @@ export function updateSessionContext(
         }
         throw error;
     }
-    return meta;
 }
 
 /** Append one message to an existing session file as a new JSONL line. */
