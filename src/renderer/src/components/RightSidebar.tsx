@@ -2,16 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import {
     ChevronRight,
     PanelRightClose,
-    PanelRightOpen,
-    Terminal
+    Terminal,
+    X
 } from "lucide-react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
 import type { ToolTaskSnapshot } from "../../../tools/types.ts";
 import { useBackgroundTasks } from "../background-task-store.ts";
+import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type RightSidebarProps = {
     open: boolean;
@@ -32,60 +34,64 @@ export function RightSidebar({ open, sessionId, onToggle }: RightSidebarProps) {
     const [activeTab, setActiveTab] = useState<TabId>("background");
 
     if (!open) {
-        return (
-            <aside className="flex h-full w-10 shrink-0 flex-col items-center border-l border-border bg-secondary/20 py-3">
-                <button
-                    type="button"
-                    aria-label={t("rightSidebar.open")}
-                    onClick={onToggle}
-                    className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                >
-                    <PanelRightOpen className="size-4" />
-                </button>
-            </aside>
-        );
+        return null;
     }
 
     return (
         <aside className="flex h-full w-80 shrink-0 flex-col border-l border-border bg-secondary/20">
-            <header className="flex items-center border-b border-border pr-2">
-                <div role="tablist" className="flex min-w-0 flex-1">
-                    {TABS.map((tab) => {
-                        const Icon = tab.icon;
-                        const active = tab.id === activeTab;
-                        return (
-                            <button
-                                key={tab.id}
-                                type="button"
-                                role="tab"
-                                aria-selected={active}
-                                onClick={() => setActiveTab(tab.id)}
-                                className={cn(
-                                    "flex items-center gap-1.5 border-b-2 px-4 py-3 text-xs font-medium transition-colors",
-                                    active
-                                        ? "border-primary text-foreground"
-                                        : "border-transparent text-muted-foreground hover:text-foreground"
-                                )}
-                            >
-                                <Icon className="size-3.5" />
-                                {t(tab.labelKey)}
-                            </button>
-                        );
-                    })}
-                </div>
-                <button
-                    type="button"
-                    aria-label={t("rightSidebar.close")}
-                    onClick={onToggle}
-                    className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                >
-                    <PanelRightClose className="size-4" />
-                </button>
-            </header>
+            <Tabs
+                value={activeTab}
+                onValueChange={(value) => setActiveTab(value as TabId)}
+                className="min-h-0 flex-1 gap-0"
+            >
+                <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-2">
+                    <div className="relative flex min-w-0 flex-1">
+                        <TabsList className="h-8 min-w-0 flex-1 justify-start rounded-none bg-transparent p-0">
+                            {TABS.map((tab) => {
+                                const Icon = tab.icon;
+                                return (
+                                    <TabsTrigger
+                                        key={tab.id}
+                                        value={tab.id}
+                                        className="h-full min-w-0 justify-start gap-2 rounded-lg border-border bg-accent/40 pr-8 text-xs shadow-xs data-[state=active]:bg-accent/70"
+                                    >
+                                        <Icon className="size-3.5" />
+                                        <span className="truncate">{t(tab.labelKey)}</span>
+                                    </TabsTrigger>
+                                );
+                            })}
+                        </TabsList>
+                        <button
+                            type="button"
+                            aria-label={t("rightSidebar.close")}
+                            title={t("rightSidebar.close")}
+                            onClick={onToggle}
+                            className="absolute top-1/2 right-1 z-10 -translate-y-1/2 rounded-sm p-0.5 text-muted-foreground opacity-70 transition-colors hover:text-foreground hover:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+                        >
+                            <X className="size-3.5" />
+                        </button>
+                    </div>
+                    <Button
+                        type="button"
+                        variant="secondary"
+                        size="icon-sm"
+                        aria-label={t("rightSidebar.close")}
+                        title={t("rightSidebar.close")}
+                        onClick={onToggle}
+                        className="shrink-0 rounded-lg"
+                    >
+                        <PanelRightClose />
+                    </Button>
+                </header>
 
-            <div role="tabpanel" className="flex min-h-0 flex-1 flex-col">
-                {activeTab === "background" ? <BackgroundTaskList sessionId={sessionId} /> : null}
-            </div>
+                <div className="flex min-h-0 flex-1 flex-col">
+                    {activeTab === "background" ? (
+                        <TabsContent value="background" className="flex min-h-0 flex-col">
+                            <BackgroundTaskList sessionId={sessionId} />
+                        </TabsContent>
+                    ) : null}
+                </div>
+            </Tabs>
         </aside>
     );
 }

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
+import { PanelRightOpen } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useDefaultLayout } from "react-resizable-panels";
 import { Composer } from "./components/Composer.tsx";
 import { CreateProjectDialog } from "./components/CreateProjectDialog.tsx";
@@ -6,6 +8,7 @@ import { RightSidebar } from "./components/RightSidebar.tsx";
 import { SettingsDialog } from "./components/SettingsDialog.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { Transcript } from "./components/Transcript.tsx";
+import { Button } from "./components/ui/button.tsx";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable.tsx";
 import { useSessions } from "./use-sessions.ts";
 import type { JarvixConfig } from "../../protocol/config.ts";
@@ -15,6 +18,7 @@ const bridge = window.jarvix;
 const LAYOUT_ID = "jarvix:main";
 
 export function App() {
+    const { t } = useTranslation();
     const [createProjectOpen, setCreateProjectOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
@@ -99,7 +103,20 @@ export function App() {
                         <ResizableHandle />
 
                         <ResizablePanel id="content" minSize="50%" style={{ overflow: "hidden" }}>
-                            <main className="flex h-full min-h-0 min-w-0 flex-col">
+                            <main className="relative flex h-full min-h-0 min-w-0 flex-col">
+                                {!rightSidebarOpen ? (
+                                    <Button
+                                        type="button"
+                                        variant="secondary"
+                                        size="icon-sm"
+                                        aria-label={t("rightSidebar.open")}
+                                        title={t("rightSidebar.open")}
+                                        onClick={toggleRightSidebar}
+                                        className="absolute top-3 right-3 z-10 rounded-lg shadow-sm"
+                                    >
+                                        <PanelRightOpen />
+                                    </Button>
+                                ) : null}
                                 <Transcript key={activeSessionId ?? "new"} sessionId={activeSessionId} />
                                 <Composer
                                     disabled={!bridge || !ready || busy}
