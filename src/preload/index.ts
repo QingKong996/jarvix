@@ -18,7 +18,18 @@ const bridge: JarvixBridge = {
     getModelCatalog: (force = false) => ipcRenderer.invoke(IPC_CHANNELS.catalogGet, force),
     syncProviderModels: (provider) => ipcRenderer.invoke(IPC_CHANNELS.providerModelsSync, provider),
     setConfig: (config) => ipcRenderer.invoke(IPC_CHANNELS.configSet, config),
-    createSession: () => ipcRenderer.invoke(IPC_CHANNELS.sessionCreate),
+    createProject: (name, workingDirectories) => ipcRenderer.invoke(
+        IPC_CHANNELS.projectCreate,
+        { name, workingDirectories }
+    ),
+    listProjects: () => ipcRenderer.invoke(IPC_CHANNELS.projectsList),
+    pickWorkingDirectories: () => ipcRenderer.invoke(IPC_CHANNELS.pickWorkingDirectories),
+    pickWorkingDirectory: () => ipcRenderer.invoke(IPC_CHANNELS.pickWorkingDirectory),
+    createSession: (context = {}) => ipcRenderer.invoke(IPC_CHANNELS.sessionCreate, { context }),
+    updateSessionContext: (sessionId, context) => ipcRenderer.invoke(
+        IPC_CHANNELS.sessionUpdateContext,
+        { sessionId, context }
+    ),
     openSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.sessionOpen, sessionId),
     listSessions: () => ipcRenderer.invoke(IPC_CHANNELS.sessionsList)
 };

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, nativeTheme, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from "electron";
 import type { IpcMainInvokeEvent } from "electron";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -6,6 +6,9 @@ import { Jarvix } from "../core/index.ts";
 import { DEFAULT_THEME, type JarvixConfig, type Theme } from "../protocol/config.ts";
 import type { JarvixEvent } from "../protocol/event.ts";
 import { IPC_CHANNELS, type JarvixEventBatch } from "../protocol/ipc.ts";
+import { createProjectInputSchema } from "../protocol/project.ts";
+import type { JarvixSessionContext } from "../protocol/session.ts";
+import { sessionContextSchema } from "../protocol/session.ts";
 import { configPaths, loadConfig, parseConfig, saveConfig, systemDefaults } from "./config.ts";
 import { createStreamBatcher } from "./stream-batcher.ts";
 import { ModelCatalogService } from "./model-catalog.ts";
@@ -99,6 +102,14 @@ function requireSessionId(value: unknown): string {
     return value;
 }
 
+function parseSessionContext(value: unknown): JarvixSessionContext {
+    const parsed = sessionContextSchema.safeParse(value ?? {});
+    if (!parsed.success) {
+        throw new Error("Invalid session context");
+    }
+    return parsed.data;
+}
+
 function sendEvents(sessionId: string, events: JarvixEvent[]): void {
     if (mainWindow && !mainWindow.isDestroyed()) {
         const batch: JarvixEventBatch = { sessionId, events };
@@ -155,9 +166,60 @@ ipcMain.handle(IPC_CHANNELS.configSet, (event, payload: unknown) => {
     return config;
 });
 
-ipcMain.handle(IPC_CHANNELS.sessionCreate, (event) => {
+ipcMain.handle(IPC_CHANNELS.projectCreate, (event, payload: unknown) => {
     assertSender(event);
-    return jarvix.createSession();
+    const parsed = createProjectInputSchema.safeParse(payload);
+    if (!parsed.success) {
+        throw new Error("Invalid project payload");
+    }
+    return jarvix.createProject(parsed.data.name, parsed.data.workingDirectories);
+});
+
+ipcMain.handle(IPC_CHANNELS.projectsList, (event) => {
+    assertSender(event);
+    return jarvix.listProjects();
+});
+
+ipcMain.handle(IPC_CHANNELS.pickWorkingDirectories, async (event) => {
+    assertSender(event);
+    if (!mainWindow || mainWindow.isDestroyed()) {
+        return [];
+    }
+    const result = await dialog.showOpenDialog(mainWindow, {
+        properties: ["openDirectory", "multiSelections"]
+    });
+    return result.canceled ? [] : result.filePaths;
+});
+
+ipcMain.handle(IPC_CHANNELS.pickWorkingDirectory, async (event) => {
+    assertSender(event);
+    if (!mainWindow || mainWindow.isDestroyed()) {
+        return null;
+    }
+    const result = await dialog.showOpenDialog(mainWindow, {
+        properties: ["openDirectory"]
+    });
+    return result.canceled ? null : result.filePaths[0] ?? null;
+});
+
+ipcMain.handle(IPC_CHANNELS.sessionCreate, (event, payload: unknown) => {
+    assertSender(event);
+    if (typeof payload !== "object" || payload === null) {
+        throw new Error("Invalid session payload");
+    }
+    return jarvix.createSession(parseSessionContext((payload as Record<string, unknown>).context));
+});
+
+ipcMain.handle(IPC_CHANNELS.sessionUpdateContext, (event, payload: unknown) => {
+    assertSender(event);
+    if (typeof payload !== "object" || payload === null) {
+        throw new Error("Invalid session context payload");
+    }
+    const { sessionId, context } = payload as Record<string, unknown>;
+    return jarvix.updateSessionContext(
+        requireSessionId(sessionId),
+        parseSessionContext(context)
+    );
 });
 
 ipcMain.handle(IPC_CHANNELS.sessionOpen, (event, sessionId: unknown) => {

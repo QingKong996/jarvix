@@ -4,10 +4,28 @@
         "settings": "Settings"
     },
     "sessions": {
-        "new": "New chat",
-        "title": "Sessions",
-        "empty": "No sessions yet",
+        "new": "New session",
         "untitled": "Untitled session"
+    },
+    "projects": {
+        "title": "Projects",
+        "new": "New project",
+        "empty": "No projects yet",
+        "temporary": "Temporary sessions",
+        "newSession": "New session",
+        "newSessionIn": "New session in {{name}}",
+        "createTitle": "New project",
+        "workingDirectoriesDescription": "Add one or more working directories for this project.",
+        "name": "Project name",
+        "namePlaceholder": "For example, jarvix",
+        "workingDirectories": "Working directories",
+        "addDirectories": "Add directories",
+        "noDirectories": "No working directories added",
+        "removeDirectory": "Remove working directory",
+        "chooseDirectoryFailed": "Could not open the directory picker.",
+        "createFailed": "Could not create the project.",
+        "create": "Create",
+        "cancel": "Cancel"
     },
     "composer": {
         "placeholder": "Ask a question...",
@@ -22,6 +40,14 @@
             "high": "High",
             "xhigh": "Extra high",
             "max": "Max"
+        },
+        "contextDialog": {
+            "title": "Choose a project or working directory",
+            "description": "A project uses all of its working directories. You can also choose a custom directory for this session.",
+            "customDirectory": "Custom working directory",
+            "chooseDirectory": "Choose directory",
+            "chooseDirectoryFailed": "Could not choose a working directory.",
+            "updateFailed": "Could not update the session context."
         }
     },
     "transcript": {

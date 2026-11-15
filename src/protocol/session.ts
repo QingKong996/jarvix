@@ -1,7 +1,29 @@
+import { z } from "zod";
 import type { LlmMessage } from "../llm/types.ts";
 
+/** Project or one-off working directory associated with a session. */
+export const sessionContextSchema = z
+    .object({
+        projectId: z.string().trim().min(1).optional(),
+        workingDirectory: z.string().trim().min(1).optional()
+    })
+    .refine(
+        (context) => !(context.projectId && context.workingDirectory),
+        "Session cannot use both a project and a custom working directory"
+    )
+    .transform(({ projectId, workingDirectory }) => ({
+        ...(projectId ? { projectId } : {}),
+        ...(workingDirectory ? { workingDirectory } : {})
+    }));
+
+export type JarvixSessionContext = z.infer<typeof sessionContextSchema>;
+
+export function sessionContextFrom(context: JarvixSessionContext): JarvixSessionContext {
+    return sessionContextSchema.parse(context);
+}
+
 /** Session header, stored as the first line of a session file. */
-export type JarvixSessionMeta = {
+export type JarvixSessionMeta = JarvixSessionContext & {
     type: "session";
     version: number;
     id: string;
@@ -17,7 +39,7 @@ export type JarvixSession = {
 };
 
 /** Lightweight session data for the sidebar; messages stay on disk. */
-export type JarvixSessionSummary = {
+export type JarvixSessionSummary = JarvixSessionContext & {
     id: string;
     name: string;
     createdAt: number;

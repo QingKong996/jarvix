@@ -1,7 +1,8 @@
 import type { JarvixConfig } from "./config.ts";
-import type { ModelCatalog, ModelDefinition, ProviderModelSyncRequest } from "./providers.ts";
 import type { JarvixEvent } from "./event.ts";
-import type { JarvixSession, JarvixSessionSummary } from "./session.ts";
+import type { JarvixProject } from "./project.ts";
+import type { ModelCatalog, ModelDefinition, ProviderModelSyncRequest } from "./providers.ts";
+import type { JarvixSession, JarvixSessionContext, JarvixSessionSummary } from "./session.ts";
 
 export const IPC_CHANNELS = {
     request: "jarvix:request",
@@ -10,7 +11,12 @@ export const IPC_CHANNELS = {
     configSet: "jarvix:config:set",
     catalogGet: "jarvix:catalog:get",
     providerModelsSync: "jarvix:provider-models:sync",
+    projectCreate: "jarvix:project:create",
+    projectsList: "jarvix:projects:list",
+    pickWorkingDirectories: "jarvix:working-directories:pick",
+    pickWorkingDirectory: "jarvix:working-directory:pick",
     sessionCreate: "jarvix:session:create",
+    sessionUpdateContext: "jarvix:session:update-context",
     sessionOpen: "jarvix:session:open",
     sessionsList: "jarvix:sessions:list"
 } as const;
@@ -27,7 +33,15 @@ export type JarvixBridge = {
     getModelCatalog(force?: boolean): Promise<ModelCatalog>;
     syncProviderModels(provider: ProviderModelSyncRequest): Promise<ModelDefinition[]>;
     setConfig(config: JarvixConfig): Promise<JarvixConfig>;
-    createSession(): Promise<JarvixSession>;
+    createProject(name: string, workingDirectories: string[]): Promise<JarvixProject>;
+    listProjects(): Promise<JarvixProject[]>;
+    pickWorkingDirectories(): Promise<string[]>;
+    pickWorkingDirectory(): Promise<string | null>;
+    createSession(context?: JarvixSessionContext): Promise<JarvixSession>;
+    updateSessionContext(
+        sessionId: string,
+        context: JarvixSessionContext
+    ): Promise<JarvixSessionContext>;
     openSession(sessionId: string): Promise<JarvixSession | null>;
     listSessions(): Promise<JarvixSessionSummary[]>;
 };

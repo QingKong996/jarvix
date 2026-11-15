@@ -15,6 +15,7 @@ vi.mock("node:os", async (importOriginal) => {
 });
 
 const base = mkdtempSync(join(tmpdir(), "jarvix-session-manager-"));
+const PROJECT_ID = "10000000-0000-4000-8000-000000000001";
 const MODEL: LlmModelInfo = {
     provider: "test",
     id: "test-model",
@@ -40,8 +41,8 @@ test("creates and tracks independent sessions", () => {
     home.path = join(base, "create-home");
     const manager = new SessionManager();
 
-    const first = manager.create("First session");
-    const second = manager.create("Second session");
+    const first = manager.create({ projectId: PROJECT_ID }, "First session");
+    const second = manager.create({ projectId: PROJECT_ID }, "Second session");
 
     expect(first.meta.id).not.toBe(second.meta.id);
     expect(first.meta.name).toBe("First session");
@@ -54,7 +55,7 @@ test("creates and tracks independent sessions", () => {
 test("persists session messages and caches loaded sessions", async () => {
     home.path = join(base, "load-home");
     const manager = new SessionManager();
-    const session = manager.create("Untitled session");
+    const session = manager.create({ projectId: PROJECT_ID }, "Untitled session");
 
     await session.request("hello", {
         llm: fakeLlm(),
@@ -77,6 +78,38 @@ test("persists session messages and caches loaded sessions", async () => {
         content: "hello"
     });
     expect(reloaded.load(session.meta.id)).toBe(loaded);
+});
+
+test("moves a session between projects and clears the association for temporary sessions", () => {
+    home.path = join(base, "move-home");
+    const manager = new SessionManager();
+    const session = manager.create({ projectId: PROJECT_ID }, "Movable session");
+    const nextProjectId = "20000000-0000-4000-8000-000000000002";
+
+    expect(manager.updateContext(session.meta.id, { projectId: nextProjectId }))
+        .toEqual({ projectId: nextProjectId });
+    expect(session.meta.projectId).toBe(nextProjectId);
+    expect(manager.listSummaries()[0]?.projectId).toBe(nextProjectId);
+
+    expect(manager.updateContext(session.meta.id, {})).toEqual({});
+    expect(session.meta.projectId).toBeUndefined();
+    expect(manager.listSummaries()[0]?.projectId).toBeUndefined();
+});
+
+test("updates a session context in memory and on disk", () => {
+    home.path = join(base, "context-home");
+    const manager = new SessionManager();
+    const session = manager.create({}, "Context session");
+    const directory = join(base, "custom-directory");
+
+    manager.updateContext(session.meta.id, { workingDirectory: directory });
+    expect(session.meta.projectId).toBeUndefined();
+    expect(session.meta.workingDirectory).toBe(directory);
+    expect(manager.listSummaries()[0]?.workingDirectory).toBe(directory);
+
+    manager.updateContext(session.meta.id, { projectId: PROJECT_ID });
+    expect(session.meta.projectId).toBe(PROJECT_ID);
+    expect(session.meta.workingDirectory).toBeUndefined();
 });
 
 function fakeLlm(): LlmAdapter {
