@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 import { expect, test } from "vitest";
 import { providerConfigSchema } from "../protocol/providers.ts";
 import { createPiAdapter } from "./pi.ts";
+import { configuredModels } from "./providers.ts";
 
 test("streams through a custom endpoint with the selected model and credential", async () => {
     let body: Record<string, unknown> | undefined;
@@ -38,4 +39,94 @@ test("streams through a custom endpoint with the selected model and credential",
     } finally {
         await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
+});
+
+test("inherits built-in compatibility metadata for configured models", () => {
+    const providers = [providerConfigSchema.parse({
+        id: "deepseek",
+        name: "DeepSeek",
+        protocol: "openai-completions",
+        baseUrl: "https://api.deepseek.com",
+        models: [{ id: "deepseek-flash", name: "DeepSeek Flash", reasoning: true }]
+    })];
+    const model = configuredModels(providers).getModel("deepseek", "deepseek-flash");
+
+    expect(model?.compat).toMatchObject({
+        supportsDeveloperRole: false,
+        maxTokensField: "max_tokens",
+        thinkingFormat: "deepseek"
+    });
+});
+
+test("leaves Responses compatibility defaults to pi and keeps model-level overrides", () => {
+    const providers = [providerConfigSchema.parse({
+        id: "custom:responses",
+        name: "Custom Responses",
+        protocol: "openai-responses",
+        baseUrl: "https://example.com/v1",
+        models: [
+            { id: "portable", name: "Portable" },
+            {
+                id: "system",
+                name: "System",
+                compat: {
+                    supportsDeveloperRole: false,
+                    supportsMidConvoSystemMessages: false
+                }
+            }
+        ]
+    })];
+    const models = configuredModels(providers);
+
+    expect(models.getModel("custom:responses", "portable")?.compat).toBeUndefined();
+    expect(models.getModel("custom:responses", "system")?.compat).toEqual({
+        supportsDeveloperRole: false,
+        supportsMidConvoSystemMessages: false
+    });
+});
+
+test("uses explicit mid-conversation system compatibility", async () => {
+    const providers = [providerConfigSchema.parse({
+        id: "custom:responses",
+        name: "Custom Responses",
+        protocol: "openai-responses",
+        baseUrl: "https://example.com/v1",
+        models: [{
+            id: "portable",
+            name: "Portable",
+            reasoning: true,
+            compat: { supportsMidConvoSystemMessages: true }
+        }]
+    })];
+    const models = configuredModels(providers);
+    const model = models.getModel("custom:responses", "portable");
+    if (!model) {
+        throw new Error("Responses model was not registered");
+    }
+
+    let payload: { input?: Array<{ role: string; content: unknown }> } | undefined;
+    for await (const _event of models.streamSimple(model, {
+        systemPrompt: "Base system.",
+        messages: [
+            { role: "user", content: "first", timestamp: 1 },
+            { role: "system", content: "NOTICE_A", timestamp: 2 },
+            { role: "user", content: "second", timestamp: 3 }
+        ]
+    }, {
+        apiKey: "test",
+        onPayload: (next) => {
+            payload = next as typeof payload;
+            throw new Error("payload captured");
+        }
+    })) {
+    }
+
+    expect(payload?.input?.map((message) => message.role)).toEqual([
+        "developer",
+        "user",
+        "developer",
+        "user"
+    ]);
+    expect(payload?.input?.[0]?.content).toBe("Base system.");
+    expect(payload?.input?.[2]?.content).toBe("NOTICE_A");
 });

@@ -3,19 +3,22 @@ import { ChevronRight } from "lucide-react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
+import type { ToolCallEndReason } from "../../../tools/types.ts";
 import type { ToolCallViewData } from "../../../tools/view.ts";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 type ToolCallBlockProps = {
     toolName: string;
     data: ToolCallViewData;
     isError: boolean;
+    endReason: ToolCallEndReason | null;
 };
 
-export function ToolCallBlock({ toolName, data, isError }: ToolCallBlockProps) {
+export function ToolCallBlock({ toolName, data, isError, endReason }: ToolCallBlockProps) {
     const { t } = useTranslation();
     const active = data.status === "pending" || data.status === "running";
-    const streaming = active || data.status === "timed_out";
+    const streaming = active;
     const [open, setOpen] = useState(active);
 
     return (
@@ -27,7 +30,7 @@ export function ToolCallBlock({ toolName, data, isError }: ToolCallBlockProps) {
                 <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
                 <span className={cn(active && "animate-pulse")}>{toolLabel(toolName, data, t)}</span>
                 <span aria-hidden="true">·</span>
-                <span>{statusLabel(data.status, isError, t)}</span>
+                <span>{statusLabel(data.status, isError, endReason, t)}</span>
             </CollapsibleTrigger>
 
             <CollapsibleContent>
@@ -54,7 +57,7 @@ export function ToolCallBlock({ toolName, data, isError }: ToolCallBlockProps) {
 }
 
 function ToolOutput({ text, streaming }: { text: string; streaming: boolean }) {
-    const ref = useRef<HTMLPreElement>(null);
+    const ref = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         if (streaming && ref.current) {
@@ -63,12 +66,15 @@ function ToolOutput({ text, streaming }: { text: string; streaming: boolean }) {
     }, [streaming, text]);
 
     return (
-        <pre
-            ref={ref}
-            className="max-h-80 overflow-auto font-mono text-[12px] leading-relaxed whitespace-pre-wrap break-words text-muted-foreground"
+        <ScrollArea
+            viewportRef={ref}
+            className="max-h-80"
+            viewportClassName="h-auto max-h-[inherit]"
         >
-            {text}
-        </pre>
+            <pre className="font-mono text-[12px] leading-relaxed whitespace-pre-wrap break-words text-muted-foreground">
+                {text}
+            </pre>
+        </ScrollArea>
     );
 }
 
@@ -85,17 +91,21 @@ function toolLabel(toolName: string, data: ToolCallViewData, t: TFunction<"trans
 function statusLabel(
     status: ToolCallViewData["status"],
     isError: boolean,
+    endReason: ToolCallEndReason | null,
     t: TFunction<"translation">
 ): string {
     if (isError || status === "failed") {
         return t("tools.status.failed");
+    }
+    if (endReason === "background") {
+        return t("tools.status.background");
     }
     switch (status) {
         case "pending":
         case "running":
             return t("tools.status.running");
         case "timed_out":
-            return t("tools.status.timedOut");
+            return t("tools.status.background");
         case "completed":
             return t("tools.status.completed");
     }

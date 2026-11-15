@@ -261,8 +261,8 @@ test("executes tool calls, streams tool data, and resumes with the tool result",
             parameters: { type: "object", properties: {} }
         }],
         handles: (name) => name === "exec_command",
-        execute: async (_call, onOutput) => {
-            onOutput({ kind: "shell.exec_command", output: "hi\n" });
+        execute: async (_call, observer) => {
+            observer.onOutput({ kind: "shell.exec_command", output: "hi\n" });
             return {
                 content: "Command exited with code 0.",
                 data: {
@@ -271,7 +271,8 @@ test("executes tool calls, streams tool data, and resumes with the tool result",
                     output: "hi\n",
                     status: "completed"
                 },
-                isError: false
+                isError: false,
+                endReason: "exited"
             };
         },
         dispose: () => undefined
@@ -319,7 +320,7 @@ test("executes tool calls, streams tool data, and resumes with the tool result",
     ]);
 });
 
-test("continues forwarding task output after the model response completes", async () => {
+test("routes background task output outside the tool call after timeout", async () => {
     const directory = mkdtempSync(join(tmpdir(), "jarvix-session-task-"));
     const script = join(directory, "task.mjs");
     writeFileSync(script, [
@@ -385,14 +386,32 @@ test("continues forwarding task output after the model response completes", asyn
 
         const finalDone = events.findLastIndex((event) => event.type === "done");
         expect(finalDone).toBeGreaterThan(-1);
+        expect(events).toContainEqual(expect.objectContaining({
+            type: "backgroundTask.start",
+            task: expect.objectContaining({
+                id: shellSessionId,
+                command
+            })
+        }));
+        expect(events).toContainEqual(expect.objectContaining({
+            type: "tool.end",
+            toolCallId: "call-background",
+            endReason: "background",
+            data: expect.objectContaining({ status: "timed_out" })
+        }));
         await vi.waitFor(() => {
             const laterOutput = events.findIndex((event, index) => (
                 index > finalDone &&
-                event.type === "tool.output" &&
-                event.toolCallId === "call-poll" &&
-                event.data.output.includes("later")
+                event.type === "backgroundTask.output" &&
+                event.taskId === shellSessionId &&
+                event.output.includes("later")
             ));
             expect(laterOutput).toBeGreaterThan(finalDone);
+            const toolOutput = events.findIndex((event, index) => (
+                index > finalDone &&
+                event.type === "tool.output"
+            ));
+            expect(toolOutput).toBe(-1);
             const execCompleted = events.findIndex((event, index) => (
                 index > finalDone &&
                 event.type === "tool.end" &&
@@ -404,8 +423,7 @@ test("continues forwarding task output after the model response completes", asyn
                 index > finalDone &&
                 event.type === "tool.end" &&
                 event.toolCallId === "call-poll" &&
-                event.data.status === "completed" &&
-                event.data.output.includes("later")
+                event.data.status === "completed"
             ));
             expect(writeCompleted).toBeGreaterThan(finalDone);
             const notices = events.filter((event) => (
@@ -421,6 +439,13 @@ test("continues forwarding task output after the model response completes", asyn
                     }
                 }
             });
+            expect(events).toContainEqual(expect.objectContaining({
+                type: "backgroundTask.end",
+                task: expect.objectContaining({
+                    id: shellSessionId,
+                    status: "completed"
+                })
+            }));
         }, { timeout: 5_000 });
         expect(session.snapshot().messages.at(-1)).toMatchObject({
             role: "system",

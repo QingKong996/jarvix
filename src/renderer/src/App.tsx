@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 import { Composer } from "./components/Composer.tsx";
+import { RightSidebar } from "./components/RightSidebar.tsx";
 import { SettingsDialog } from "./components/SettingsDialog.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { Transcript } from "./components/Transcript.tsx";
@@ -14,6 +15,7 @@ const LAYOUT_ID = "jarvix:main";
 
 export function App() {
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
     const [config, setConfig] = useState<JarvixConfig | null>(null);
     const { defaultLayout, onLayoutChanged } = useDefaultLayout({
         id: LAYOUT_ID,
@@ -48,42 +50,53 @@ export function App() {
         setSettingsOpen(true);
     }, []);
 
+    const toggleRightSidebar = useCallback(() => {
+        setRightSidebarOpen((open) => !open);
+    }, []);
+
     return (
         <>
-            <div className="h-full overflow-hidden">
-                <ResizablePanelGroup
-                    id={LAYOUT_ID}
-                    orientation="horizontal"
-                    defaultLayout={defaultLayout}
-                    onLayoutChanged={onLayoutChanged}
-                >
-                    <ResizablePanel
-                        id="sidebar"
-                        defaultSize={280}
-                        minSize={200}
-                        maxSize={320}
-                        groupResizeBehavior="preserve-pixel-size"
-                        style={{ overflow: "hidden" }}
+            <div className="flex h-full overflow-hidden">
+                <div className="min-w-0 flex-1">
+                    <ResizablePanelGroup
+                        id={LAYOUT_ID}
+                        orientation="horizontal"
+                        defaultLayout={defaultLayout}
+                        onLayoutChanged={onLayoutChanged}
                     >
-                        <Sidebar
-                            sessions={sessions}
-                            activeSessionId={activeSessionId}
-                            busy={busy || !ready}
-                            onSelectSession={selectSession}
-                            onNewSession={createSession}
-                            onOpenSettings={openSettings}
-                        />
-                    </ResizablePanel>
+                        <ResizablePanel
+                            id="sidebar"
+                            defaultSize={280}
+                            minSize={200}
+                            maxSize={320}
+                            groupResizeBehavior="preserve-pixel-size"
+                            style={{ overflow: "hidden" }}
+                        >
+                            <Sidebar
+                                sessions={sessions}
+                                activeSessionId={activeSessionId}
+                                busy={busy || !ready}
+                                onSelectSession={selectSession}
+                                onNewSession={createSession}
+                                onOpenSettings={openSettings}
+                            />
+                        </ResizablePanel>
 
-                    <ResizableHandle />
+                        <ResizableHandle />
 
-                    <ResizablePanel id="content" minSize="50%" style={{ overflow: "hidden" }}>
-                        <main className="flex h-full min-h-0 min-w-0 flex-col">
-                            <Transcript key={activeSessionId ?? "new"} sessionId={activeSessionId} />
-                            <Composer disabled={!bridge || !ready || busy} onSubmit={send} config={config} onConfigChange={handleConfigChange} />
-                        </main>
-                    </ResizablePanel>
-                </ResizablePanelGroup>
+                        <ResizablePanel id="content" minSize="50%" style={{ overflow: "hidden" }}>
+                            <main className="flex h-full min-h-0 min-w-0 flex-col">
+                                <Transcript key={activeSessionId ?? "new"} sessionId={activeSessionId} />
+                                <Composer disabled={!bridge || !ready || busy} onSubmit={send} config={config} onConfigChange={handleConfigChange} />
+                            </main>
+                        </ResizablePanel>
+                    </ResizablePanelGroup>
+                </div>
+                <RightSidebar
+                    open={rightSidebarOpen}
+                    sessionId={activeSessionId}
+                    onToggle={toggleRightSidebar}
+                />
             </div>
 
             <SettingsDialog

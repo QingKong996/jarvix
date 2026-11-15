@@ -27,11 +27,22 @@
     "transcript": {
         "generating": "生成中…"
     },
-    "backgroundTask": {
-        "ended": "后台任务已结束",
-        "exitCode": "退出码 {{code}}",
-        "unknownExitCode": "退出码未知",
-        "buffered": "模型仍有 {{count}} 个字符未读取，可在后续请求中通过 write_stdin 获取。"
+    "system": {
+        "message": "系统消息"
+    },
+    "rightSidebar": {
+        "open": "展开右侧栏",
+        "close": "收起右侧栏",
+        "empty": "暂无后台任务",
+        "tabs": {
+            "background": "后台任务"
+        },
+        "status": {
+            "running": "运行中",
+            "completed": "已完成",
+            "pendingRead": "待读取",
+            "failed": "失败"
+        }
     },
     "thinking": {
         "streaming": "思考中…",
@@ -44,7 +55,7 @@
         "status": {
             "running": "运行中…",
             "completed": "已完成",
-            "timedOut": "仍在运行",
+            "background": "后台运行中",
             "failed": "失败"
         }
     },

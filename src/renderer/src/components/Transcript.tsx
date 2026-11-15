@@ -3,12 +3,13 @@ import { useTranslation } from "react-i18next";
 import { useCommitted, useLive } from "../transcript-hooks.ts";
 import { subscribeCommitted, subscribeLive } from "../transcript-store.ts";
 import type { CommittedTurn, LiveTurn } from "../types.ts";
-import { BackgroundTaskNotice } from "./BackgroundTaskNotice.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { ThinkingBlock } from "./ThinkingBlock.tsx";
 import { ToolCallBlock } from "./ToolCallBlock.tsx";
 
 const CommittedTurnView = memo(function CommittedTurnView({ turn }: { turn: CommittedTurn }) {
+    const { t } = useTranslation();
+
     if (turn.role === "user") {
         return (
             <p className="max-w-[85%] self-end rounded-lg bg-primary px-3 py-2 text-sm leading-relaxed break-words whitespace-pre-wrap text-primary-foreground">
@@ -17,9 +18,7 @@ const CommittedTurnView = memo(function CommittedTurnView({ turn }: { turn: Comm
         );
     }
     if (turn.role === "system") {
-        return turn.notice
-            ? <BackgroundTaskNotice notice={turn.notice} />
-            : <Markdown text={turn.text} />;
+        return <ThinkingBlock text={turn.text} label={t("system.message")} />;
     }
 
     return (
@@ -35,6 +34,7 @@ const CommittedTurnView = memo(function CommittedTurnView({ turn }: { turn: Comm
                             toolName={block.toolName}
                             data={block.data}
                             isError={block.isError}
+                            endReason={block.endReason}
                         />
                     );
                 }

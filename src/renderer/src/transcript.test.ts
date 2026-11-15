@@ -98,7 +98,8 @@ test("hydrates and updates shell tool output", () => {
             output: "hi\n",
             status: "completed"
         },
-        isError: false
+        isError: false,
+        endReason: "exited"
     }]);
 
     const live = transcriptReducer(initialTranscriptState, {
@@ -131,19 +132,21 @@ test("hydrates and updates shell tool output", () => {
                     kind: "shell.exec_command",
                     command: "echo hi",
                     output: "hi\n",
-                    status: "completed"
+                    status: "timed_out"
                 },
-                isError: false
+                isError: false,
+                endReason: "background"
             }
         ]
     });
 
     expect(live.committed[0]?.blocks[0]).toMatchObject({
         type: "tool",
-        data: { output: "hi\n", status: "completed" }
+        data: { output: "hi\n", status: "timed_out" },
+        endReason: "background"
     });
 
-    const continued = transcriptReducer(live, {
+    const afterEnd = transcriptReducer(live, {
         type: "events.batch",
         events: [{
             type: "tool.output",
@@ -153,9 +156,10 @@ test("hydrates and updates shell tool output", () => {
         }]
     });
 
-    expect(continued.committed[0]?.blocks[0]).toMatchObject({
+    expect(afterEnd.committed[0]?.blocks[0]).toMatchObject({
         type: "tool",
-        data: { output: "hi\nlater\n", status: "completed" }
+        data: { output: "hi\n", status: "timed_out" },
+        endReason: "background"
     });
 });
 
@@ -180,7 +184,7 @@ test("renders background task exit notices from events and history", () => {
 
     expect(live.committed).toEqual([expect.objectContaining({
         role: "system",
-        notice
+        text: "Background task exited."
     })]);
 
     const hydrated = transcriptReducer(initialTranscriptState, {
@@ -189,6 +193,6 @@ test("renders background task exit notices from events and history", () => {
     });
     expect(hydrated.committed).toEqual([expect.objectContaining({
         role: "system",
-        notice
+        text: "Background task exited."
     })]);
 });

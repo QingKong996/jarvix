@@ -23,7 +23,7 @@ import {
     resolveReasoningLevel
 } from "../protocol/providers.ts";
 
-const SYSTEM_PROMPT = `Response user in Chinese. Current operating system: ${process.platform}.`;
+const SYSTEM_PROMPT = `Respond to the user in Chinese. Current operating system: ${process.platform}.`;
 const PERSIST_ATTEMPTS = 2;
 const MAX_TOOL_ROUNDS = 32;
 
@@ -162,33 +162,36 @@ export class Session {
             try {
                 result = await this.tools.execute(
                     toolCall,
-                    (data) => {
-                        runtime.emit({
-                            type: "tool.output",
-                            toolCallId: toolCall.id,
-                            toolName: toolCall.name,
-                            data
-                        });
-                    },
-                    undefined,
-                    ({ taskId, exitCode, error, unreadOutput, data, isError }) => {
-                        runtime.emit({
-                            type: "tool.end",
-                            toolCallId: toolCall.id,
-                            toolName: toolCall.name,
-                            data,
-                            isError
-                        });
-                        if (unreadOutput.length > 0 && !this.backgroundExitNotices.has(taskId)) {
-                            this.backgroundExitNotices.add(taskId);
-                            this.queueBackgroundExitNotice(
-                                runtime,
-                                taskId,
-                                exitCode,
-                                error,
-                                unreadOutput.length
-                            );
-                        }
+                    {
+                        onOutput: (data) => {
+                            runtime.emit({
+                                type: "tool.output",
+                                toolCallId: toolCall.id,
+                                toolName: toolCall.name,
+                                data
+                            });
+                        },
+                        onBackgroundEnd: ({ taskId, exitCode, error, unreadOutput, data, isError }) => {
+                            runtime.emit({
+                                type: "tool.end",
+                                toolCallId: toolCall.id,
+                                toolName: toolCall.name,
+                                data,
+                                isError,
+                                endReason: "exited"
+                            });
+                            if (unreadOutput.length > 0 && !this.backgroundExitNotices.has(taskId)) {
+                                this.backgroundExitNotices.add(taskId);
+                                this.queueBackgroundExitNotice(
+                                    runtime,
+                                    taskId,
+                                    exitCode,
+                                    error,
+                                    unreadOutput.length
+                                );
+                            }
+                        },
+                        onTaskEvent: (event) => runtime.emit(event)
                     }
                 );
             } catch (error) {
@@ -201,7 +204,8 @@ export class Session {
             toolCallId: toolCall.id,
             toolName: toolCall.name,
             data: result.data,
-            isError: result.isError
+            isError: result.isError,
+            endReason: result.endReason
         });
 
         const message: LlmToolResultMessage = {
@@ -305,6 +309,7 @@ function failedToolResult(toolCall: LlmToolCallBlock, output: string): ToolExecu
     return {
         content: output,
         data,
-        isError: true
+        isError: true,
+        endReason: "exited"
     };
 }

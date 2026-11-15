@@ -3,33 +3,31 @@ import { ShellTool, type ShellSessionExit } from "./shell.ts";
 import type {
     ToolBackgroundEndHandler,
     ToolExecutionResult,
+    ToolExecutionObserver,
     ToolExecutor,
-    ToolOutputHandler
+    ToolTaskEventHandler,
+    ToolTaskState,
+    ToolTaskSnapshot
 } from "./types.ts";
 import {
-    appendToolOutput,
     EXEC_COMMAND_TOOL,
     WRITE_STDIN_TOOL,
-    type ToolCallOutputDelta,
     type ToolCallViewData
 } from "./view.ts";
 
 type BackgroundSubscription = {
-    toolName: string;
     data: ToolCallViewData;
-    onOutput: ToolOutputHandler;
     onBackgroundEnd?: ToolBackgroundEndHandler;
 };
 
 type BackgroundTask = {
-    sessionId: string;
+    state: ToolTaskState;
     subscriptions: BackgroundSubscription[];
-    active: BackgroundSubscription | null;
     unwatch: (() => void) | null;
-    ended: boolean;
+    onTaskEvent?: ToolTaskEventHandler;
 };
 
-/** Owns the shell tasks for one conversation and keeps their streams attached after timeouts. */
+/** Owns the shell tasks for one conversation and broadcasts their output separately from tool calls. */
 export class BackgroundTaskManager implements ToolExecutor {
     readonly definitions: readonly LlmToolDefinition[];
     private readonly shell: ShellTool;
@@ -46,13 +44,23 @@ export class BackgroundTaskManager implements ToolExecutor {
 
     async execute(
         call: LlmToolCallBlock,
-        onOutput: ToolOutputHandler,
-        signal?: AbortSignal,
-        onBackgroundEnd?: ToolBackgroundEndHandler
+        observer: ToolExecutionObserver,
+        signal?: AbortSignal
     ): Promise<ToolExecutionResult> {
-        const result = await this.shell.execute(call, onOutput, signal);
-        if (result.taskId) {
-            this.attach(result.taskId, call.name, onOutput, result.data, onBackgroundEnd);
+        const result = await this.shell.execute(call, observer, signal);
+        if (result.task) {
+            const task = this.tasks.get(result.task.id);
+            if (call.name === EXEC_COMMAND_TOOL && !task) {
+                this.startTask(result.task, result.data, observer);
+            } else if (call.name === WRITE_STDIN_TOOL && task) {
+                if (task.state.status === "running") {
+                    task.subscriptions.push({
+                        data: result.data,
+                        onBackgroundEnd: observer.onBackgroundEnd
+                    });
+                }
+                this.consumeTask(task, result.task, observer.onTaskEvent);
+            }
         }
         return result;
     }
@@ -65,90 +73,93 @@ export class BackgroundTaskManager implements ToolExecutor {
         this.shell.dispose();
     }
 
-    private attach(
-        sessionId: string,
-        toolName: string,
-        onOutput: ToolOutputHandler,
-        initialData: ToolCallViewData,
-        onBackgroundEnd?: ToolBackgroundEndHandler
+    private startTask(
+        snapshot: ToolTaskSnapshot,
+        data: ToolCallViewData,
+        observer: ToolExecutionObserver
     ): void {
-        const subscription: BackgroundSubscription = {
-            toolName,
-            data: initialData,
-            onOutput,
-            onBackgroundEnd
-        };
-        const existing = this.tasks.get(sessionId);
-        if (existing) {
-            existing.subscriptions.push(subscription);
-            existing.active = subscription;
-            return;
-        }
-
         const task: BackgroundTask = {
-            sessionId,
-            subscriptions: [subscription],
-            active: subscription,
+            state: taskState(snapshot),
+            subscriptions: [{ data, onBackgroundEnd: observer.onBackgroundEnd }],
             unwatch: null,
-            ended: false
+            onTaskEvent: observer.onTaskEvent
         };
-        this.tasks.set(sessionId, task);
-        const unwatch = this.shell.watchSession(sessionId, (chunk) => {
-            const active = task.active;
-            if (!active) {
-                return;
-            }
-            const delta = outputDelta(active.toolName, chunk);
-            active.data = appendToolOutput(active.data, delta);
-            active.onOutput(delta);
+        this.tasks.set(snapshot.id, task);
+        observer.onTaskEvent?.({ type: "backgroundTask.start", task: snapshot });
+
+        const unwatch = this.shell.watchSession(snapshot.id, (chunk) => {
+            task.onTaskEvent?.({ type: "backgroundTask.output", taskId: task.state.id, output: chunk });
         }, (exit) => {
             this.finish(task, exit);
         });
-        if (task.ended) {
-            unwatch();
-        } else {
+        if (task.state.status === "running") {
             task.unwatch = unwatch;
+        } else {
+            unwatch();
+        }
+    }
+
+    private consumeTask(
+        task: BackgroundTask,
+        snapshot: ToolTaskSnapshot,
+        onTaskEvent?: ToolTaskEventHandler
+    ): void {
+        task.state = taskState(snapshot);
+        task.onTaskEvent = onTaskEvent ?? task.onTaskEvent;
+        task.onTaskEvent?.({ type: "backgroundTask.consume", task: task.state });
+        if (task.state.status !== "running" && task.state.unreadCharacters === 0) {
+            this.dropTask(task);
         }
     }
 
     private finish(task: BackgroundTask, exit: ShellSessionExit): void {
-        if (task.ended) {
+        if (task.state.status !== "running") {
             return;
         }
-        task.ended = true;
         task.unwatch?.();
         task.unwatch = null;
-        task.active = null;
-        this.tasks.delete(task.sessionId);
+        task.state = {
+            ...task.state,
+            status: exit.error || exit.exitCode !== 0 ? "failed" : "completed",
+            exitCode: exit.exitCode,
+            error: exit.error,
+            unreadCharacters: exit.unreadOutput.length
+        };
+        task.onTaskEvent?.({ type: "backgroundTask.end", task: task.state });
 
-        const isError = Boolean(exit.error) || exit.exitCode !== 0;
-        for (const subscription of task.subscriptions) {
+        const subscriptions = task.subscriptions.splice(0);
+        const isError = task.state.status === "failed";
+        for (const subscription of subscriptions) {
             const completed: ToolCallViewData = {
                 ...subscription.data,
                 status: isError ? "failed" : "completed"
             };
             setTimeout(() => {
                 subscription.onBackgroundEnd?.({
-                    taskId: task.sessionId,
-                    exitCode: exit.exitCode,
-                    error: exit.error,
+                    taskId: task.state.id,
+                    exitCode: task.state.exitCode,
+                    error: task.state.error,
                     unreadOutput: exit.unreadOutput,
                     data: completed,
                     isError
                 });
             }, 0);
         }
+
+        if (task.state.unreadCharacters === 0) {
+            this.dropTask(task);
+        }
+    }
+
+    private dropTask(task: BackgroundTask): void {
+        task.unwatch?.();
+        task.unwatch = null;
+        this.tasks.delete(task.state.id);
+        this.shell.releaseSession(task.state.id);
     }
 }
 
-function outputDelta(toolName: string, output: string): ToolCallOutputDelta {
-    switch (toolName) {
-        case EXEC_COMMAND_TOOL:
-            return { kind: "shell.exec_command", output };
-        case WRITE_STDIN_TOOL:
-            return { kind: "shell.write_stdin", output };
-        default:
-            return { kind: "generic", output };
-    }
+function taskState(snapshot: ToolTaskSnapshot): ToolTaskState {
+    const { output: _output, ...state } = snapshot;
+    return state;
 }
-

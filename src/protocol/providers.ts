@@ -29,6 +29,10 @@ export const DEFAULT_MODEL_REASONING_LEVELS = ["low", "high", "max"] as const;
 export const DEFAULT_REASONING_LEVEL: ReasoningLevel = "max";
 
 const identifier = z.string().trim().min(1);
+export const modelCompatSchema = z.object({
+    supportsDeveloperRole: z.boolean().optional(),
+    supportsMidConvoSystemMessages: z.boolean().optional()
+});
 export const modelDefinitionSchema = z.object({
     id: identifier,
     name: identifier,
@@ -38,6 +42,7 @@ export const modelDefinitionSchema = z.object({
     maxTokens: z.number().int().positive().default(4096),
     input: z.array(z.enum(["text", "image"])).default(["text"]),
     toolCall: z.boolean().default(false),
+    compat: modelCompatSchema.optional(),
     cost: z.object({
         input: z.number().nonnegative().default(0),
         output: z.number().nonnegative().default(0),

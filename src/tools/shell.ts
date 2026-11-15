@@ -4,7 +4,12 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import type { LlmToolCallBlock, LlmToolDefinition } from "../llm/types.ts";
-import type { ToolExecutionResult, ToolExecutor, ToolOutputHandler } from "./types.ts";
+import type {
+    ToolExecutionResult,
+    ToolExecutionObserver,
+    ToolExecutor,
+    ToolTaskSnapshot
+} from "./types.ts";
 import {
     EXEC_COMMAND_TOOL,
     WRITE_STDIN_TOOL,
@@ -66,6 +71,8 @@ export const SHELL_TOOL_DEFINITIONS: readonly LlmToolDefinition[] = [{
 
 type ShellSession = {
     id: string;
+    command: string;
+    cwd: string;
     child: ChildProcessWithoutNullStreams;
     output: string;
     /** Cursor for output already broadcast to the UI. */
@@ -104,7 +111,7 @@ export type ShellToolOptions = {
 export class ShellTool implements ToolExecutor {
     readonly definitions = SHELL_TOOL_DEFINITIONS;
     private readonly defaultCwd: string;
-    private readonly sessions = new Map<string, ShellSession>();
+    private readonly addressableSessions = new Map<string, ShellSession>();
     private readonly children = new Set<ShellSession>();
 
     constructor(options: ShellToolOptions = {}) {
@@ -117,14 +124,14 @@ export class ShellTool implements ToolExecutor {
 
     async execute(
         call: LlmToolCallBlock,
-        onOutput: ToolOutputHandler,
+        observer: ToolExecutionObserver,
         signal?: AbortSignal
     ): Promise<ToolExecutionResult> {
         if (call.name === EXEC_COMMAND_TOOL) {
-            return this.execCommand(call, onOutput, signal);
+            return this.execCommand(call, observer, signal);
         }
         if (call.name === WRITE_STDIN_TOOL) {
-            return this.writeStdin(call, onOutput, signal);
+            return this.writeStdin(call, observer, signal);
         }
         return {
             content: `Unknown shell tool: ${call.name}`,
@@ -132,7 +139,8 @@ export class ShellTool implements ToolExecutor {
                 ...createToolCallViewData(call.name, call.arguments, "failed"),
                 output: `Unknown shell tool: ${call.name}`
             },
-            isError: true
+            isError: true,
+            endReason: "exited"
         };
     }
 
@@ -145,7 +153,12 @@ export class ShellTool implements ToolExecutor {
             }
         }
         this.children.clear();
-        this.sessions.clear();
+        this.addressableSessions.clear();
+    }
+
+    /** Release a completed session after its final buffered output was consumed. */
+    releaseSession(sessionId: string): void {
+        this.addressableSessions.delete(sessionId);
     }
 
     /**
@@ -157,7 +170,7 @@ export class ShellTool implements ToolExecutor {
         listener: (chunk: string) => void,
         onExit?: (exit: ShellSessionExit) => void
     ): () => void {
-        const session = this.sessions.get(sessionId);
+        const session = this.addressableSessions.get(sessionId);
         if (!session) {
             return () => undefined;
         }
@@ -203,7 +216,7 @@ export class ShellTool implements ToolExecutor {
 
     private async execCommand(
         call: LlmToolCallBlock,
-        onOutput: ToolOutputHandler,
+        observer: ToolExecutionObserver,
         signal?: AbortSignal
     ): Promise<ToolExecutionResult> {
         const parsed = execCommandArguments.safeParse(call.arguments);
@@ -216,14 +229,15 @@ export class ShellTool implements ToolExecutor {
         try {
             session = this.start(command, resolve(this.defaultCwd, parsed.data.cwd), (chunk) => {
                 session.broadcastOffset = session.output.length;
-                onOutput({ kind: "shell.exec_command", output: chunk });
+                observer.onOutput({ kind: "shell.exec_command", output: chunk });
             });
         } catch (error) {
             const message = errorMessage(error);
             return {
                 content: `Failed to start command: ${message}`,
                 data: { kind: "shell.exec_command", command, output: message, status: "failed" },
-                isError: true
+                isError: true,
+                endReason: "exited"
             };
         }
 
@@ -234,18 +248,21 @@ export class ShellTool implements ToolExecutor {
             return {
                 content: "Command aborted.",
                 data: { kind: "shell.exec_command", command, output: session.output, status: "failed" },
-                isError: true
+                isError: true,
+                endReason: "exited"
             };
         }
 
         if (outcome === "timeout" && !session.ended) {
+            session.listener = null;
             session.readOffset = session.output.length;
-            this.sessions.set(session.id, session);
+            this.addressableSessions.set(session.id, session);
             return {
                 content: timedOutContent(session.id, timeoutMs, session.output),
                 data: { kind: "shell.exec_command", command, output: session.output, status: "timed_out" },
                 isError: false,
-                taskId: session.id
+                endReason: "background",
+                task: taskSnapshot(session)
             };
         }
 
@@ -256,7 +273,7 @@ export class ShellTool implements ToolExecutor {
 
     private async writeStdin(
         call: LlmToolCallBlock,
-        onOutput: ToolOutputHandler,
+        observer: ToolExecutionObserver,
         signal?: AbortSignal
     ): Promise<ToolExecutionResult> {
         const parsed = writeStdinArguments.safeParse(call.arguments);
@@ -265,13 +282,14 @@ export class ShellTool implements ToolExecutor {
         }
 
         const { sessionId, command } = parsed.data;
-        const session = this.sessions.get(sessionId);
+        const session = this.addressableSessions.get(sessionId);
         if (!session) {
             const message = `Shell session not found: ${sessionId}`;
             return {
                 content: message,
                 data: { kind: "shell.write_stdin", sessionId, command, output: message, status: "failed" },
-                isError: true
+                isError: true,
+                endReason: "exited"
             };
         }
 
@@ -285,14 +303,15 @@ export class ShellTool implements ToolExecutor {
                     output: "",
                     status: "failed"
                 },
-                isError: true
+                isError: true,
+                endReason: "exited"
             };
         }
 
         const pendingBroadcast = session.output.slice(session.broadcastOffset);
         if (pendingBroadcast.length > 0) {
             session.broadcastOffset = session.output.length;
-            onOutput({ kind: "shell.write_stdin", output: pendingBroadcast });
+            observer.onOutput({ kind: "shell.write_stdin", output: pendingBroadcast });
         }
 
         const buffered = session.output.slice(session.readOffset);
@@ -319,7 +338,8 @@ export class ShellTool implements ToolExecutor {
             content: writeResultContent(sessionId, status, session.exitCode, session.error, buffered, commandState),
             data,
             isError: status === "failed",
-            taskId: !session.ended ? sessionId : undefined
+            endReason: status === "running" ? "background" : "exited",
+            task: taskSnapshot(session)
         };
     }
 
@@ -337,6 +357,8 @@ export class ShellTool implements ToolExecutor {
         });
         const session: ShellSession = {
             id: randomUUID(),
+            command,
+            cwd,
             child,
             output: "",
             broadcastOffset: 0,
@@ -463,7 +485,8 @@ function finishedResult(command: string, session: ShellSession): ToolExecutionRe
     return {
         content: finishedContent(session.exitCode, session.error, output),
         data: details,
-        isError: status === "failed"
+        isError: status === "failed",
+        endReason: "exited"
     };
 }
 
@@ -472,7 +495,22 @@ function invalidArgumentsResult(call: LlmToolCallBlock, message: string): ToolEx
     return {
         content: `Invalid arguments for ${call.name}: ${message}`,
         data: { ...data, output: message },
-        isError: true
+        isError: true,
+        endReason: "exited"
+    };
+}
+
+function taskSnapshot(session: ShellSession): ToolTaskSnapshot {
+    return {
+        id: session.id,
+        kind: "shell",
+        command: session.command,
+        cwd: session.cwd,
+        output: session.output,
+        status: sessionStatus(session),
+        exitCode: session.exitCode,
+        error: session.error,
+        unreadCharacters: session.output.length - session.readOffset
     };
 }
 

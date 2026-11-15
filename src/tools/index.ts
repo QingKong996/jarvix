@@ -3,9 +3,15 @@ export { ShellTool, SHELL_TOOL_DEFINITIONS } from "./shell.ts";
 export type {
     ToolBackgroundEnd,
     ToolBackgroundEndHandler,
+    ToolCallEndReason,
     ToolExecutionResult,
+    ToolExecutionObserver,
     ToolExecutor,
-    ToolOutputHandler
+    ToolOutputHandler,
+    ToolTaskEvent,
+    ToolTaskEventHandler,
+    ToolTaskState,
+    ToolTaskSnapshot
 } from "./types.ts";
 export type {
     GenericToolView,

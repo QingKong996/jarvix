@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { expect, test, vi } from "vitest";
 import type { LlmToolCallBlock } from "../llm/types.ts";
 import { BackgroundTaskManager } from "./background-task-manager.ts";
-import type { ToolBackgroundEnd } from "./types.ts";
+import type { ToolBackgroundEnd, ToolTaskEvent } from "./types.ts";
 
 test("keeps streaming a timed-out task and isolates it from other managers", async () => {
     const directory = mkdtempSync(join(tmpdir(), "jarvix-background-"));
@@ -20,6 +20,7 @@ test("keeps streaming a timed-out task and isolates it from other managers", asy
     const second = new BackgroundTaskManager();
     const outputAfterReturn: string[] = [];
     const completed: { tool: string; result: ToolBackgroundEnd }[] = [];
+    const taskEvents: ToolTaskEvent[] = [];
     let returned = false;
     const collectOutput = (data: { output: string }): void => {
         if (returned) {
@@ -32,27 +33,54 @@ test("keeps streaming a timed-out task and isolates it from other managers", asy
             command,
             cwd: directory,
             timeoutMs: 50
-        }), collectOutput, undefined, (result) => {
-            completed.push({ tool: "exec_command", result });
+        }), {
+            onOutput: collectOutput,
+            onBackgroundEnd: (result) => {
+                completed.push({ tool: "exec_command", result });
+            },
+            onTaskEvent: (event) => {
+                taskEvents.push(event);
+            }
         });
         returned = true;
 
         expect(started.data.status).toBe("timed_out");
-        expect(started.taskId).toBeTruthy();
+        expect(started.endReason).toBe("background");
+        const taskId = started.task?.id;
+        expect(taskId).toBeTruthy();
         const polled = await first.execute(call("write_stdin", {
-            sessionId: started.taskId,
+            sessionId: taskId,
             command: ""
-        }), collectOutput, undefined, (result) => {
-            completed.push({ tool: "write_stdin", result });
+        }), {
+            onOutput: collectOutput,
+            onBackgroundEnd: (result) => {
+                completed.push({ tool: "write_stdin", result });
+            },
+            onTaskEvent: (event) => {
+                taskEvents.push(event);
+            }
         });
-        expect(polled.taskId).toBe(started.taskId);
+        expect(polled.task?.id).toBe(taskId);
 
         await vi.waitFor(() => {
-            expect(outputAfterReturn.join("")).toContain("later");
+            expect(taskEvents).toContainEqual({
+                type: "backgroundTask.output",
+                taskId,
+                output: expect.stringContaining("later")
+            });
+            expect(taskEvents).toContainEqual(expect.objectContaining({
+                type: "backgroundTask.end",
+                task: expect.objectContaining({
+                    id: taskId,
+                    status: "completed",
+                    unreadCharacters: expect.any(Number)
+                })
+            }));
+            expect(outputAfterReturn.join("")).not.toContain("later");
             expect(completed.map(({ tool }) => tool).sort()).toEqual(["exec_command", "write_stdin"]);
             for (const { result } of completed) {
                 expect(result).toMatchObject({
-                    taskId: started.taskId,
+                    taskId,
                     unreadOutput: expect.stringContaining("later"),
                     data: { status: "completed" },
                     isError: false
@@ -61,20 +89,40 @@ test("keeps streaming a timed-out task and isolates it from other managers", asy
         }, { timeout: 5_000 });
 
         const drained = await first.execute(call("write_stdin", {
-            sessionId: started.taskId,
+            sessionId: taskId,
             command: ""
-        }), () => undefined);
+        }), {
+            onOutput: () => undefined,
+            onTaskEvent: (event) => {
+                taskEvents.push(event);
+            }
+        });
         expect(drained.data).toMatchObject({
             kind: "shell.write_stdin",
-            sessionId: started.taskId,
+            sessionId: taskId,
             status: "completed"
         });
         expect(drained.data.output).toContain("later");
+        expect(taskEvents).toContainEqual(expect.objectContaining({
+            type: "backgroundTask.consume",
+            task: expect.objectContaining({
+                id: taskId,
+                status: "completed",
+                unreadCharacters: 0
+            })
+        }));
+
+        const forgotten = await first.execute(call("write_stdin", {
+            sessionId: taskId,
+            command: ""
+        }), { onOutput: () => undefined });
+        expect(forgotten.isError).toBe(true);
+        expect(forgotten.data.output).toContain("Shell session not found");
 
         const isolated = await second.execute(call("write_stdin", {
-            sessionId: started.taskId,
+            sessionId: taskId,
             command: ""
-        }), () => undefined);
+        }), { onOutput: () => undefined });
         expect(isolated.isError).toBe(true);
         expect(isolated.data.output).toContain("Shell session not found");
     } finally {

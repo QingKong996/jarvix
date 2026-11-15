@@ -27,11 +27,22 @@
     "transcript": {
         "generating": "Generating…"
     },
-    "backgroundTask": {
-        "ended": "Background task ended",
-        "exitCode": "Exit code {{code}}",
-        "unknownExitCode": "Unknown exit code",
-        "buffered": "{{count}} characters remain unread by the model and can be retrieved with write_stdin on a later request."
+    "system": {
+        "message": "System message"
+    },
+    "rightSidebar": {
+        "open": "Expand right sidebar",
+        "close": "Collapse right sidebar",
+        "empty": "No background tasks",
+        "tabs": {
+            "background": "Background tasks"
+        },
+        "status": {
+            "running": "Running",
+            "completed": "Completed",
+            "pendingRead": "Unread output",
+            "failed": "Failed"
+        }
     },
     "thinking": {
         "streaming": "Thinking…",
@@ -44,7 +55,7 @@
         "status": {
             "running": "Running…",
             "completed": "Completed",
-            "timedOut": "Still running",
+            "background": "Running in background",
             "failed": "Failed"
         }
     },

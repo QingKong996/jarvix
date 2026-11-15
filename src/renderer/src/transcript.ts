@@ -110,7 +110,8 @@ function toHistoryBlock(block: LlmContentBlock): CommittedBlock[] {
                 toolCallId: block.id,
                 toolName: block.name,
                 data: createToolCallViewData(block.name, block.arguments),
-                isError: false
+                isError: false,
+                endReason: null
             }];
     }
 }
@@ -145,7 +146,12 @@ function applyHistoryToolResult(
                 status: isError ? "failed" : "completed"
             };
         const blocks = [...turn.blocks];
-        blocks[blockIndex] = { ...block, data, isError };
+        blocks[blockIndex] = {
+            ...block,
+            data,
+            isError,
+            endReason: data.status === "timed_out" ? "background" : "exited"
+        };
         turns[turnIndex] = { ...turn, blocks };
         return;
     }
@@ -176,24 +182,32 @@ function applyEvent(state: TranscriptState, event: JarvixEvent): TranscriptState
         case "toolCall.start":
         case "toolCall.delta":
         case "toolCall.end":
+        case "backgroundTask.start":
+        case "backgroundTask.output":
+        case "backgroundTask.end":
+        case "backgroundTask.consume":
         case "log":
             return state;
         case "tool.start":
             return updateToolBlock(state, event.toolCallId, (block) => ({
                 ...block,
                 data: event.data,
-                isError: false
+                isError: false,
+                endReason: null
             }));
         case "tool.output":
-            return updateToolBlock(state, event.toolCallId, (block) => ({
-                ...block,
-                data: appendToolOutput(block.data, event.data)
-            }));
+            return updateToolBlock(state, event.toolCallId, (block) => block.endReason
+                ? block
+                : {
+                    ...block,
+                    data: appendToolOutput(block.data, event.data)
+                });
         case "tool.end":
             return updateToolBlock(state, event.toolCallId, (block) => ({
                 ...block,
                 data: event.data,
-                isError: event.isError
+                isError: event.isError,
+                endReason: event.endReason
             }));
         case "system.message":
             return appendSystemMessage(state, event.message);
@@ -201,7 +215,7 @@ function applyEvent(state: TranscriptState, event: JarvixEvent): TranscriptState
 }
 
 function appendSystemMessage(state: TranscriptState, message: LlmSystemMessage): TranscriptState {
-    const id = `system-${message.timestamp}-${message.notice?.sessionId ?? "message"}`;
+    const id = `system-${message.timestamp}-${state.committed.length}`;
     return {
         ...state,
         committed: [...state.committed, systemTurn(id, message)]
@@ -215,8 +229,7 @@ function systemTurn(id: string, message: LlmSystemMessage): CommittedTurn {
         text: message.content,
         blocks: [],
         error: null,
-        reason: null,
-        notice: message.notice ?? null
+        reason: null
     };
 }
 

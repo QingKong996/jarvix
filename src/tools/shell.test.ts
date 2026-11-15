@@ -26,7 +26,7 @@ test("executes a command and returns its output", async () => {
         command,
         cwd: process.cwd(),
         timeoutMs: 10_000
-    }), () => undefined);
+    }), { onOutput: () => undefined });
 
     expect(result.isError).toBe(false);
     expect(result.data).toMatchObject({
@@ -51,7 +51,7 @@ test("starts Windows PowerShell without relying on PATH", async () => {
             command: "Write-Output pathless",
             cwd: process.cwd(),
             timeoutMs: 10_000
-        }), () => undefined);
+        }), { onOutput: () => undefined });
 
         expect(result.isError).toBe(false);
         expect(result.data.output).toContain("pathless");
@@ -93,7 +93,7 @@ test("keeps a timed-out shell addressable through write_stdin", async () => {
             command,
             cwd: directory,
             timeoutMs: 150
-        }), (data) => { outputs.push(data.output); });
+        }), { onOutput: (data) => { outputs.push(data.output); } });
         const sessionId = /sessionId: ([0-9a-f-]+)/.exec(started.content)?.[1];
         expect(sessionId).toBeTruthy();
         expect(started.content).toMatch(/IMPORTANT: The command has NOT finished\..*$/s);
@@ -101,7 +101,7 @@ test("keeps a timed-out shell addressable through write_stdin", async () => {
         const written = await tool.execute(call("write_stdin", {
             sessionId,
             command: "ping"
-        }), (data) => { outputs.push(data.output); });
+        }), { onOutput: (data) => { outputs.push(data.output); } });
 
         expect(written.data).toMatchObject({
             kind: "shell.write_stdin",
@@ -114,7 +114,7 @@ test("keeps a timed-out shell addressable through write_stdin", async () => {
             const polled = await tool.execute(call("write_stdin", {
                 sessionId,
                 command: ""
-            }), (data) => { outputs.push(data.output); });
+            }), { onOutput: (data) => { outputs.push(data.output); } });
             if (polled.data.output.length > 0) {
                 outputs.push(polled.data.output);
             }
@@ -124,12 +124,12 @@ test("keeps a timed-out shell addressable through write_stdin", async () => {
         await tool.execute(call("write_stdin", {
             sessionId,
             command: "quit"
-        }), () => undefined);
+        }), { onOutput: () => undefined });
         await vi.waitFor(async () => {
             const polled = await tool.execute(call("write_stdin", {
                 sessionId,
                 command: ""
-            }), () => undefined);
+            }), { onOutput: () => undefined });
             if (polled.data.status === "completed") {
                 return;
             }
