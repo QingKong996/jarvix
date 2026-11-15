@@ -1,16 +1,20 @@
 import type {
     JarvixSession,
     JarvixSessionContext,
-    JarvixSessionSummary
+    JarvixSessionSummary,
+    JarvixSessionStatus
 } from "../protocol/session.ts";
 import { sessionContextFrom } from "../protocol/session.ts";
 import { Session } from "./session.ts";
 import {
     createSession,
+    deleteSession,
+    listArchivedSessionSummaries,
     listSessionSummaries,
     loadSession,
     updateSessionContext,
-    updateSessionName
+    updateSessionName,
+    updateSessionStatus
 } from "./store.ts";
 
 /** Owns the session instances currently loaded by the app. */
@@ -35,6 +39,10 @@ export class SessionManager {
         return listSessionSummaries();
     }
 
+    listArchivedSummaries(): JarvixSessionSummary[] {
+        return listArchivedSessionSummaries();
+    }
+
     updateContext(id: string, context: JarvixSessionContext): JarvixSessionContext {
         const session = this.require(id);
         const meta = updateSessionContext(id, context);
@@ -48,6 +56,24 @@ export class SessionManager {
         const meta = updateSessionName(id, name);
         session.meta.name = meta.name;
         return meta.name;
+    }
+
+    updateStatus(id: string, status: JarvixSessionStatus): void {
+        const session = this.require(id);
+        const meta = updateSessionStatus(id, status);
+        session.meta.status = meta.status;
+        if (meta.archivedAt === undefined) {
+            delete session.meta.archivedAt;
+        } else {
+            session.meta.archivedAt = meta.archivedAt;
+        }
+    }
+
+    delete(id: string): void {
+        const session = this.require(id);
+        deleteSession(id);
+        session.dispose();
+        this.sessions.delete(id);
     }
 
     require(id: string): Session {

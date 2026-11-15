@@ -59,7 +59,23 @@ export class Jarvix {
     }
 
     listSessions(): JarvixSessionSummary[] {
-        return this.sessions.listSummaries();
+        return this.sessions.listSummaries().filter((session) => session.status === "active");
+    }
+
+    listArchivedSessions(): JarvixSessionSummary[] {
+        return this.sessions.listArchivedSummaries();
+    }
+
+    archiveSession(sessionId: string): void {
+        this.sessions.updateStatus(sessionId, "archived");
+    }
+
+    unarchiveSession(sessionId: string): void {
+        this.sessions.updateStatus(sessionId, "active");
+    }
+
+    deleteSession(sessionId: string): void {
+        this.sessions.delete(sessionId);
     }
 
     updateSessionContext(

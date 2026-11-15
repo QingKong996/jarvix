@@ -251,6 +251,21 @@ ipcMain.handle(IPC_CHANNELS.sessionAutoName, (event, payload: unknown) => {
     return jarvix.autoNameSession(requireSessionId(sessionId), firstPrompt);
 });
 
+ipcMain.handle(IPC_CHANNELS.sessionArchive, (event, sessionId: unknown) => {
+    assertSender(event);
+    jarvix.archiveSession(requireSessionId(sessionId));
+});
+
+ipcMain.handle(IPC_CHANNELS.sessionUnarchive, (event, sessionId: unknown) => {
+    assertSender(event);
+    jarvix.unarchiveSession(requireSessionId(sessionId));
+});
+
+ipcMain.handle(IPC_CHANNELS.sessionDelete, (event, sessionId: unknown) => {
+    assertSender(event);
+    jarvix.deleteSession(requireSessionId(sessionId));
+});
+
 ipcMain.handle(IPC_CHANNELS.sessionOpen, (event, sessionId: unknown) => {
     assertSender(event);
     return jarvix.loadSession(requireSessionId(sessionId));
@@ -259,6 +274,11 @@ ipcMain.handle(IPC_CHANNELS.sessionOpen, (event, sessionId: unknown) => {
 ipcMain.handle(IPC_CHANNELS.sessionsList, (event) => {
     assertSender(event);
     return jarvix.listSessions();
+});
+
+ipcMain.handle(IPC_CHANNELS.sessionsListArchived, (event) => {
+    assertSender(event);
+    return jarvix.listArchivedSessions();
 });
 
 app.whenReady().then(() => {

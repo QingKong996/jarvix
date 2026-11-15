@@ -12,19 +12,21 @@ import {
     type DragStartEvent
 } from "@dnd-kit/core";
 import {
+    Archive,
     ChevronRight,
     Folder,
     FolderPlus,
     Inbox,
-    MessageSquare,
     Pencil,
     Plus,
     Settings,
-    Sparkles
+    Sparkles,
+    Trash2
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { JarvixProject } from "../../../protocol/project.ts";
 import type { JarvixSessionSummary } from "../../../protocol/session.ts";
+import { DeleteSessionDialog } from "./DeleteSessionDialog.tsx";
 import { RenameSessionDialog } from "./RenameSessionDialog.tsx";
 import { Button } from "./ui/button.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible.tsx";
@@ -46,6 +48,8 @@ type SidebarProps = {
     onMoveSession(sessionId: string, projectId: string | null): void;
     onRenameSession(sessionId: string, name: string): Promise<boolean>;
     onAutoNameSession(sessionId: string): Promise<boolean>;
+    onArchiveSession(sessionId: string): Promise<boolean>;
+    onDeleteSession(sessionId: string): Promise<boolean>;
     onOpenSettings(): void;
 };
 
@@ -63,7 +67,7 @@ function navItemClass(active: boolean): string {
 }
 
 function sessionItemClass(active: boolean): string {
-    return `flex w-full items-center gap-2 rounded-md py-2 pr-3 pl-9 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+    return `group flex w-full items-center rounded-md text-sm transition-colors ${
         active ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
     }`;
 }
@@ -110,7 +114,12 @@ function projectGroups(projects: JarvixProject[], sessions: JarvixSessionSummary
                 latestAt: sessions[0]?.updatedAt ?? group.latestAt
             };
         })
-        .sort((left, right) => right.latestAt - left.latestAt || left.key.localeCompare(right.key));
+        .sort((left, right) => {
+            if (left.key === "temporary" || right.key === "temporary") {
+                return left.key === "temporary" ? 1 : -1;
+            }
+            return right.latestAt - left.latestAt || left.key.localeCompare(right.key);
+        });
 }
 
 function SessionItem({
@@ -119,7 +128,9 @@ function SessionItem({
     busy,
     onSelect,
     onRename,
-    onAutoName
+    onAutoName,
+    onArchive,
+    onRequestDelete
 }: {
     session: JarvixSessionSummary;
     active: boolean;
@@ -127,6 +138,8 @@ function SessionItem({
     onSelect(sessionId: string): void;
     onRename(session: JarvixSessionSummary): void;
     onAutoName(sessionId: string): void;
+    onArchive(sessionId: string): void;
+    onRequestDelete(session: JarvixSessionSummary): void;
 }) {
     const { t } = useTranslation();
     const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -138,21 +151,36 @@ function SessionItem({
     return (
         <ContextMenu>
             <ContextMenuTrigger asChild disabled={busy}>
-                <button
-                    ref={setNodeRef}
-                    type="button"
-                    aria-current={active ? "page" : undefined}
-                    title={session.name}
-                    onClick={() => onSelect(session.id)}
-                    disabled={busy}
+                <div
                     style={{ opacity: isDragging ? 0.35 : undefined }}
-                    className={`${sessionItemClass(active)} cursor-grab active:cursor-grabbing`}
-                    {...attributes}
-                    {...listeners}
+                    className={sessionItemClass(active)}
                 >
-                    <MessageSquare className="size-3.5 shrink-0" />
-                    <span className="min-w-0 flex-1 truncate">{session.name}</span>
-                </button>
+                    <button
+                        ref={setNodeRef}
+                        type="button"
+                        aria-current={active ? "page" : undefined}
+                        title={session.name}
+                        onClick={() => onSelect(session.id)}
+                        disabled={busy}
+                        className="flex min-w-0 flex-1 cursor-grab items-center py-2 pl-9 text-left text-sm disabled:cursor-not-allowed disabled:opacity-50 active:cursor-grabbing"
+                        {...attributes}
+                        {...listeners}
+                    >
+                        <span className="min-w-0 flex-1 truncate">{session.name}</span>
+                    </button>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={t("sessions.archive")}
+                        title={t("sessions.archive")}
+                        disabled={busy}
+                        onClick={() => onArchive(session.id)}
+                        className="mr-1 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                    >
+                        <Archive />
+                    </Button>
+                </div>
             </ContextMenuTrigger>
             <ContextMenuContent className="w-44">
                 <ContextMenuItem onSelect={() => onRename(session)}>
@@ -162,6 +190,13 @@ function SessionItem({
                 <ContextMenuItem onSelect={() => void onAutoName(session.id)}>
                     <Sparkles />
                     {t("sessions.autoName")}
+                </ContextMenuItem>
+                <ContextMenuItem
+                    className="text-destructive focus:bg-destructive/10 focus:text-destructive"
+                    onSelect={() => onRequestDelete(session)}
+                >
+                    <Trash2 />
+                    {t("sessions.delete")}
                 </ContextMenuItem>
             </ContextMenuContent>
         </ContextMenu>
@@ -175,7 +210,9 @@ function SessionGroupView({
     onSelectSession,
     onNewSession,
     onRenameSession,
-    onAutoNameSession
+    onAutoNameSession,
+    onArchiveSession,
+    onRequestDeleteSession
 }: {
     group: SessionGroup;
     activeSessionId: string | null;
@@ -184,6 +221,8 @@ function SessionGroupView({
     onNewSession(projectId?: string | null): void;
     onRenameSession(session: JarvixSessionSummary): void;
     onAutoNameSession(sessionId: string): void;
+    onArchiveSession(sessionId: string): void;
+    onRequestDeleteSession(session: JarvixSessionSummary): void;
 }) {
     const { t } = useTranslation();
     const [open, setOpen] = useState(true);
@@ -239,6 +278,8 @@ function SessionGroupView({
                                 onSelect={onSelectSession}
                                 onRename={onRenameSession}
                                 onAutoName={onAutoNameSession}
+                                onArchive={onArchiveSession}
+                                onRequestDelete={onRequestDeleteSession}
                             />
                         ))}
                     </div>
@@ -259,6 +300,8 @@ export function Sidebar({
     onMoveSession,
     onRenameSession,
     onAutoNameSession,
+    onArchiveSession,
+    onDeleteSession,
     onOpenSettings
 }: SidebarProps) {
     const { t } = useTranslation();
@@ -269,6 +312,7 @@ export function Sidebar({
     const groups = projectGroups(projects, sessions);
     const knownProjectIds = new Set(projects.map((project) => project.id));
     const [renameTarget, setRenameTarget] = useState<JarvixSessionSummary | null>(null);
+    const [deleteTarget, setDeleteTarget] = useState<JarvixSessionSummary | null>(null);
 
     function handleDragStart(event: DragStartEvent): void {
         const session = event.active.data.current?.session;
@@ -352,6 +396,10 @@ export function Sidebar({
                                 onAutoNameSession={(sessionId) => {
                                     void onAutoNameSession(sessionId);
                                 }}
+                                onArchiveSession={(sessionId) => {
+                                    void onArchiveSession(sessionId);
+                                }}
+                                onRequestDeleteSession={setDeleteTarget}
                             />
                         ))}
                     </nav>
@@ -359,7 +407,6 @@ export function Sidebar({
                     <DragOverlay dropAnimation={null}>
                         {activeSession ? (
                             <div className="flex max-w-64 items-center gap-2 rounded-md border bg-popover px-3 py-2 text-sm shadow-lg">
-                                <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
                                 <span className="truncate">{activeSession.name}</span>
                             </div>
                         ) : null}
@@ -382,6 +429,16 @@ export function Sidebar({
                     }
                 }}
                 onRename={onRenameSession}
+            />
+
+            <DeleteSessionDialog
+                session={deleteTarget}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setDeleteTarget(null);
+                    }
+                }}
+                onDelete={onDeleteSession}
             />
         </aside>
     );

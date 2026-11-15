@@ -5,6 +5,9 @@ export const SESSION_NAME_MAX_LENGTH = 80;
 
 export const sessionNameSchema = z.string().trim().min(1).max(SESSION_NAME_MAX_LENGTH);
 
+export const SESSION_STATUSES = ["active", "archived"] as const;
+export type JarvixSessionStatus = (typeof SESSION_STATUSES)[number];
+
 /** Project or one-off working directory associated with a session. */
 export const sessionContextSchema = z
     .object({
@@ -34,6 +37,8 @@ export type JarvixSessionMeta = JarvixSessionContext & {
     /** Non-empty display name. */
     name: string;
     createdAt: number;
+    status: JarvixSessionStatus;
+    archivedAt?: number;
 };
 
 /** A session loaded into memory. */
@@ -48,4 +53,6 @@ export type JarvixSessionSummary = JarvixSessionContext & {
     name: string;
     createdAt: number;
     updatedAt: number;
+    status: JarvixSessionStatus;
+    archivedAt?: number;
 };

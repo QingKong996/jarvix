@@ -288,3 +288,39 @@ test("updates a session to a custom working directory", () => {
     expect(summary?.projectId).toBeUndefined();
     expect(summary?.workingDirectory).toBe(workspace);
 });
+
+test("hides archived sessions from the active list and restores them", () => {
+    home.path = join(base, "archive-home");
+    const jarvix = new Jarvix({ llm: fakeLlm("ok", []), config: TEST_CONFIG });
+    const first = jarvix.createSession({}, "First session");
+    const second = jarvix.createSession({}, "Second session");
+
+    jarvix.archiveSession(first.meta.id);
+
+    expect(jarvix.listSessions().map((session) => session.id)).toEqual([second.meta.id]);
+    expect(jarvix.listArchivedSessions()).toMatchObject([{
+        id: first.meta.id,
+        status: "archived",
+        archivedAt: expect.any(Number)
+    }]);
+    expect(jarvix.loadSession(first.meta.id)?.meta.status).toBe("archived");
+
+    jarvix.unarchiveSession(first.meta.id);
+
+    expect(jarvix.listArchivedSessions()).toEqual([]);
+    expect(jarvix.listSessions().map((session) => session.id).sort())
+        .toEqual([first.meta.id, second.meta.id].sort());
+    expect(jarvix.loadSession(first.meta.id)?.meta.status).toBe("active");
+});
+
+test("permanently deletes a session", () => {
+    home.path = join(base, "delete-home");
+    const jarvix = new Jarvix({ llm: fakeLlm("ok", []), config: TEST_CONFIG });
+    const session = jarvix.createSession({}, "Delete me");
+
+    jarvix.deleteSession(session.meta.id);
+
+    expect(jarvix.listSessions()).toEqual([]);
+    expect(jarvix.loadSession(session.meta.id)).toBeNull();
+    expect(() => jarvix.deleteSession(session.meta.id)).toThrow("Session not found");
+});

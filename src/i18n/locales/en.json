@@ -6,6 +6,13 @@
     "sessions": {
         "new": "New session",
         "untitled": "Untitled session",
+        "archive": "Archive",
+        "delete": "Delete permanently",
+        "deleteTitle": "Delete session permanently",
+        "deleteDescription": "Permanently delete \"{{name}}\"? This action cannot be undone.",
+        "deleteConfirm": "Delete permanently",
+        "deleting": "Deleting…",
+        "deleteFailed": "Could not delete this session.",
         "rename": "Rename",
         "autoName": "Auto name",
         "renameTitle": "Rename session",
@@ -97,7 +104,17 @@
         "title": "Settings",
         "sections": {
             "model": "Model",
+            "archived": "Archived",
             "general": "General"
+        },
+        "archived": {
+            "title": "Archived sessions",
+            "description": "Archived sessions are hidden from the sidebar.",
+            "archivedAt": "Archived {{date}}",
+            "empty": "No archived sessions",
+            "restore": "Restore",
+            "restoring": "Restoring…",
+            "restoreFailed": "Could not restore this session."
         },
         "providers": {
             "loading": "Loading…",

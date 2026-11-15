@@ -23,6 +23,7 @@ import {
     type JarvixSessionContext,
     type JarvixSessionMeta,
     type JarvixSessionSummary,
+    type JarvixSessionStatus,
     sessionContextSchema,
     sessionNameSchema
 } from "../protocol/session.ts";
@@ -59,6 +60,7 @@ export function createSession(
         id: randomUUID(),
         name: name.trim() || i18n.t("sessions.untitled"),
         createdAt: Date.now(),
+        status: "active",
         ...normalizedContext
     };
 
@@ -115,6 +117,44 @@ export function updateSessionName(
     };
     writeSessionMeta(file, meta);
     return meta;
+}
+
+/** Change a session's archive state while preserving its messages. */
+export function updateSessionStatus(
+    id: string,
+    status: JarvixSessionStatus,
+    directory = defaultSessionDirectory(),
+    archivedAt = Date.now()
+): JarvixSessionMeta {
+    const file = sessionFile(id, directory);
+    const current = readSessionMeta(file);
+    if (!current || current.id !== id) {
+        throw new Error(`Session not found: ${id}`);
+    }
+
+    const meta: JarvixSessionMeta = {
+        ...current,
+        version: SESSION_FORMAT_VERSION,
+        status
+    };
+    if (status === "archived") {
+        meta.archivedAt = archivedAt;
+    } else {
+        delete meta.archivedAt;
+    }
+
+    writeSessionMeta(file, meta);
+    return meta;
+}
+
+/** Permanently remove a session file and all of its messages. */
+export function deleteSession(id: string, directory = defaultSessionDirectory()): void {
+    const file = sessionFile(id, directory);
+    const current = readSessionMeta(file);
+    if (!current || current.id !== id) {
+        throw new Error(`Session not found: ${id}`);
+    }
+    unlinkSync(file);
 }
 
 function writeSessionMeta(file: string, meta: JarvixSessionMeta): void {
@@ -217,6 +257,17 @@ export function listSessionSummaries(directory = defaultSessionDirectory()): Jar
     );
 }
 
+/** List archived session summaries newest archive first. */
+export function listArchivedSessionSummaries(directory = defaultSessionDirectory()): JarvixSessionSummary[] {
+    return listSessionSummaries(directory)
+        .filter((session) => session.status === "archived")
+        .sort(
+            (left, right) =>
+                (right.archivedAt ?? 0) - (left.archivedAt ?? 0)
+                || right.createdAt - left.createdAt
+        );
+}
+
 function defaultSessionDirectory(): string {
     return join(homedir(), ".jarvix", "sessions");
 }
@@ -231,6 +282,8 @@ function readSessionSummary(file: string, id: string): JarvixSessionSummary | nu
         name: meta.name,
         createdAt: meta.createdAt,
         updatedAt: readLastMessageTimestamp(file) ?? meta.createdAt,
+        status: meta.status,
+        ...(meta.archivedAt !== undefined ? { archivedAt: meta.archivedAt } : {}),
         ...(meta.projectId ? { projectId: meta.projectId } : {}),
         ...(meta.workingDirectory ? { workingDirectory: meta.workingDirectory } : {})
     };
@@ -348,12 +401,22 @@ function parseSessionMeta(value: unknown): JarvixSessionMeta | null {
         projectId: typeof value.projectId === "string" ? value.projectId : undefined,
         workingDirectory: typeof value.workingDirectory === "string" ? value.workingDirectory : undefined
     });
+    const archivedAt = (
+        typeof value.archivedAt === "number" &&
+        Number.isFinite(value.archivedAt)
+    ) ? value.archivedAt : undefined;
+    const archived = (
+        value.status === "archived" &&
+        archivedAt !== undefined
+    );
     return {
         type: "session",
         version: value.version,
         id: value.id,
         name,
         createdAt: value.createdAt,
+        status: archived ? "archived" : "active",
+        ...(archived ? { archivedAt } : {}),
         ...(parsedContext.success ? parsedContext.data : {})
     };
 }

@@ -26,7 +26,8 @@ const meta: JarvixSessionMeta = {
     version: 1,
     id: "session-test",
     name: "Session test",
-    createdAt: 1
+    createdAt: 1,
+    status: "active"
 };
 const MODEL: LlmModelInfo = {
     provider: "test",

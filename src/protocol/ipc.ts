@@ -19,8 +19,12 @@ export const IPC_CHANNELS = {
     sessionUpdateContext: "jarvix:session:update-context",
     sessionRename: "jarvix:session:rename",
     sessionAutoName: "jarvix:session:auto-name",
+    sessionArchive: "jarvix:session:archive",
+    sessionUnarchive: "jarvix:session:unarchive",
+    sessionDelete: "jarvix:session:delete",
     sessionOpen: "jarvix:session:open",
-    sessionsList: "jarvix:sessions:list"
+    sessionsList: "jarvix:sessions:list",
+    sessionsListArchived: "jarvix:sessions:list-archived"
 } as const;
 
 export type JarvixEventBatch = {
@@ -46,6 +50,10 @@ export type JarvixBridge = {
     ): Promise<JarvixSessionContext>;
     renameSession(sessionId: string, name: string): Promise<string>;
     autoNameSession(sessionId: string, firstPrompt?: string): Promise<string>;
+    archiveSession(sessionId: string): Promise<void>;
+    unarchiveSession(sessionId: string): Promise<void>;
+    deleteSession(sessionId: string): Promise<void>;
     openSession(sessionId: string): Promise<JarvixSession | null>;
     listSessions(): Promise<JarvixSessionSummary[]>;
+    listArchivedSessions(): Promise<JarvixSessionSummary[]>;
 };
