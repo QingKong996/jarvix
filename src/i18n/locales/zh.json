@@ -92,6 +92,7 @@
     "tools": {
         "execCommand": "执行命令",
         "writeStdin": "写入 Shell",
+        "applyPatch": "修改文件",
         "generic": "调用工具",
         "status": {
             "running": "运行中…",

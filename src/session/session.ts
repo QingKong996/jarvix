@@ -12,7 +12,7 @@ import type { JarvixConfig } from "../protocol/config.ts";
 import type { JarvixEvent } from "../protocol/event.ts";
 import type { JarvixSession, JarvixSessionMeta } from "../protocol/session.ts";
 import {
-    BackgroundTaskManager,
+    createDefaultTools,
     type ToolExecutionResult,
     type ToolExecutor
 } from "../tools/index.ts";
@@ -48,7 +48,7 @@ export class Session {
     constructor(
         meta: JarvixSessionMeta,
         messages: readonly LlmMessage[] = [],
-        tools: ToolExecutor = new BackgroundTaskManager()
+        tools: ToolExecutor = createDefaultTools()
     ) {
         this.meta = meta;
         this.history = [...messages];
@@ -311,7 +311,7 @@ function systemPromptFor(workingDirectories: readonly string[] = []): string {
         "",
         "Session working directories:",
         ...workingDirectories.map((directory) => `- ${directory}`),
-        "Use one of these directories as cwd for shell commands when appropriate."
+        "Use one of these directories as cwd for shell commands and apply_patch when appropriate."
     ].join("\n");
 }
 

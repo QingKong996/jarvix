@@ -2,6 +2,7 @@ import type { LlmJsonObject } from "../llm/types.ts";
 
 export const EXEC_COMMAND_TOOL = "exec_command";
 export const WRITE_STDIN_TOOL = "write_stdin";
+export const APPLY_PATCH_TOOL = "apply_patch";
 
 export type ToolCallStatus = "pending" | "running" | "completed" | "timed_out" | "failed";
 
@@ -28,7 +29,15 @@ export type GenericToolView = {
     status: ToolCallStatus;
 };
 
-export type ToolCallViewData = ShellExecCommandView | ShellWriteStdinView | GenericToolView;
+export type ApplyPatchView = {
+    kind: "apply_patch";
+    patch: string;
+    cwd: string;
+    output: string;
+    status: ToolCallStatus;
+};
+
+export type ToolCallViewData = ShellExecCommandView | ShellWriteStdinView | ApplyPatchView | GenericToolView;
 
 export type ToolCallOutputDelta =
     | { kind: "shell.exec_command"; output: string }
@@ -56,6 +65,16 @@ export function createToolCallViewData(
                 output: "",
                 status
             };
+        case APPLY_PATCH_TOOL: {
+            const patch = stringArgument(arguments_.patch);
+            return {
+                kind: "apply_patch",
+                patch,
+                cwd: stringArgument(arguments_.cwd),
+                output: "",
+                status
+            };
+        }
         default:
             return {
                 kind: "generic",
@@ -88,6 +107,9 @@ export function isToolCallViewData(value: unknown): value is ToolCallViewData {
             return typeof value.command === "string";
         case "shell.write_stdin":
             return typeof value.command === "string" && typeof value.sessionId === "string";
+        case "apply_patch":
+            return typeof value.patch === "string"
+                && typeof value.cwd === "string";
         case "generic":
             return typeof value.name === "string" && isRecord(value.arguments);
         default:
