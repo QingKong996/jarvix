@@ -2,6 +2,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import { FolderOpen, Plus, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { JarvixProject } from "../../../protocol/project.ts";
+import { DialogFooter } from "./DialogFooter.tsx";
+import { FormField } from "./FormField.tsx";
 import { Button } from "./ui/button.tsx";
 import {
     Dialog,
@@ -80,8 +82,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreate }: CreateProj
                 </DialogHeader>
 
                 <form onSubmit={(event) => void handleSubmit(event)} className="flex flex-col gap-5">
-                    <label className="flex flex-col gap-2 text-sm font-medium">
-                        {t("projects.name")}
+                    <FormField label={t("projects.name")}>
                         <Input
                             autoFocus
                             value={name}
@@ -89,7 +90,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreate }: CreateProj
                             placeholder={t("projects.namePlaceholder")}
                             disabled={saving}
                         />
-                    </label>
+                    </FormField>
 
                     <div className="flex flex-col gap-2">
                         <div className="flex items-center justify-between gap-3">
@@ -139,9 +140,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreate }: CreateProj
                         )}
                     </div>
 
-                    {error ? <p className="text-sm text-destructive">{error}</p> : null}
-
-                    <div className="flex justify-end gap-2">
+                    <DialogFooter error={error}>
                         <DialogClose asChild>
                             <Button type="button" variant="ghost" disabled={saving}>
                                 {t("projects.cancel")}
@@ -154,7 +153,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreate }: CreateProj
                             <Plus />
                             {t("projects.create")}
                         </Button>
-                    </div>
+                    </DialogFooter>
                 </form>
             </DialogContent>
         </Dialog>

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { LoaderCircle, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { JarvixSessionSummary } from "../../../protocol/session.ts";
+import { DialogFooter } from "./DialogFooter.tsx";
 import { Button } from "./ui/button.tsx";
 import {
     Dialog,
@@ -67,9 +68,7 @@ export function DeleteSessionDialog({
                     </DialogDescription>
                 </DialogHeader>
 
-                {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
-
-                <div className="flex justify-end gap-2">
+                <DialogFooter error={error}>
                     <DialogClose asChild>
                         <Button type="button" variant="ghost" disabled={deleting}>
                             {t("sessions.cancel")}
@@ -84,7 +83,7 @@ export function DeleteSessionDialog({
                         {deleting ? <LoaderCircle className="animate-spin" /> : <Trash2 />}
                         {deleting ? t("sessions.deleting") : t("sessions.deleteConfirm")}
                     </Button>
-                </div>
+                </DialogFooter>
             </DialogContent>
         </Dialog>
     );

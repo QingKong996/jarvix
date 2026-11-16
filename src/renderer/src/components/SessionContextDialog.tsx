@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { JarvixProject } from "../../../protocol/project.ts";
 import type { JarvixSessionContext } from "../../../protocol/session.ts";
 import { Button } from "./ui/button.tsx";
+import { NavigationItem } from "./NavigationItem.tsx";
 import {
     Dialog,
     DialogContent,
@@ -78,30 +79,32 @@ export function SessionContextDialog({
                 </DialogHeader>
 
                 <div className="flex max-h-80 flex-col gap-1 overflow-y-auto">
-                    <button
-                        type="button"
+                    <NavigationItem
                         onClick={() => void apply({})}
                         disabled={saving}
-                        className={contextOptionClass(!context.projectId && !context.workingDirectory)}
+                        active={!context.projectId && !context.workingDirectory}
+                        aria-pressed={!context.projectId && !context.workingDirectory}
+                        className="gap-3"
+                        icon={<Inbox />}
                     >
-                        <Inbox className="size-4 shrink-0" />
                         <span className="min-w-0 flex-1 truncate">{t("projects.temporary")}</span>
                         {!context.projectId && !context.workingDirectory ? <Check className="size-4" /> : null}
-                    </button>
+                    </NavigationItem>
 
                     {projects.length === 0 ? (
                         <p className="px-3 py-2 text-xs text-muted-foreground">{t("projects.empty")}</p>
                     ) : (
                         projects.map((project) => (
-                            <button
+                            <NavigationItem
                                 key={project.id}
-                                type="button"
                                 onClick={() => void apply({ projectId: project.id })}
                                 disabled={saving}
-                                className={contextOptionClass(context.projectId === project.id)}
+                                active={context.projectId === project.id}
+                                aria-pressed={context.projectId === project.id}
+                                className="gap-3"
+                                icon={<Folder />}
                                 title={project.workingDirectories.join("\n")}
                             >
-                                <Folder className="size-4 shrink-0" />
                                 <span className="min-w-0 flex-1">
                                     <span className="block truncate">{project.name}</span>
                                     <span className="block truncate text-xs font-normal text-muted-foreground">
@@ -109,7 +112,7 @@ export function SessionContextDialog({
                                     </span>
                                 </span>
                                 {context.projectId === project.id ? <Check className="size-4" /> : null}
-                            </button>
+                            </NavigationItem>
                         ))
                     )}
                 </div>
@@ -135,16 +138,8 @@ export function SessionContextDialog({
                     </Button>
                 </div>
 
-                {error ? <p className="text-sm text-destructive">{error}</p> : null}
+                {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
             </DialogContent>
         </Dialog>
     );
-}
-
-function contextOptionClass(active: boolean): string {
-    return `flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-        active
-            ? "bg-accent text-accent-foreground"
-            : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-    }`;
 }

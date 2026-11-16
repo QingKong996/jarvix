@@ -23,7 +23,7 @@ const legacyCatalogFile = join(paths.directory, "models-dev.json");
 let mainWindow: BrowserWindow | null = null;
 
 const WINDOW_BACKGROUND: Record<Theme, string> = {
-    dark: "#0b0e14",
+    dark: "#0d1117",
     light: "#ffffff"
 };
 

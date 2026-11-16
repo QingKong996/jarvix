@@ -1,19 +1,24 @@
-import { useEffect, useId, useState, type FormEvent, type ReactNode } from "react";
-import { Eye, EyeOff, Minus, Plus, RefreshCw, X } from "lucide-react";
+import { useEffect, useId, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "./ui/button.tsx";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog.tsx";
-import { Input } from "./ui/input.tsx";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.tsx";
-import { ProviderIcon } from "./ProviderIcon.tsx";
 import {
-    PROVIDER_PROTOCOLS,
     modelDefinitionSchema,
     providerConfigSchema,
     type ModelDefinition,
     type ModelSelection,
     type ProviderConfig
 } from "../../../protocol/providers.ts";
+import { DialogFooter } from "./DialogFooter.tsx";
+import { ModelConfigPanel } from "./providers/ModelConfigPanel.tsx";
+import { ProviderConfigForm } from "./providers/ProviderConfigForm.tsx";
+import { ProviderIcon } from "./ProviderIcon.tsx";
+import { Button } from "./ui/button.tsx";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle
+} from "./ui/dialog.tsx";
 
 type ProviderConfigDialogProps = {
     provider: ProviderConfig;
@@ -44,8 +49,6 @@ export function ProviderConfigDialog({ provider, selectedModel, disabled, onClos
     const [revealed, setRevealed] = useState(false);
     const [syncingModels, setSyncingModels] = useState(false);
     const [error, setError] = useState("");
-    const search = query.trim().toLowerCase();
-    const visibleModels = draft.models.filter((model) => `${model.name} ${model.id}`.toLowerCase().includes(search));
     const modelDirty = editingModel !== undefined &&
         modelDraft !== undefined &&
         JSON.stringify(editingModel.model) !== JSON.stringify(modelDraft);
@@ -80,10 +83,6 @@ export function ProviderConfigDialog({ provider, selectedModel, disabled, onClos
             return;
         }
         activateModelPanel(model);
-    }
-
-    function closeModelPanel(): void {
-        setModelPanelOpen(false);
     }
 
     function closeSwitchDialog(): void {
@@ -127,7 +126,7 @@ export function ProviderConfigDialog({ provider, selectedModel, disabled, onClos
     }
 
     function saveModel(): void {
-        if (applyModelDraft()) closeModelPanel();
+        if (applyModelDraft()) setModelPanelOpen(false);
     }
 
     function saveAndSwitch(): void {
@@ -146,7 +145,7 @@ export function ProviderConfigDialog({ provider, selectedModel, disabled, onClos
     function removeModel(model: ModelDefinition): void {
         update({ models: draft.models.filter((item) => item.id !== model.id) });
         if (selection?.provider === draft.id && selection.id === model.id) setSelection(undefined);
-        if (editingModel?.originalId === model.id) closeModelPanel();
+        if (editingModel?.originalId === model.id) setModelPanelOpen(false);
     }
 
     async function syncModels(): Promise<void> {
@@ -200,7 +199,7 @@ export function ProviderConfigDialog({ provider, selectedModel, disabled, onClos
                     }
                     if (!modelPanelOpen) return;
                     event.preventDefault();
-                    closeModelPanel();
+                    setModelPanelOpen(false);
                 }}
                 onPointerDownOutside={(event) => {
                     if (switchDialogOpen) {
@@ -209,7 +208,7 @@ export function ProviderConfigDialog({ provider, selectedModel, disabled, onClos
                     }
                     if (!modelPanelOpen) return;
                     event.preventDefault();
-                    closeModelPanel();
+                    setModelPanelOpen(false);
                 }}
                 className="gap-0 overflow-hidden p-0"
                 style={{
@@ -228,120 +227,52 @@ export function ProviderConfigDialog({ provider, selectedModel, disabled, onClos
 
                 <div className="relative min-w-0 overflow-hidden">
                     <div className={`flex min-w-0 flex-col transition-[margin-right] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
-                        modelPanelOpen ? "mr-96" : "mr-0"
+                        modelPanelOpen ? "sm:mr-96" : "mr-0"
                     }`}>
-                        <form id={formId} onSubmit={handleSubmit} className="flex max-h-[clamp(18rem,62dvh,32rem)] flex-col gap-4 overflow-y-auto p-6 text-sm">
-                            <Field label={t("settings.providers.name")}>
-                                <Input value={draft.name} required disabled={disabled} onChange={(event) => update({ name: event.target.value })} />
-                            </Field>
-                            <div className="flex items-center justify-between gap-4">
-                                <span className="font-medium">{t("settings.providers.protocol")}</span>
-                                <Select value={draft.protocol} disabled={disabled} onValueChange={(value) => {
-                                    const protocol = PROVIDER_PROTOCOLS.find((item) => item === value);
-                                    if (protocol) update({ protocol });
-                                }}>
-                                    <SelectTrigger className="w-64 max-w-[75%]"><SelectValue /></SelectTrigger>
-                                    <SelectContent>
-                                        {PROVIDER_PROTOCOLS.map((protocol) => <SelectItem key={protocol} value={protocol}>{protocol}</SelectItem>)}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <Field label="Base URL">
-                                <Input required value={draft.baseUrl} disabled={disabled} onChange={(event) => update({ baseUrl: event.target.value })} />
-                            </Field>
-                            <Field label={t("settings.providers.apiKey")}>
-                                <div className="relative">
-                                    <Input
-                                        type={revealed ? "text" : "password"}
-                                        autoComplete="off"
-                                        value={draft.apiKey ?? ""}
-                                        placeholder={draft.env.join(" / ")}
-                                        disabled={disabled}
-                                        onChange={(event) => update({ apiKey: event.target.value })}
-                                        className="pr-10"
-                                    />
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon-xs"
-                                        disabled={disabled}
-                                        aria-label={t(revealed ? "settings.providers.hideKey" : "settings.providers.revealKey")}
-                                        onClick={() => setRevealed(!revealed)}
-                                        className="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground"
-                                    >
-                                        {revealed ? <EyeOff /> : <Eye />}
-                                    </Button>
-                                </div>
-                            </Field>
+                        <ProviderConfigForm
+                            formId={formId}
+                            draft={draft}
+                            disabled={disabled}
+                            syncingModels={syncingModels}
+                            modelPanelOpen={modelPanelOpen}
+                            editingModelId={editingModel?.originalId}
+                            query={query}
+                            revealed={revealed}
+                            onQueryChange={setQuery}
+                            onRevealChange={setRevealed}
+                            onUpdate={update}
+                            onAddModel={addModel}
+                            onSyncModels={() => void syncModels()}
+                            onOpenModel={(model) => openModelPanel({ model, originalId: model.id })}
+                            onRemoveModel={removeModel}
+                            onSubmit={handleSubmit}
+                        />
 
-                            <fieldset className="flex min-w-0 flex-col gap-3 border-t pt-4">
-                                <legend className="pr-2 font-medium">{t("settings.providers.models")}</legend>
-                                <div className="flex items-center justify-between gap-3">
-                                    <Button type="button" variant="outline" disabled={disabled || syncingModels || modelPanelOpen} onClick={addModel}>
-                                        <Plus />
-                                        {t("settings.providers.addModel")}
-                                    </Button>
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        disabled={disabled || syncingModels || modelPanelOpen}
-                                        aria-busy={syncingModels}
-                                        onClick={() => void syncModels()}
-                                    >
-                                        <RefreshCw className={syncingModels ? "animate-spin" : undefined} />
-                                        {t(syncingModels ? "settings.providers.syncingModels" : "settings.providers.syncModels")}
-                                    </Button>
-                                </div>
-                                <Input
-                                    aria-label={t("settings.providers.search")}
-                                    placeholder={t("settings.providers.search")}
-                                    value={query}
-                                    onChange={(event) => setQuery(event.target.value)}
-                                />
-                                <ul className="min-h-28 max-h-44 overflow-y-auto rounded-md border [scrollbar-width:thin]">
-                                    {visibleModels.length > 0 ? visibleModels.map((model) => (
-                                        <ModelListItem
-                                            key={model.id}
-                                            model={model}
-                                            active={modelPanelOpen && editingModel?.originalId === model.id}
-                                            disabled={disabled || syncingModels}
-                                            removeDisabled={disabled || syncingModels || modelPanelOpen}
-                                            onSelect={() => openModelPanel({ model, originalId: model.id })}
-                                            onRemove={() => removeModel(model)}
-                                        />
-                                    )) : (
-                                        <li role="status" className="flex min-h-28 items-center justify-center px-4 text-center text-muted-foreground">
-                                            {t("settings.providers.noModels")}
-                                        </li>
-                                    )}
-                                </ul>
-                            </fieldset>
-                        </form>
-
-                        <div className="flex items-center justify-end gap-3 border-t px-6 py-3">
-                            {error ? <p role="alert" className="mr-auto text-xs text-destructive">{error}</p> : null}
+                        <DialogFooter error={error} className="gap-3 border-t px-6 py-3">
                             <Button type="button" variant="outline" onClick={onClose}>{t("settings.cancel")}</Button>
-                            <Button type="submit" form={formId} disabled={disabled || syncingModels || modelPanelOpen}>{t("settings.save")}</Button>
-                        </div>
+                            <Button type="submit" form={formId} disabled={disabled || syncingModels || modelPanelOpen}>
+                                {t("settings.save")}
+                            </Button>
+                        </DialogFooter>
                     </div>
 
                     <aside
                         inert={!modelPanelOpen}
-                        className={`absolute inset-y-0 right-0 w-96 bg-card transition-[opacity,transform,border-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+                        className={`absolute inset-y-0 right-0 w-full bg-card transition-[opacity,transform,border-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] sm:w-96 ${
                             modelPanelOpen
                                 ? "translate-x-0 border-l opacity-100"
                                 : "pointer-events-none translate-x-full border-l-0 opacity-0"
                         }`}
                     >
                         {editingModel && modelDraft ? (
-                            <ModelConfigPage
+                            <ModelConfigPanel
                                 key={`${editingModel.originalId ?? "new"}-${editingModel.model.id}-${modelEditorVersion}`}
                                 model={modelDraft}
                                 originalId={editingModel.originalId}
                                 error={modelError}
                                 disabled={disabled}
                                 onChange={updateModelDraft}
-                                onClose={closeModelPanel}
+                                onClose={() => setModelPanelOpen(false)}
                                 onSave={saveModel}
                             />
                         ) : null}
@@ -357,161 +288,16 @@ export function ProviderConfigDialog({ provider, selectedModel, disabled, onClos
                     <DialogDescription className="px-6 py-5">
                         {t("settings.providers.unsavedModelDescription", { name: pendingModel?.model.name ?? "" })}
                     </DialogDescription>
-                    <div className="flex items-center justify-end gap-3 border-t px-6 py-3">
+                    <DialogFooter className="gap-3 border-t px-6 py-3">
                         <Button type="button" variant="outline" onClick={discardAndSwitch}>
                             {t("settings.providers.discardChanges")}
                         </Button>
                         <Button type="button" onClick={saveAndSwitch}>
                             {t("settings.save")}
                         </Button>
-                    </div>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </Dialog>
     );
-}
-
-type ModelListItemProps = {
-    model: ModelDefinition;
-    active: boolean;
-    disabled: boolean;
-    removeDisabled: boolean;
-    onSelect: () => void;
-    onRemove: () => void;
-};
-
-function ModelListItem({ model, active, disabled, removeDisabled, onSelect, onRemove }: ModelListItemProps) {
-    const { t } = useTranslation();
-
-    return (
-        <li
-            data-state={active ? "open" : "closed"}
-            className="group flex items-center gap-1 rounded-md px-1 py-1 transition-colors data-[state=closed]:hover:bg-accent data-[state=open]:bg-accent data-[state=open]:text-accent-foreground"
-        >
-            <button
-                type="button"
-                disabled={disabled}
-                aria-pressed={active}
-                onClick={onSelect}
-                className="min-w-0 flex-1 rounded-sm px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed"
-            >
-                <span className="block truncate" title={model.id}>{model.name}</span>
-            </button>
-            <Button
-                type="button"
-                size="icon-xs"
-                variant="secondary"
-                disabled={removeDisabled}
-                aria-label={t("settings.providers.removeModel")}
-                onClick={onRemove}
-                className="mr-1 border border-border bg-muted/40 hover:bg-muted/60"
-            >
-                <Minus />
-            </Button>
-        </li>
-    );
-}
-
-type ModelConfigPageProps = {
-    model: ModelDefinition;
-    originalId?: string;
-    error: string;
-    disabled: boolean;
-    onChange: (patch: Partial<ModelDefinition>) => void;
-    onClose: () => void;
-    onSave: () => void;
-};
-
-function ModelConfigPage({ model, originalId, error, disabled, onChange, onClose, onSave }: ModelConfigPageProps) {
-    const { t } = useTranslation();
-    const titleId = useId();
-
-    function handleSubmit(event: FormEvent<HTMLFormElement>): void {
-        event.preventDefault();
-        onSave();
-    }
-
-    return (
-        <section aria-labelledby={titleId} className="flex h-full min-h-0 flex-col">
-            <div className="flex items-center justify-between gap-3 border-b px-5 py-4">
-                <h3 id={titleId} className="text-base font-semibold">
-                    {originalId === undefined ? t("settings.providers.addModel") : t("settings.providers.modelSettings")}
-                </h3>
-                <Button
-                    type="button"
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label={t("ui.dialog.close")}
-                    onClick={onClose}
-                >
-                    <X />
-                </Button>
-            </div>
-            <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
-                <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-5 text-sm">
-                    <Field label={t("settings.providers.modelName")}>
-                        <Input
-                            required
-                            autoFocus
-                            value={model.name}
-                            disabled={disabled}
-                            onChange={(event) => onChange({ name: event.target.value })}
-                        />
-                    </Field>
-                    <Field label={t("settings.providers.modelId")}>
-                        <Input
-                            required
-                            value={model.id}
-                            disabled={disabled}
-                            onChange={(event) => onChange({ id: event.target.value })}
-                        />
-                    </Field>
-                    <div className="grid grid-cols-2 gap-3">
-                        <Field label={t("settings.providers.contextWindow")}>
-                            <Input
-                                type="number"
-                                min={1}
-                                step={1}
-                                required
-                                value={model.contextWindow}
-                                disabled={disabled}
-                                onChange={(event) => onChange({ contextWindow: Number(event.target.value) })}
-                            />
-                        </Field>
-                        <Field label={t("settings.providers.maxTokens")}>
-                            <Input
-                                type="number"
-                                min={1}
-                                step={1}
-                                required
-                                value={model.maxTokens}
-                                disabled={disabled}
-                                onChange={(event) => onChange({ maxTokens: Number(event.target.value) })}
-                            />
-                        </Field>
-                    </div>
-                    <label className="flex items-center gap-2">
-                        <input
-                            type="checkbox"
-                            checked={model.reasoning}
-                            disabled={disabled}
-                            onChange={(event) => onChange({ reasoning: event.target.checked })}
-                        />
-                        {t("settings.providers.reasoning")}
-                    </label>
-                </div>
-                <div className="flex items-center justify-end gap-2 border-t px-5 py-3">
-                    {error ? <p role="alert" className="mr-auto text-xs text-destructive">{error}</p> : null}
-                    <Button type="button" variant="outline" onClick={onClose}>{t("settings.cancel")}</Button>
-                    <Button type="submit" disabled={disabled}>
-                        {t("settings.providers.applyModel")}
-                    </Button>
-                </div>
-            </form>
-        </section>
-    );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-    return <label className="flex flex-col gap-2"><span className="font-medium">{label}</span>{children}</label>;
 }

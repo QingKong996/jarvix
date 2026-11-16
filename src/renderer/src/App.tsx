@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PanelRightOpen } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useDefaultLayout } from "react-resizable-panels";
@@ -23,6 +23,8 @@ export function App() {
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
     const [config, setConfig] = useState<JarvixConfig | null>(null);
+    const rightSidebarTriggerRef = useRef<HTMLButtonElement>(null);
+    const rightSidebarWasOpen = useRef(false);
     const { defaultLayout, onLayoutChanged } = useDefaultLayout({
         id: LAYOUT_ID,
         onlySaveAfterUserInteractions: true
@@ -55,6 +57,13 @@ export function App() {
         void bridge.getConfig().then(setConfig).catch(() => undefined);
     }, []);
 
+    useEffect(() => {
+        if (rightSidebarWasOpen.current && !rightSidebarOpen) {
+            rightSidebarTriggerRef.current?.focus();
+        }
+        rightSidebarWasOpen.current = rightSidebarOpen;
+    }, [rightSidebarOpen]);
+
     const handleSaved = useCallback((next: JarvixConfig) => {
         setConfig(next);
     }, []);
@@ -77,7 +86,7 @@ export function App() {
 
     return (
         <>
-            <div className="flex h-full overflow-hidden">
+            <div className="relative flex h-full overflow-hidden">
                 <div className="min-w-0 flex-1">
                     <ResizablePanelGroup
                         id={LAYOUT_ID}
@@ -116,6 +125,7 @@ export function App() {
                             <main className="relative flex h-full min-h-0 min-w-0 flex-col">
                                 {!rightSidebarOpen ? (
                                     <Button
+                                        ref={rightSidebarTriggerRef}
                                         type="button"
                                         variant="secondary"
                                         size="icon-sm"

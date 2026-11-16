@@ -1,27 +1,14 @@
-import { Fragment, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { Check, ChevronLeft, ChevronRight, ChevronUp, Folder, Send } from "lucide-react";
+import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { ArrowUp, ChevronUp, Folder } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { cn } from "cn";
 import { Button } from "@/components/ui/button";
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuLabel,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import type { JarvixConfig } from "../../../protocol/config.ts";
 import type { JarvixProject } from "../../../protocol/project.ts";
-import {
-    availableReasoningLevels,
-    resolveConfiguredModel,
-    resolveReasoningLevel,
-    type ModelDefinition,
-    type ModelSelection,
-    type ReasoningLevel
-} from "../../../protocol/providers.ts";
 import type { JarvixSessionContext } from "../../../protocol/session.ts";
+import { CHAT_COLUMN, CONTENT_GUTTER } from "../layout.ts";
+import { ComposerModelMenu } from "./composer/ComposerModelMenu.tsx";
 import { SessionContextDialog } from "./SessionContextDialog.tsx";
 
 type ComposerProps = {
@@ -32,21 +19,6 @@ type ComposerProps = {
     config: JarvixConfig | null;
     onConfigChange: (config: JarvixConfig) => Promise<void>;
     onContextChange: (context: JarvixSessionContext) => Promise<void>;
-};
-
-type MenuView = "root" | "model" | "reasoning";
-
-type ComposerModel = {
-    selection: ModelSelection;
-    name: string;
-    reasoning: boolean;
-    reasoningLevels?: ModelDefinition["reasoningLevels"];
-};
-
-type ProviderGroup = {
-    id: string;
-    name: string;
-    models: ComposerModel[];
 };
 
 export function Composer({
@@ -60,75 +32,28 @@ export function Composer({
 }: ComposerProps) {
     const { t } = useTranslation();
     const [value, setValue] = useState("");
-    const resolved = resolveConfiguredModel(config?.providers, config?.selectedModel);
-    const selection = resolved?.selection;
-    const providerGroups = providerGroupsFor(config);
-    const selectedModel = selection
-        ? providerGroups
-            .flatMap((provider) => provider.models)
-            .find((item) => item.selection.provider === selection.provider && item.selection.id === selection.id)
-        : undefined;
-    const model = selectedModel?.name ?? selection?.id ?? "";
-    const reasoningLevels = selectedModel ? availableReasoningLevels(selectedModel) : [];
-    const reasoningLevel = selectedModel ? resolveReasoningLevel(selectedModel, config?.reasoning) : undefined;
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
-    const [menuOpen, setMenuOpen] = useState(false);
     const [contextOpen, setContextOpen] = useState(false);
-    const [menuView, setMenuView] = useState<MenuView>("root");
-    const firstMenuItemRef = useRef<HTMLDivElement>(null);
-
-    const reasoningLabel = reasoningLevel ? t(`composer.reasoningLevels.${reasoningLevel}`) : "";
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
     const selectedProject = projects.find((project) => project.id === sessionContext.projectId);
     const workingDirectoryName = sessionContext.workingDirectory
         ? sessionContext.workingDirectory.split(/[\\/]/).filter(Boolean).at(-1) ?? sessionContext.workingDirectory
         : null;
     const contextLabel = selectedProject?.name ?? workingDirectoryName ?? t("projects.temporary");
 
-    useLayoutEffect(() => {
-        if (menuOpen) {
-            firstMenuItemRef.current?.focus();
-        }
-    }, [menuOpen, menuView]);
-
-    function handleMenuOpenChange(next: boolean): void {
-        setMenuOpen(next);
-        if (next) {
-            setMenuView("root");
-        }
-    }
-
-    function showMenuView(event: Event, view: MenuView): void {
-        event.preventDefault();
-        setMenuView(view);
-    }
-
-    async function save(next: JarvixConfig): Promise<void> {
+    async function saveConfig(next: JarvixConfig): Promise<boolean> {
         setSaving(true);
         setError("");
         try {
             await onConfigChange(next);
-            setMenuOpen(false);
+            return true;
         } catch (cause) {
             setError(String(cause));
+            return false;
         } finally {
             setSaving(false);
         }
-    }
-
-    function selectModel(next: ComposerModel): void {
-        if (!config) return;
-        const reasoning = resolveReasoningLevel(next, config.reasoning);
-        if (reasoning) {
-            void save({ ...config, selectedModel: next.selection, reasoning });
-            return;
-        }
-        const { reasoning: _reasoning, ...withoutReasoning } = config;
-        void save({ ...withoutReasoning, selectedModel: next.selection });
-    }
-
-    function selectReasoningLevel(next: ReasoningLevel): void {
-        if (config) void save({ ...config, reasoning: next });
     }
 
     function handleSubmit(event: FormEvent<HTMLFormElement>): void {
@@ -139,6 +64,7 @@ export function Composer({
         }
         setValue("");
         onSubmit(question);
+        textareaRef.current?.focus();
     }
 
     function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
@@ -156,9 +82,10 @@ export function Composer({
 
     return (
         <>
-            <form onSubmit={handleSubmit} className="px-14 py-3">
-                <div className="flex flex-col gap-1 rounded-xl border bg-card p-1.5 shadow-sm transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
+            <form onSubmit={handleSubmit} className={cn(CONTENT_GUTTER, "py-3")}>
+                <div className={cn(CHAT_COLUMN, "flex flex-col gap-1 rounded-xl border bg-composer p-1.5 shadow-sm")}>
                     <Textarea
+                        ref={textareaRef}
                         rows={1}
                         autoComplete="off"
                         autoFocus
@@ -172,10 +99,12 @@ export function Composer({
                     <div className="flex min-w-0 items-center gap-1">
                         <Button
                             type="button"
-                            variant="secondary"
+                            variant="ghost"
                             size="sm"
                             onClick={() => setContextOpen(true)}
                             disabled={disabled || saving}
+                            aria-haspopup="dialog"
+                            aria-expanded={contextOpen}
                             className="h-8 min-w-0 max-w-[45%] shrink justify-start gap-1 px-2 text-xs font-normal"
                             title={contextLabel}
                         >
@@ -185,113 +114,21 @@ export function Composer({
                         </Button>
 
                         <div className="ml-auto flex min-w-0 items-center justify-end gap-1">
-                            <DropdownMenu open={menuOpen} onOpenChange={handleMenuOpenChange}>
-                                <DropdownMenuTrigger asChild>
-                                    <Button
-                                        type="button"
-                                        variant="secondary"
-                                        size="sm"
-                                        disabled={disabled || !config || saving}
-                                        className="h-8 min-w-0 max-w-72 shrink justify-start gap-1 px-2 text-xs font-normal"
-                                        title={[model, reasoningLabel].filter(Boolean).join(" ")}
-                                    >
-                                        <span className="min-w-0 truncate">{model}</span>
-                                        {reasoningLabel ? (
-                                            <span className="shrink-0 text-muted-foreground">{reasoningLabel}</span>
-                                        ) : null}
-                                        <ChevronUp className="size-3.5 shrink-0 opacity-60" />
-                                    </Button>
-                                </DropdownMenuTrigger>
-
-                                <DropdownMenuContent
-                                    side="top"
-                                    align="end"
-                                    sideOffset={8}
-                                    className="max-h-80 min-w-56 overflow-y-auto"
-                                >
-                                    {menuView === "root" ? (
-                                        <>
-                                            <DropdownMenuItem
-                                                ref={firstMenuItemRef}
-                                                onSelect={(event) => showMenuView(event, "model")}
-                                            >
-                                                {t("composer.model")}
-                                                <span className="ml-auto text-muted-foreground">{model}</span>
-                                                <ChevronRight className="size-3.5 opacity-60" />
-                                            </DropdownMenuItem>
-
-                                            {reasoningLevels.length > 0 ? (
-                                                <DropdownMenuItem onSelect={(event) => showMenuView(event, "reasoning")}>
-                                                    {t("composer.reasoning")}
-                                                    <span className="ml-auto text-muted-foreground">{reasoningLabel}</span>
-                                                    <ChevronRight className="size-3.5 opacity-60" />
-                                                </DropdownMenuItem>
-                                            ) : null}
-                                        </>
-                                    ) : (
-                                        <>
-                                            <DropdownMenuItem
-                                                ref={firstMenuItemRef}
-                                                className="text-muted-foreground"
-                                                onSelect={(event) => showMenuView(event, "root")}
-                                            >
-                                                <ChevronLeft className="size-3.5" />
-                                                {menuView === "model" ? t("composer.model") : t("composer.reasoning")}
-                                            </DropdownMenuItem>
-
-                                            <DropdownMenuSeparator />
-
-                                            {menuView === "model"
-                                                ? providerGroups.map((provider, index) => (
-                                                      <Fragment key={provider.id}>
-                                                          {index > 0 ? <DropdownMenuSeparator /> : null}
-                                                          <DropdownMenuLabel>{provider.name}</DropdownMenuLabel>
-                                                          {provider.models.map((option) => (
-                                                              <DropdownMenuItem
-                                                                  key={`${option.selection.provider}/${option.selection.id}`}
-                                                                  disabled={saving}
-                                                                  onSelect={(event) => {
-                                                                      event.preventDefault();
-                                                                      selectModel(option);
-                                                                  }}
-                                                              >
-                                                                  {option.name}
-                                                                  {option.selection.provider === selection?.provider
-                                                                  && option.selection.id === selection?.id
-                                                                      ? <Check className="ml-auto size-3.5" />
-                                                                      : null}
-                                                              </DropdownMenuItem>
-                                                          ))}
-                                                      </Fragment>
-                                                  ))
-                                                : reasoningLevels.map((level) => (
-                                                      <DropdownMenuItem
-                                                          key={level}
-                                                          disabled={saving}
-                                                          onSelect={(event) => {
-                                                              event.preventDefault();
-                                                              selectReasoningLevel(level);
-                                                          }}
-                                                      >
-                                                          {t(`composer.reasoningLevels.${level}`)}
-                                                          {level === reasoningLevel ? (
-                                                              <Check className="ml-auto size-3.5" />
-                                                          ) : null}
-                                                      </DropdownMenuItem>
-                                                  ))}
-                                        </>
-                                    )}
-                                </DropdownMenuContent>
-                            </DropdownMenu>
+                            <ComposerModelMenu
+                                config={config}
+                                disabled={disabled}
+                                saving={saving}
+                                onSave={saveConfig}
+                            />
 
                             <Button
                                 type="submit"
                                 size="icon-sm"
-                                className="shrink-0"
+                                className="shrink-0 p-0"
                                 aria-label={t("composer.send")}
                                 disabled={disabled || saving || value.trim().length === 0}
                             >
-                                <Send />
+                                <ArrowUp aria-hidden="true" className="size-4" />
                             </Button>
                         </div>
                     </div>
@@ -308,20 +145,4 @@ export function Composer({
             />
         </>
     );
-}
-
-function providerGroupsFor(config: JarvixConfig | null): ProviderGroup[] {
-    return config?.providers?.flatMap((provider) => {
-        if (provider.models.length === 0) return [];
-        return [{
-            id: provider.id,
-            name: provider.name,
-            models: provider.models.map((model) => ({
-                selection: { provider: provider.id, id: model.id },
-                name: model.name,
-                reasoning: model.reasoning,
-                reasoningLevels: model.reasoningLevels
-            }))
-        }];
-    }) ?? [];
 }

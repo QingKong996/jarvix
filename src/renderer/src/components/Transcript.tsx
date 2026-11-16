@@ -1,8 +1,10 @@
 import { memo, useEffect, useRef, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
+import { cn } from "cn";
 import { useCommitted, useLive } from "../transcript-hooks.ts";
 import { subscribeCommitted, subscribeLive } from "../transcript-store.ts";
 import type { CommittedTurn, LiveTurn } from "../types.ts";
+import { CHAT_COLUMN, CONTENT_GUTTER } from "../layout.ts";
 import { Markdown } from "./Markdown.tsx";
 import { ThinkingBlock } from "./ThinkingBlock.tsx";
 import { ToolCallBlock } from "./ToolCallBlock.tsx";
@@ -12,7 +14,7 @@ const CommittedTurnView = memo(function CommittedTurnView({ turn }: { turn: Comm
 
     if (turn.role === "user") {
         return (
-            <p className="max-w-[85%] self-end rounded-lg bg-primary px-3 py-2 text-sm leading-relaxed break-words whitespace-pre-wrap text-primary-foreground">
+            <p className="max-w-[85%] self-end rounded-lg bg-secondary px-3 py-2 text-sm leading-relaxed break-words whitespace-pre-wrap text-secondary-foreground">
                 {turn.text}
             </p>
         );
@@ -40,7 +42,7 @@ const CommittedTurnView = memo(function CommittedTurnView({ turn }: { turn: Comm
                 }
                 return <Markdown key={index} text={block.text} />;
             })}
-            {turn.error ? <p className="text-[13px] text-destructive">{turn.error}</p> : null}
+            {turn.error ? <p role="alert" className="text-[13px] text-destructive">{turn.error}</p> : null}
         </div>
     );
 });
@@ -134,10 +136,14 @@ export function Transcript({ sessionId }: { sessionId: string | null }) {
         <section
             ref={containerRef}
             data-session-id={sessionId ?? undefined}
-            className="flex min-h-0 flex-1 flex-col gap-3 overflow-x-hidden overflow-y-auto px-14 py-8"
+            className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto"
         >
-            <CommittedList />
-            <LiveSlot />
+            <div className={cn("flex min-h-full flex-col gap-3 py-8", CONTENT_GUTTER)}>
+                <div className={cn("flex flex-col gap-3", CHAT_COLUMN)}>
+                    <CommittedList />
+                    <LiveSlot />
+                </div>
+            </div>
         </section>
     );
 }
