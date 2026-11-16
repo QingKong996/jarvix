@@ -2,6 +2,7 @@ import type {
     LlmAdapter,
     LlmAssistantMessage,
     LlmMessage,
+    LlmRequest,
     LlmSystemMessage,
     LlmSystemNotice,
     LlmToolCallBlock,
@@ -12,24 +13,32 @@ import type { JarvixConfig } from "../../protocol/config.ts";
 import type { JarvixEvent } from "../../protocol/event.ts";
 import type { JarvixSession, JarvixSessionMeta } from "../../protocol/session.ts";
 import {
+    resolveConfiguredModel,
+    resolveReasoningLevel
+} from "../../protocol/providers.ts";
+import {
     createDefaultTools,
     type ToolExecutionResult,
     type ToolExecutor
 } from "../../tools/index.ts";
 import { createToolCallViewData, toToolResultDetails, type ToolCallViewData } from "../../tools/view.ts";
 import { appendSessionMessage } from "./store.ts";
-import {
-    resolveConfiguredModel,
-    resolveReasoningLevel
-} from "../../protocol/providers.ts";
 
 const SYSTEM_PROMPT = `Respond to the user in Chinese. Current operating system: ${process.platform}.`;
 const PERSIST_ATTEMPTS = 2;
-const MAX_TOOL_ROUNDS = 32;
+export const MAX_TOOL_ROUNDS = 32;
 
 type PendingPrompt = {
     id: string;
     text: string;
+};
+
+type TurnDecision = "continue" | "complete" | "failed";
+
+type TurnContext = {
+    runtime: SessionRuntime;
+    signal: AbortSignal;
+    request: Omit<LlmRequest, "messages" | "signal">;
 };
 
 export type SessionRuntime = {
@@ -82,6 +91,17 @@ export class Session {
             if (!model) {
                 throw new Error(`Model not found: ${selection.provider}/${selection.id}`);
             }
+            const turn: TurnContext = {
+                runtime,
+                signal,
+                request: {
+                    model,
+                    systemPrompt: systemPromptFor(runtime.workingDirectories),
+                    reasoning: resolveReasoningLevel(definition, runtime.config.reasoning),
+                    apiKey: provider?.apiKey,
+                    tools: this.tools.definitions
+                }
+            };
 
             const questionMessage: LlmUserMessage = {
                 role: "user",
@@ -90,7 +110,7 @@ export class Session {
             };
             this.append(questionMessage);
 
-            for (let round = 0; ; round += 1) {
+            for (let round = 0; ;) {
                 if (signal.aborted) {
                     break;
                 }
@@ -98,70 +118,19 @@ export class Session {
                     throw new Error(`Tool call limit exceeded (${MAX_TOOL_ROUNDS})`);
                 }
 
-                const stream = runtime.llm.stream({
-                    model,
-                    messages: [...this.history],
-                    systemPrompt: systemPromptFor(runtime.workingDirectories),
-                    reasoning: resolveReasoningLevel(definition, runtime.config.reasoning),
-                    apiKey: provider?.apiKey,
-                    tools: this.tools.definitions,
-                    signal
-                });
-
-                let completed: LlmAssistantMessage | undefined;
-                for await (const event of stream) {
-                    if (signal.aborted) {
-                        break;
-                    }
-                    runtime.emit(event);
-                    if (event.type === "done") {
-                        completed = event.message;
-                        this.append(event.message);
-                        this.toolUseOpen = event.message.stopReason === "toolUse";
-                    } else if (event.type === "error") {
-                        completed = undefined;
-                    }
-                }
-
-                if (signal.aborted) {
+                const decision = await this.takeTurn(turn);
+                if (signal.aborted || decision === "failed") {
                     break;
                 }
-                if (!completed) {
-                    break;
-                }
-                const toolCalls = completed.stopReason === "toolUse"
-                    ? completed.content.filter(
-                        (block): block is LlmToolCallBlock => block.type === "toolCall"
-                    )
-                    : [];
-                if (toolCalls.length > 0) {
-                    try {
-                        for (const [index, toolCall] of toolCalls.entries()) {
-                            if (signal.aborted) {
-                                for (const remaining of toolCalls.slice(index)) {
-                                    this.finishCancelledToolCall(remaining, runtime);
-                                }
-                                break;
-                            }
-                            await this.executeToolCall(toolCall, runtime, signal);
-                        }
-                    } finally {
-                        this.toolUseOpen = false;
-                        this.flushPendingSystemMessages(runtime);
-                    }
-                } else {
-                    this.toolUseOpen = false;
-                    this.flushPendingSystemMessages(runtime);
-                }
-                if (signal.aborted) {
-                    break;
-                }
-
-                const injected = this.insertPendingPrompts(runtime);
-                if (toolCalls.length > 0 || injected) {
+                if (this.pendingPrompts.length > 0) {
+                    this.insertPendingPrompts(runtime);
+                    round = 0;
                     continue;
                 }
-                break;
+                if (decision === "complete") {
+                    break;
+                }
+                round += 1;
             }
         } catch (error) {
             if (signal.aborted) {
@@ -199,6 +168,69 @@ export class Session {
         }
         this.pendingPrompts.push({ id, text });
         return true;
+    }
+
+    private async takeTurn(
+        turn: TurnContext
+    ): Promise<TurnDecision> {
+        const { runtime, signal } = turn;
+        if (signal.aborted) {
+            return "failed";
+        }
+
+        let completed: LlmAssistantMessage | undefined;
+        for await (const event of runtime.llm.stream({
+            ...turn.request,
+            messages: [...this.history],
+            signal
+        })) {
+            if (signal.aborted) {
+                break;
+            }
+            runtime.emit(event);
+            if (event.type === "done") {
+                completed = event.message;
+                this.append(event.message);
+                this.toolUseOpen = event.message.stopReason === "toolUse";
+            } else if (event.type === "error") {
+                completed = undefined;
+            }
+        }
+
+        if (signal.aborted || !completed) {
+            return "failed";
+        }
+
+        const toolCalls = completed.stopReason === "toolUse"
+            ? completed.content.filter(
+                (block): block is LlmToolCallBlock => block.type === "toolCall"
+            )
+            : [];
+        if (toolCalls.length > 0) {
+            try {
+                for (const [index, toolCall] of toolCalls.entries()) {
+                    if (signal.aborted) {
+                        for (const remaining of toolCalls.slice(index)) {
+                            this.finishCancelledToolCall(remaining, runtime);
+                        }
+                        break;
+                    }
+                    await this.executeToolCall(toolCall, runtime, signal);
+                }
+            } finally {
+                this.toolUseOpen = false;
+                this.flushPendingSystemMessages(runtime);
+            }
+        } else {
+            this.toolUseOpen = false;
+            this.flushPendingSystemMessages(runtime);
+        }
+
+        if (signal.aborted) {
+            return "failed";
+        }
+
+        return toolCalls.length > 0 ? "continue" : "complete";
     }
 
     snapshot(): JarvixSession {
@@ -286,29 +318,22 @@ export class Session {
             }
         }
 
-        runtime.emit({
-            type: "tool.end",
-            toolCallId: toolCall.id,
-            toolName: toolCall.name,
-            data: result.data,
-            isError: result.isError,
-            endReason: result.endReason
-        });
-
-        const message: LlmToolResultMessage = {
-            role: "toolResult",
-            toolCallId: toolCall.id,
-            toolName: toolCall.name,
-            content: result.content,
-            details: toToolResultDetails(result.data),
-            isError: result.isError,
-            timestamp: Date.now()
-        };
-        this.append(message);
+        this.completeToolCall(toolCall, result, runtime);
     }
 
     private finishCancelledToolCall(toolCall: LlmToolCallBlock, runtime: SessionRuntime): void {
-        const result = cancelledToolResult(toolCall);
+        this.completeToolCall(
+            toolCall,
+            failedToolResult(toolCall, "Tool execution stopped."),
+            runtime
+        );
+    }
+
+    private completeToolCall(
+        toolCall: LlmToolCallBlock,
+        result: ToolExecutionResult,
+        runtime: SessionRuntime
+    ): void {
         runtime.emit({
             type: "tool.end",
             toolCallId: toolCall.id,
@@ -360,10 +385,7 @@ export class Session {
         this.flushPendingSystemMessages(runtime);
     }
 
-    private insertPendingPrompts(runtime: SessionRuntime): boolean {
-        if (this.pendingPrompts.length === 0) {
-            return false;
-        }
+    private insertPendingPrompts(runtime: SessionRuntime): void {
         while (this.pendingPrompts.length > 0) {
             const pending = this.pendingPrompts[0]!;
             const message: LlmUserMessage = {
@@ -379,7 +401,6 @@ export class Session {
                 text: pending.text
             });
         }
-        return true;
     }
 
     private flushPendingSystemMessages(runtime: SessionRuntime): void {
@@ -447,20 +468,6 @@ function systemPromptFor(workingDirectories: readonly string[] = []): string {
 }
 
 function failedToolResult(toolCall: LlmToolCallBlock, output: string): ToolExecutionResult {
-    const data: ToolCallViewData = {
-        ...createToolCallViewData(toolCall.name, toolCall.arguments, "failed"),
-        output
-    };
-    return {
-        content: output,
-        data,
-        isError: true,
-        endReason: "exited"
-    };
-}
-
-function cancelledToolResult(toolCall: LlmToolCallBlock): ToolExecutionResult {
-    const output = "Tool execution stopped.";
     const data: ToolCallViewData = {
         ...createToolCallViewData(toolCall.name, toolCall.arguments, "failed"),
         output

@@ -11,7 +11,7 @@ import type {
 } from "../../llm/types.ts";
 import type { JarvixEvent } from "../../protocol/event.ts";
 import type { JarvixSessionMeta } from "../../protocol/session.ts";
-import { Session } from "./session.ts";
+import { MAX_TOOL_ROUNDS, Session } from "./session.ts";
 import { appendSessionMessage } from "./store.ts";
 import { providerConfigSchema } from "../../protocol/providers.ts";
 import { BackgroundTaskManager, type ToolExecutor } from "../../tools/index.ts";
@@ -496,6 +496,76 @@ test("injects prompts after tool execution before the next LLM request", async (
     const injected = events.findIndex((event) => event.type === "prompt.injected");
     expect(toolEnd).toBeGreaterThan(-1);
     expect(injected).toBeGreaterThan(toolEnd);
+});
+
+test("resets the round limit after injecting a prompt", async () => {
+    let session!: Session;
+    let toolRuns = 0;
+    const tools: ToolExecutor = {
+        definitions: [{
+            name: "exec_command",
+            description: "Run a command",
+            parameters: { type: "object", properties: {} }
+        }],
+        handles: (name) => name === "exec_command",
+        execute: async () => {
+            toolRuns += 1;
+            if (toolRuns === MAX_TOOL_ROUNDS) {
+                expect(session.injectPrompt("fresh prompt", "fresh-prompt")).toBe(true);
+            }
+            return {
+                content: "Command exited with code 0.",
+                data: {
+                    kind: "shell.exec_command",
+                    command: "echo hi",
+                    output: "hi\n",
+                    status: "completed"
+                },
+                isError: false,
+                endReason: "exited"
+            };
+        },
+        dispose: () => undefined
+    };
+    let llmCalls = 0;
+    const llm: LlmAdapter = {
+        getModel: () => MODEL,
+        stream(request) {
+            llmCalls += 1;
+            const last = request.messages.at(-1);
+            const injected = last?.role === "user" && last.content === "fresh prompt";
+            const message: LlmAssistantMessage = injected
+                ? assistantMessage()
+                : {
+                    ...assistantMessage(),
+                    content: [{
+                        type: "toolCall",
+                        id: `call-${llmCalls}`,
+                        name: "exec_command",
+                        arguments: { command: "echo hi", cwd: process.cwd(), timeoutMs: 1000 }
+                    }],
+                    stopReason: "toolUse"
+                };
+            return (async function* (): AsyncIterable<LlmStreamEvent> {
+                yield { type: "done", message };
+            })();
+        }
+    };
+    session = new Session(meta, [], tools);
+
+    await session.request("first", {
+        llm,
+        config: TEST_CONFIG,
+        emit: () => undefined
+    });
+
+    expect(toolRuns).toBe(MAX_TOOL_ROUNDS);
+    expect(llmCalls).toBe(MAX_TOOL_ROUNDS + 1);
+    expect(session.snapshot().messages.at(-2)).toMatchObject({
+        role: "user",
+        content: "fresh prompt"
+    });
+    expect(session.snapshot().messages.at(-1)).toMatchObject({ role: "assistant" });
 });
 
 test("stops accepting stream events after an abort", async () => {

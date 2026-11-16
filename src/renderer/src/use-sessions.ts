@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isFunctionCallResultEvent } from "../../protocol/event.ts";
 import type { JarvixProject } from "../../protocol/project.ts";
 import {
     sessionContextFrom,
@@ -8,6 +7,7 @@ import {
     type JarvixSessionSummary
 } from "../../protocol/session.ts";
 import { ingestBackgroundTasks } from "./background-task-store.ts";
+import { RequestEventGate } from "./request-event-gate.ts";
 import {
     beginTurn,
     discardInjectedPrompt,
@@ -31,11 +31,10 @@ export function useSessions() {
     const [busy, setBusy] = useState(false);
     const [running, setRunning] = useState(false);
     const [ready, setReady] = useState(false);
+    const [requestEventGate] = useState(() => new RequestEventGate());
     const activeSessionIdRef = useRef<string | null>(null);
     const requestSessionIdRef = useRef<string | null>(null);
     const requestCompletionRef = useRef<Promise<void> | null>(null);
-    const pausedSessionIdsRef = useRef(new Set<string>());
-    const awaitingStartSessionIdsRef = useRef(new Set<string>());
     const requestInFlightRef = useRef(false);
     const sessionContextRef = useRef<JarvixSessionContext>({});
     const hasUserMessagesRef = useRef(false);
@@ -100,21 +99,7 @@ export function useSessions() {
 
         let cancelled = false;
         const unsubscribe = bridge.onEvents((batch) => {
-            let events = batch.events;
-            if (awaitingStartSessionIdsRef.current.has(batch.sessionId)) {
-                const startIndex = batch.events.findIndex((event) => event.type === "start");
-                if (startIndex === -1) {
-                    events = batch.events.filter(isFunctionCallResultEvent);
-                } else {
-                    awaitingStartSessionIdsRef.current.delete(batch.sessionId);
-                    events = [
-                        ...batch.events.slice(0, startIndex).filter(isFunctionCallResultEvent),
-                        ...batch.events.slice(startIndex)
-                    ];
-                }
-            } else if (pausedSessionIdsRef.current.has(batch.sessionId)) {
-                events = batch.events.filter(isFunctionCallResultEvent);
-            }
+            const events = requestEventGate.filter(batch.sessionId, batch.events);
             if (events.length === 0) {
                 return;
             }
@@ -163,7 +148,7 @@ export function useSessions() {
             cancelled = true;
             unsubscribe();
         };
-    }, [activateSession, updateSessionName]);
+    }, [activateSession, requestEventGate, updateSessionName]);
 
     const startNewSession = useCallback((projectId?: string | null): void => {
         if (!bridge || !ready || busy) {
@@ -358,9 +343,7 @@ export function useSessions() {
                 sessionId = created.meta.id;
             }
             requestSessionIdRef.current = sessionId;
-            if (pausedSessionIdsRef.current.delete(sessionId)) {
-                awaitingStartSessionIdsRef.current.add(sessionId);
-            }
+            requestEventGate.resume(sessionId);
             setRunning(true);
             beginTurn(question);
             hasUserMessagesRef.current = true;
@@ -383,7 +366,7 @@ export function useSessions() {
             setBusy(false);
             await refreshSessions();
         }
-    }, [activateSession, refreshSessions]);
+    }, [activateSession, refreshSessions, requestEventGate]);
 
     const startRequest = useCallback(async (
         question: string,
@@ -438,15 +421,16 @@ export function useSessions() {
             return;
         }
         stopTurn();
-        pausedSessionIdsRef.current.add(sessionId);
-        awaitingStartSessionIdsRef.current.delete(sessionId);
+        requestEventGate.pause(sessionId);
         setRunning(false);
         try {
             await bridge.stopRequest(sessionId);
         } catch {
+            requestEventGate.cancelPause(sessionId);
+            setRunning(true);
             return;
         }
-    }, []);
+    }, [requestEventGate]);
 
     return {
         projects,
