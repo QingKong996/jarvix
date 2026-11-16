@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "cn";
 import type { ToolCallEndReason } from "../../../tools/types.ts";
 import type { ToolCallViewData } from "../../../tools/view.ts";
+import { ApplyPatchDiff } from "./ApplyPatchDiff.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -35,7 +36,9 @@ export function ToolCallBlock({ toolName, data, isError, endReason }: ToolCallBl
 
             <CollapsibleContent>
                 <div className="flex flex-col gap-2 border-l-2 pl-3">
-                    {data.kind === "generic" ? (
+                    {data.kind === "apply_patch" ? (
+                        <ApplyPatchDiff patch={data.patch} />
+                    ) : data.kind === "generic" ? (
                         <pre className="font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-muted-foreground">
                             {JSON.stringify(data.arguments, null, 2)}
                         </pre>
@@ -47,7 +50,7 @@ export function ToolCallBlock({ toolName, data, isError, endReason }: ToolCallBl
                             {data.command}
                         </code>
                     )}
-                    {data.output.length > 0 ? (
+                    {data.output.length > 0 && (data.kind !== "apply_patch" || isError) ? (
                         <ToolOutput text={data.output} streaming={streaming} />
                     ) : null}
                 </div>
@@ -84,6 +87,9 @@ function toolLabel(toolName: string, data: ToolCallViewData, t: TFunction<"trans
     }
     if (data.kind === "shell.write_stdin") {
         return t("tools.writeStdin");
+    }
+    if (data.kind === "apply_patch") {
+        return t("tools.applyPatch");
     }
     return `${t("tools.generic")} · ${toolName}`;
 }

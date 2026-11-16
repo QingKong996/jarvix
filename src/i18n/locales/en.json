@@ -92,6 +92,7 @@
     "tools": {
         "execCommand": "Run command",
         "writeStdin": "Write to shell",
+        "applyPatch": "Edit files",
         "generic": "Tool call",
         "status": {
             "running": "Running…",
