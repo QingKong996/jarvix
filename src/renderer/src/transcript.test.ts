@@ -55,6 +55,82 @@ test("keeps streamed content when a request fails before a complete message", ()
     });
 });
 
+test("keeps streamed thinking and text when the turn is stopped", () => {
+    const started = transcriptReducer(initialTranscriptState, {
+        type: "turn.send",
+        userId: "user-1",
+        assistantId: "assistant-1",
+        text: "hello"
+    });
+    const streaming = transcriptReducer(started, {
+        type: "events.batch",
+        events: [
+            { type: "start" },
+            { type: "thinking.delta", index: 0, delta: "plan" },
+            { type: "text.delta", index: 1, delta: "partial" }
+        ]
+    });
+
+    const stopped = transcriptReducer(streaming, { type: "turn.stop" });
+
+    expect(stopped.live).toBeNull();
+    expect(stopped.committed.at(-1)).toMatchObject({
+        role: "assistant",
+        blocks: [
+            { type: "thinking", thinking: "plan" },
+            { type: "text", text: "partial" }
+        ],
+        error: null,
+        reason: "aborted"
+    });
+});
+
+test("shows an injected prompt below the live response until it enters the next round", () => {
+    const started = transcriptReducer(initialTranscriptState, {
+        type: "turn.send",
+        userId: "user-1",
+        assistantId: "assistant-1",
+        text: "first"
+    });
+    const streaming = transcriptReducer(started, {
+        type: "events.batch",
+        events: [
+            { type: "start" },
+            { type: "text.delta", index: 0, delta: "working" }
+        ]
+    });
+    const injected = transcriptReducer(streaming, {
+        type: "turn.inject",
+        userId: "user-2",
+        text: "follow up"
+    });
+
+    expect(injected.committed.map((turn) => turn.role)).toEqual(["user"]);
+    expect(injected.live?.blocks).toEqual([{ index: 0, kind: "text", text: "working" }]);
+    expect(injected.injected).toEqual([expect.objectContaining({
+        id: "user-2",
+        role: "user",
+        text: "follow up"
+    })]);
+
+    const completed = transcriptReducer(injected, {
+        type: "events.batch",
+        events: [{ type: "done", message }]
+    });
+    const nextRound = transcriptReducer(completed, {
+        type: "events.batch",
+        events: [
+            { type: "prompt.injected", promptId: "user-2", text: "follow up" },
+            { type: "start" }
+        ]
+    });
+
+    expect(nextRound.injected).toEqual([]);
+    expect(nextRound.committed.map((turn) => turn.role)).toEqual(["user", "assistant", "user"]);
+    expect(nextRound.committed[2]?.text).toBe("follow up");
+    expect(nextRound.live).not.toBeNull();
+});
+
 test("hydrates and updates shell tool output", () => {
     const toolCall = {
         type: "toolCall" as const,

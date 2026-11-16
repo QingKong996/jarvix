@@ -2,8 +2,8 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSyn
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, expect, test } from "vitest";
-import type { LlmAssistantMessage, LlmUserMessage } from "../llm/types.ts";
-import type { JarvixSessionMeta } from "../protocol/session.ts";
+import type { LlmAssistantMessage, LlmUserMessage } from "../../llm/types.ts";
+import type { JarvixSessionMeta } from "../../protocol/session.ts";
 import {
     SESSION_FORMAT_VERSION,
     appendSessionMessage,

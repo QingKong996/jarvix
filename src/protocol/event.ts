@@ -42,6 +42,16 @@ export type JarvixEvent = LlmStreamEvent
   } | {
     type: "session.renamed";
     name: string;
+  } | {
+    type: "prompt.injected";
+    promptId: string;
+    text: string;
   };
 
 export type JarvixListener = (jarvixEvent: JarvixEvent, sessionId: string) => void;
+
+export function isFunctionCallResultEvent(
+    event: JarvixEvent
+): event is Extract<JarvixEvent, { type: "tool.end" }> {
+    return event.type === "tool.end";
+}

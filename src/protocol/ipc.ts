@@ -6,6 +6,8 @@ import type { JarvixSession, JarvixSessionContext, JarvixSessionSummary } from "
 
 export const IPC_CHANNELS = {
     request: "jarvix:request",
+    requestInject: "jarvix:request:inject",
+    requestStop: "jarvix:request:stop",
     event: "jarvix:event",
     configGet: "jarvix:config:get",
     configSet: "jarvix:config:set",
@@ -34,6 +36,8 @@ export type JarvixEventBatch = {
 
 export type JarvixBridge = {
     request(question: string, sessionId: string): Promise<void>;
+    injectPrompt(question: string, sessionId: string, promptId: string): Promise<boolean>;
+    stopRequest(sessionId: string): Promise<void>;
     onEvents(listener: (batch: JarvixEventBatch) => void): () => void;
     getConfig(): Promise<JarvixConfig>;
     getModelCatalog(force?: boolean): Promise<ModelCatalog>;

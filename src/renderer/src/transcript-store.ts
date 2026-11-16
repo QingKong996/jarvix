@@ -8,6 +8,7 @@ let sequence = 0;
 
 const committedListeners = new Set<() => void>();
 const liveListeners = new Set<() => void>();
+const injectedListeners = new Set<() => void>();
 
 function notify(listeners: Set<() => void>): void {
     for (const listener of listeners) {
@@ -22,12 +23,16 @@ function apply(action: TranscriptAction): void {
     }
     const committedChanged = next.committed !== state.committed;
     const liveChanged = next.live !== state.live;
+    const injectedChanged = next.injected !== state.injected;
     state = next;
     if (committedChanged) {
         notify(committedListeners);
     }
     if (liveChanged) {
         notify(liveListeners);
+    }
+    if (injectedChanged) {
+        notify(injectedListeners);
     }
 }
 
@@ -45,12 +50,23 @@ export function subscribeLive(listener: () => void): () => void {
     };
 }
 
+export function subscribeInjected(listener: () => void): () => void {
+    injectedListeners.add(listener);
+    return () => {
+        injectedListeners.delete(listener);
+    };
+}
+
 export function getCommitted(): CommittedTurn[] {
     return state.committed;
 }
 
 export function getLive(): LiveTurn | null {
     return state.live;
+}
+
+export function getInjected(): CommittedTurn[] {
+    return state.injected;
 }
 
 /** Single entry for every batch relayed from the main process. */
@@ -73,6 +89,25 @@ export function beginTurn(text: string): void {
     });
 }
 
+export function injectUserPrompt(text: string): string {
+    sequence += 1;
+    const userId = `user-${sequence}`;
+    apply({ type: "turn.inject", userId, text });
+    return userId;
+}
+
+export function discardInjectedPrompt(userId: string): void {
+    apply({ type: "turn.discard", userId });
+}
+
+export function finishRequest(): void {
+    apply({ type: "turn.finish" });
+}
+
 export function failRequest(error: string): void {
     apply({ type: "request.error", error });
+}
+
+export function stopTurn(): void {
+    apply({ type: "turn.stop" });
 }

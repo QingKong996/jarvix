@@ -139,6 +139,58 @@ test("registers apply_patch in the default tool set", () => {
     }
 });
 
+test("stops before applying files when cancelled", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-apply-patch-abort-"));
+    const tool = new ApplyPatchTool();
+    const controller = new AbortController();
+    try {
+        const pending = tool.execute(call(directory, [
+            "*** Begin Patch",
+            "*** Add File: aborted.txt",
+            "+not written",
+            "*** End Patch"
+        ]), { onOutput: () => undefined }, controller.signal);
+        controller.abort();
+
+        const result = await pending;
+
+        expect(result.isError).toBe(true);
+        expect(result.content).toContain("Apply patch stopped");
+        expect(existsSync(join(directory, "aborted.txt"))).toBe(false);
+    } finally {
+        tool.dispose();
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
+test("returns completed changes when cancelled between file hunks", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-apply-patch-partial-"));
+    const tool = new ApplyPatchTool();
+    const controller = new AbortController();
+    try {
+        const pending = tool.execute(call(directory, [
+            "*** Begin Patch",
+            "*** Add File: first.txt",
+            "+first",
+            "*** Add File: second.txt",
+            "+second",
+            "*** End Patch"
+        ]), { onOutput: () => undefined }, controller.signal);
+        setTimeout(() => controller.abort(), 0);
+
+        const result = await pending;
+
+        expect(result.isError).toBe(true);
+        expect(result.content).toContain("A first.txt");
+        expect(result.content).not.toContain("second.txt");
+        expect(existsSync(join(directory, "first.txt"))).toBe(true);
+        expect(existsSync(join(directory, "second.txt"))).toBe(false);
+    } finally {
+        tool.dispose();
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
 function call(cwd: string, patchLines: string[]): LlmToolCallBlock {
     return {
         type: "toolCall",

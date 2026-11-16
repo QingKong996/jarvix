@@ -65,6 +65,28 @@ export function registerIpc(dependencies: IpcDependencies): void {
         return jarvix.request(question, requireSessionId(sessionId));
     });
 
+    ipcMain.handle(IPC_CHANNELS.requestStop, (event, sessionId: unknown) => {
+        assertSender(event);
+        jarvix.stopRequest(requireSessionId(sessionId));
+    });
+
+    ipcMain.handle(IPC_CHANNELS.requestInject, (event, payload: unknown) => {
+        assertSender(event);
+        const request = requirePayload(payload, "Invalid request payload");
+        const { question, sessionId, promptId } = request;
+        if (typeof question !== "string" || question.trim().length === 0) {
+            throw new Error("Question must be a non-empty string");
+        }
+        if (typeof promptId !== "string" || promptId.trim().length === 0) {
+            throw new Error("Prompt id must be a non-empty string");
+        }
+        return jarvix.injectPrompt(
+            question,
+            requireSessionId(sessionId),
+            promptId
+        );
+    });
+
     ipcMain.handle(IPC_CHANNELS.configGet, (event) => {
         assertSender(event);
         return getConfig();

@@ -243,8 +243,7 @@ export class ShellTool implements ToolExecutor {
 
         const outcome = await waitForSession(session, timeoutMs, signal);
         if (outcome === "aborted") {
-            session.listener = null;
-            session.child.kill();
+            await interruptSession(session);
             return {
                 content: "Command aborted.",
                 data: { kind: "shell.exec_command", command, output: session.output, status: "failed" },
@@ -349,7 +348,8 @@ export class ShellTool implements ToolExecutor {
             cwd,
             env: process.env,
             stdio: ["pipe", "pipe", "pipe"],
-            windowsHide: true
+            windowsHide: true,
+            detached: process.platform !== "win32"
         });
         let resolveDone!: () => void;
         const done = new Promise<void>((resolvePromise) => {
@@ -471,6 +471,49 @@ function waitForSession(
         signal?.addEventListener("abort", abort, { once: true });
         void session.done.then(() => finish("exited"));
     });
+}
+
+async function interruptSession(session: ShellSession): Promise<void> {
+    session.listener = null;
+    if (!session.ended) {
+        await terminateProcessTree(session);
+        await Promise.race([
+            session.done,
+            new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 100))
+        ]);
+    }
+    session.listener = null;
+}
+
+async function terminateProcessTree(session: ShellSession): Promise<void> {
+    const pid = session.child.pid;
+    if (pid === undefined) {
+        session.child.kill();
+        return;
+    }
+
+    if (process.platform === "win32") {
+        const systemRoot = process.env.SystemRoot ?? process.env.WINDIR ?? "C:\\Windows";
+        await new Promise<void>((resolvePromise) => {
+            const killer = spawn(
+                join(systemRoot, "System32", "taskkill.exe"),
+                ["/PID", String(pid), "/T", "/F"],
+                { stdio: "ignore", windowsHide: true }
+            );
+            killer.once("error", () => {
+                session.child.kill();
+                resolvePromise();
+            });
+            killer.once("close", () => resolvePromise());
+        });
+        return;
+    }
+
+    try {
+        process.kill(-pid, "SIGTERM");
+    } catch {
+        session.child.kill();
+    }
 }
 
 function finishedResult(command: string, session: ShellSession): ToolExecutionResult {

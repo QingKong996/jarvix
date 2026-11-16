@@ -1,8 +1,8 @@
 import { memo, useEffect, useRef, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
-import { useCommitted, useLive } from "../transcript-hooks.ts";
-import { subscribeCommitted, subscribeLive } from "../transcript-store.ts";
+import { useCommitted, useInjected, useLive } from "../transcript-hooks.ts";
+import { subscribeCommitted, subscribeInjected, subscribeLive } from "../transcript-store.ts";
 import type { CommittedTurn, LiveTurn } from "../types.ts";
 import { CHAT_COLUMN, CONTENT_GUTTER } from "../layout.ts";
 import { Markdown } from "./Markdown.tsx";
@@ -80,6 +80,17 @@ function LiveSlot() {
     return live ? <LiveTurnView turn={live} /> : null;
 }
 
+function InjectedList() {
+    const injected = useInjected();
+    return (
+        <>
+            {injected.map((turn) => (
+                <CommittedTurnView key={turn.id} turn={turn} />
+            ))}
+        </>
+    );
+}
+
 const FOLLOW_THRESHOLD_PX = 80;
 
 function useFollowBottom(ref: RefObject<HTMLElement | null>): void {
@@ -117,6 +128,7 @@ function useFollowBottom(ref: RefObject<HTMLElement | null>): void {
         container.addEventListener("scroll", updateFollow, { passive: true });
         const unsubscribeCommitted = subscribeCommitted(scrollToBottom);
         const unsubscribeLive = subscribeLive(scrollToBottom);
+        const unsubscribeInjected = subscribeInjected(scrollToBottom);
         return () => {
             container.removeEventListener("scroll", updateFollow);
             if (frame !== null) {
@@ -124,6 +136,7 @@ function useFollowBottom(ref: RefObject<HTMLElement | null>): void {
             }
             unsubscribeCommitted();
             unsubscribeLive();
+            unsubscribeInjected();
         };
     }, [ref]);
 }
@@ -142,6 +155,7 @@ export function Transcript({ sessionId }: { sessionId: string | null }) {
                 <div className={cn("flex flex-col gap-3", CHAT_COLUMN)}>
                     <CommittedList />
                     <LiveSlot />
+                    <InjectedList />
                 </div>
             </div>
         </section>

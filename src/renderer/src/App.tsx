@@ -36,6 +36,7 @@ export function App() {
         sessionContext,
         activeSessionId,
         busy,
+        running,
         ready,
         createProject,
         startNewSession,
@@ -47,7 +48,8 @@ export function App() {
         deleteSession,
         moveSessionToProject,
         selectSession,
-        send
+        send,
+        stop
     } = useSessions();
 
     useEffect(() => {
@@ -139,10 +141,12 @@ export function App() {
                                 ) : null}
                                 <Transcript key={activeSessionId ?? "new"} sessionId={activeSessionId} />
                                 <Composer
-                                    disabled={!bridge || !ready || busy}
+                                    disabled={!bridge || !ready || (busy && !running)}
+                                    running={running}
                                     projects={projects}
                                     sessionContext={sessionContext}
                                     onSubmit={send}
+                                    onStop={stop}
                                     config={config}
                                     onConfigChange={handleConfigChange}
                                     onContextChange={updateSessionContext}

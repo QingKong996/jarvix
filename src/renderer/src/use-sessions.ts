@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isFunctionCallResultEvent } from "../../protocol/event.ts";
 import type { JarvixProject } from "../../protocol/project.ts";
 import {
     sessionContextFrom,
@@ -7,7 +8,16 @@ import {
     type JarvixSessionSummary
 } from "../../protocol/session.ts";
 import { ingestBackgroundTasks } from "./background-task-store.ts";
-import { beginTurn, failRequest, hydrate, ingest } from "./transcript-store.ts";
+import {
+    beginTurn,
+    discardInjectedPrompt,
+    failRequest,
+    finishRequest,
+    hydrate,
+    ingest,
+    injectUserPrompt,
+    stopTurn
+} from "./transcript-store.ts";
 
 const bridge = window.jarvix;
 
@@ -19,8 +29,14 @@ export function useSessions() {
     const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
     const [sessionContext, setSessionContext] = useState<JarvixSessionContext>({});
     const [busy, setBusy] = useState(false);
+    const [running, setRunning] = useState(false);
     const [ready, setReady] = useState(false);
     const activeSessionIdRef = useRef<string | null>(null);
+    const requestSessionIdRef = useRef<string | null>(null);
+    const requestCompletionRef = useRef<Promise<void> | null>(null);
+    const pausedSessionIdsRef = useRef(new Set<string>());
+    const awaitingStartSessionIdsRef = useRef(new Set<string>());
+    const requestInFlightRef = useRef(false);
     const sessionContextRef = useRef<JarvixSessionContext>({});
     const hasUserMessagesRef = useRef(false);
 
@@ -84,15 +100,33 @@ export function useSessions() {
 
         let cancelled = false;
         const unsubscribe = bridge.onEvents((batch) => {
-            ingestBackgroundTasks(batch.sessionId, batch.events);
-            for (const event of batch.events) {
+            let events = batch.events;
+            if (awaitingStartSessionIdsRef.current.has(batch.sessionId)) {
+                const startIndex = batch.events.findIndex((event) => event.type === "start");
+                if (startIndex === -1) {
+                    events = batch.events.filter(isFunctionCallResultEvent);
+                } else {
+                    awaitingStartSessionIdsRef.current.delete(batch.sessionId);
+                    events = [
+                        ...batch.events.slice(0, startIndex).filter(isFunctionCallResultEvent),
+                        ...batch.events.slice(startIndex)
+                    ];
+                }
+            } else if (pausedSessionIdsRef.current.has(batch.sessionId)) {
+                events = batch.events.filter(isFunctionCallResultEvent);
+            }
+            if (events.length === 0) {
+                return;
+            }
+            ingestBackgroundTasks(batch.sessionId, events);
+            for (const event of events) {
                 if (event.type === "session.renamed") {
                     updateSessionName(batch.sessionId, event.name);
                     break;
                 }
             }
             if (batch.sessionId === activeSessionIdRef.current) {
-                ingest(batch.events);
+                ingest(events);
             }
         });
 
@@ -304,42 +338,115 @@ export function useSessions() {
         }
     }, [activateSession, busy, ready]);
 
-    const send = useCallback(async (question: string): Promise<void> => {
-        if (!bridge || !ready || busy) {
+    const runPrompt = useCallback(async (
+        question: string,
+        initialSessionId: string | null
+    ): Promise<void> => {
+        if (!bridge) {
             return;
         }
         setBusy(true);
         let naming: Promise<unknown> | undefined;
+        let sessionId = initialSessionId;
 
         try {
-            const sessionId = activeSessionIdRef.current;
             const shouldAutoName = !hasUserMessagesRef.current;
             if (!sessionId) {
                 const created = await bridge.createSession(sessionContextRef.current);
                 activateSession(created);
                 await refreshSessions();
-                beginTurn(question);
-                hasUserMessagesRef.current = true;
-                if (shouldAutoName) {
-                    naming = bridge.autoNameSession(created.meta.id, question).catch(() => undefined);
-                }
-                await bridge.request(question, created.meta.id);
-            } else {
-                beginTurn(question);
-                hasUserMessagesRef.current = true;
-                if (shouldAutoName) {
-                    naming = bridge.autoNameSession(sessionId, question).catch(() => undefined);
-                }
+                sessionId = created.meta.id;
+            }
+            requestSessionIdRef.current = sessionId;
+            if (pausedSessionIdsRef.current.delete(sessionId)) {
+                awaitingStartSessionIdsRef.current.add(sessionId);
+            }
+            setRunning(true);
+            beginTurn(question);
+            hasUserMessagesRef.current = true;
+            if (shouldAutoName) {
+                naming = bridge.autoNameSession(sessionId, question).catch(() => undefined);
+            }
+            try {
                 await bridge.request(question, sessionId);
+            } catch (error) {
+                failRequest(error instanceof Error ? error.message : String(error));
             }
         } catch (error) {
             failRequest(error instanceof Error ? error.message : String(error));
         } finally {
+            finishRequest();
+            requestSessionIdRef.current = null;
+            setRunning(false);
             await naming;
+            requestInFlightRef.current = false;
             setBusy(false);
             await refreshSessions();
         }
-    }, [activateSession, busy, ready, refreshSessions]);
+    }, [activateSession, refreshSessions]);
+
+    const startRequest = useCallback(async (
+        question: string,
+        sessionId: string | null
+    ): Promise<void> => {
+        requestInFlightRef.current = true;
+        const request = runPrompt(question, sessionId);
+        requestCompletionRef.current = request;
+        try {
+            await request;
+        } finally {
+            if (requestCompletionRef.current === request) {
+                requestCompletionRef.current = null;
+            }
+        }
+    }, [runPrompt]);
+
+    const send = useCallback(async (question: string): Promise<void> => {
+        const normalized = question.trim();
+        if (!normalized || !bridge || !ready) {
+            return;
+        }
+        const activeRequestSessionId = requestSessionIdRef.current;
+        if (activeRequestSessionId) {
+            const promptId = injectUserPrompt(normalized);
+            try {
+                if (await bridge.injectPrompt(normalized, activeRequestSessionId, promptId)) {
+                    return;
+                }
+            } catch (error) {
+                discardInjectedPrompt(promptId);
+                failRequest(error instanceof Error ? error.message : String(error));
+                return;
+            }
+            discardInjectedPrompt(promptId);
+            await requestCompletionRef.current?.catch(() => undefined);
+            if (requestInFlightRef.current) {
+                return;
+            }
+            await startRequest(normalized, activeSessionIdRef.current);
+            return;
+        }
+        if (busy || requestInFlightRef.current) {
+            return;
+        }
+        await startRequest(normalized, activeSessionIdRef.current);
+    }, [busy, ready, startRequest]);
+
+    const stop = useCallback(async (): Promise<void> => {
+        const sessionId = requestSessionIdRef.current;
+        if (!bridge || !sessionId) {
+            return;
+        }
+        stopTurn();
+        pausedSessionIdsRef.current.add(sessionId);
+        awaitingStartSessionIdsRef.current.delete(sessionId);
+        setRunning(false);
+        try {
+            await bridge.stopRequest(sessionId);
+        } catch {
+            return;
+        }
+    }, []);
 
     return {
         projects,
@@ -348,6 +455,7 @@ export function useSessions() {
         sessionContext,
         activeSessionId,
         busy,
+        running,
         ready,
         createProject,
         startNewSession,
@@ -359,6 +467,7 @@ export function useSessions() {
         deleteSession,
         moveSessionToProject,
         selectSession,
-        send
+        send,
+        stop
     };
 }

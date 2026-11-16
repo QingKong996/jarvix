@@ -5,6 +5,11 @@ import { IPC_CHANNELS } from "../protocol/ipc.ts";
 
 const bridge: JarvixBridge = {
     request: (question, sessionId) => ipcRenderer.invoke(IPC_CHANNELS.request, { question, sessionId }),
+    injectPrompt: (question, sessionId, promptId) => ipcRenderer.invoke(
+        IPC_CHANNELS.requestInject,
+        { question, sessionId, promptId }
+    ),
+    stopRequest: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.requestStop, sessionId),
     onEvents: (listener) => {
         const handler = (_event: IpcRendererEvent, batch: JarvixEventBatch): void => {
             listener(batch);
