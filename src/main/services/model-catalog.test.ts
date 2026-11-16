@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, test, vi } from "vitest";
 import { ModelCatalogService } from "./model-catalog.ts";
-import { parseModelsDevCatalog } from "../llm/catalog.ts";
+import { parseModelsDevCatalog } from "../../llm/catalog.ts";
 
 const fixture = { example: { id: "example", name: "Example", npm: "@ai-sdk/openai-compatible",
     api: "https://example.com/v1", models: { chat: { id: "chat", name: "Chat", limit: { context: 128000, output: 8192 } } } } };

@@ -1,4 +1,7 @@
+import type { Jarvix } from "../core/index.ts";
 import type { JarvixEvent } from "../protocol/event.ts";
+import { IPC_CHANNELS, type JarvixEventBatch } from "../protocol/ipc.ts";
+import type { MainWindowController } from "./window.ts";
 
 const FLUSH_INTERVAL_MS = 32;
 
@@ -8,7 +11,7 @@ type Flush = (events: JarvixEvent[]) => void;
  * Coalesces stream deltas in the main process so the renderer receives at most
  * one batch per interval. Lifecycle events flush immediately to keep their order.
  */
-export function createStreamBatcher(flush: Flush): { push(event: JarvixEvent): void } {
+function createStreamBatcher(flush: Flush): { push(event: JarvixEvent): void } {
     let pending: JarvixEvent[] = [];
     let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -96,4 +99,23 @@ export function createStreamBatcher(flush: Flush): { push(event: JarvixEvent): v
             emit();
         }
     };
+}
+
+export function attachEventBridge(
+    jarvix: Pick<Jarvix, "subscribe">,
+    windows: MainWindowController
+): () => void {
+    const batchers = new Map<string, ReturnType<typeof createStreamBatcher>>();
+
+    return jarvix.subscribe((event, sessionId) => {
+        let batcher = batchers.get(sessionId);
+        if (!batcher) {
+            batcher = createStreamBatcher((events) => {
+                const batch: JarvixEventBatch = { sessionId, events };
+                windows.send(IPC_CHANNELS.event, batch);
+            });
+            batchers.set(sessionId, batcher);
+        }
+        batcher.push(event);
+    });
 }

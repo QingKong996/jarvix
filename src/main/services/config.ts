@@ -8,7 +8,7 @@ import {
     providerConfigSchema,
     resolveConfiguredModel,
     resolveReasoningLevel
-} from "../protocol/providers.ts";
+} from "../../protocol/providers.ts";
 import {
     DEFAULT_THEME,
     SUPPORTED_LANGUAGES,
@@ -16,7 +16,7 @@ import {
     type JarvixConfig,
     type Language,
     type Theme
-} from "../protocol/config.ts";
+} from "../../protocol/config.ts";
 
 export type ConfigDefaults = {
     language: Language;
