@@ -1,7 +1,7 @@
-import type { LlmAdapter, LlmAssistantMessage } from "../llm/index.ts";
-import type { JarvixConfig } from "../protocol/config.ts";
-import { resolveConfiguredModel } from "../protocol/providers.ts";
-import { SESSION_NAME_MAX_LENGTH } from "../protocol/session.ts";
+import type { LlmAdapter, LlmAssistantMessage } from "../../llm/index.ts";
+import type { JarvixConfig } from "../../protocol/config.ts";
+import { resolveConfiguredModel } from "../../protocol/providers.ts";
+import { SESSION_NAME_MAX_LENGTH } from "../../protocol/session.ts";
 
 const NAME_SYSTEM_PROMPT = [
     "Create a concise title for a conversation from the user's first message.",

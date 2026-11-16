@@ -14,8 +14,8 @@ import {
     listProjects as listStoredProjects,
     loadProject
 } from "../project/store.ts";
-import { SessionManager } from "../session/manager.ts";
-import { generateSessionName } from "../session/naming.ts";
+import { SessionManager } from "./session/manager.ts";
+import { generateSessionName } from "./session/naming.ts";
 
 export type JarvixOptions = {
     llm?: LlmAdapter;
@@ -135,6 +135,14 @@ export class Jarvix {
             workingDirectories,
             emit: (event) => this.emit(session.meta.id, event)
         });
+    }
+
+    injectPrompt(question: string, sessionId: string, promptId: string): boolean {
+        return this.sessions.require(sessionId).injectPrompt(question, promptId);
+    }
+
+    stopRequest(sessionId: string): void {
+        this.sessions.require(sessionId).abort();
     }
 
     dispose(): void {

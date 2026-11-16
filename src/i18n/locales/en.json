@@ -45,6 +45,7 @@
     "composer": {
         "placeholder": "Ask a question...",
         "send": "Send",
+        "stop": "Stop",
         "model": "Model",
         "reasoning": "Reasoning",
         "reasoningLevels": {

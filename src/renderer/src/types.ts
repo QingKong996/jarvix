@@ -42,4 +42,5 @@ export type LiveTurn = {
 export type TranscriptState = {
     committed: CommittedTurn[];
     live: LiveTurn | null;
+    injected: CommittedTurn[];
 };

@@ -16,8 +16,8 @@ import {
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { i18n } from "../i18n/index.ts";
-import type { LlmMessage } from "../llm/types.ts";
+import { i18n } from "../../i18n/index.ts";
+import type { LlmMessage } from "../../llm/types.ts";
 import {
     type JarvixSession,
     type JarvixSessionContext,
@@ -26,7 +26,7 @@ import {
     type JarvixSessionStatus,
     sessionContextSchema,
     sessionNameSchema
-} from "../protocol/session.ts";
+} from "../../protocol/session.ts";
 
 export const SESSION_FORMAT_VERSION = 2;
 

@@ -45,6 +45,7 @@
     "composer": {
         "placeholder": "输入问题...",
         "send": "发送",
+        "stop": "终止",
         "model": "模型",
         "reasoning": "推理等级",
         "reasoningLevels": {

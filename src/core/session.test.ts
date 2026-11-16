@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, test, vi } from "vitest";
 import type { LlmAdapter, LlmAssistantMessage, LlmMessage, LlmModelInfo, LlmStreamEvent } from "../llm/index.ts";
-import { loadSession } from "../session/store.ts";
+import { loadSession } from "./session/store.ts";
 import { Jarvix } from "./index.ts";
 import type { Language } from "../protocol/config.ts";
 import { providerConfigSchema } from "../protocol/providers.ts";

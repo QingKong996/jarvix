@@ -2,9 +2,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, test, vi } from "vitest";
-import type { LlmAdapter } from "../llm/index.ts";
-import type { LlmAssistantMessage, LlmModelInfo, LlmStreamEvent } from "../llm/types.ts";
-import { providerConfigSchema } from "../protocol/providers.ts";
+import type { LlmAdapter } from "../../llm/index.ts";
+import type { LlmAssistantMessage, LlmModelInfo, LlmStreamEvent } from "../../llm/types.ts";
+import { providerConfigSchema } from "../../protocol/providers.ts";
 import { SessionManager } from "./manager.ts";
 
 const home = vi.hoisted(() => ({ path: "" }));

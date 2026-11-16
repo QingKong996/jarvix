@@ -3,8 +3,8 @@ import type {
     JarvixSessionContext,
     JarvixSessionSummary,
     JarvixSessionStatus
-} from "../protocol/session.ts";
-import { sessionContextFrom } from "../protocol/session.ts";
+} from "../../protocol/session.ts";
+import { sessionContextFrom } from "../../protocol/session.ts";
 import { Session } from "./session.ts";
 import {
     createSession,

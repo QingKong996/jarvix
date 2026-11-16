@@ -2,30 +2,44 @@ import type {
     LlmAdapter,
     LlmAssistantMessage,
     LlmMessage,
+    LlmRequest,
     LlmSystemMessage,
     LlmSystemNotice,
     LlmToolCallBlock,
     LlmToolResultMessage,
     LlmUserMessage
-} from "../llm/index.ts";
-import type { JarvixConfig } from "../protocol/config.ts";
-import type { JarvixEvent } from "../protocol/event.ts";
-import type { JarvixSession, JarvixSessionMeta } from "../protocol/session.ts";
+} from "../../llm/index.ts";
+import type { JarvixConfig } from "../../protocol/config.ts";
+import type { JarvixEvent } from "../../protocol/event.ts";
+import type { JarvixSession, JarvixSessionMeta } from "../../protocol/session.ts";
+import {
+    resolveConfiguredModel,
+    resolveReasoningLevel
+} from "../../protocol/providers.ts";
 import {
     createDefaultTools,
     type ToolExecutionResult,
     type ToolExecutor
-} from "../tools/index.ts";
-import { createToolCallViewData, toToolResultDetails, type ToolCallViewData } from "../tools/view.ts";
+} from "../../tools/index.ts";
+import { createToolCallViewData, toToolResultDetails, type ToolCallViewData } from "../../tools/view.ts";
 import { appendSessionMessage } from "./store.ts";
-import {
-    resolveConfiguredModel,
-    resolveReasoningLevel
-} from "../protocol/providers.ts";
 
 const SYSTEM_PROMPT = `Respond to the user in Chinese. Current operating system: ${process.platform}.`;
 const PERSIST_ATTEMPTS = 2;
-const MAX_TOOL_ROUNDS = 32;
+export const MAX_TOOL_ROUNDS = 32;
+
+type PendingPrompt = {
+    id: string;
+    text: string;
+};
+
+type TurnDecision = "continue" | "complete" | "failed";
+
+type TurnContext = {
+    runtime: SessionRuntime;
+    signal: AbortSignal;
+    request: Omit<LlmRequest, "messages" | "signal">;
+};
 
 export type SessionRuntime = {
     llm: LlmAdapter;
@@ -40,10 +54,12 @@ export class Session {
     private readonly history: LlmMessage[];
     private readonly pendingPersistence: LlmMessage[] = [];
     private readonly pendingSystemMessages: LlmSystemMessage[] = [];
+    private readonly pendingPrompts: PendingPrompt[] = [];
     private readonly backgroundExitNotices = new Set<string>();
     private readonly tools: ToolExecutor;
     private running = false;
     private toolUseOpen = false;
+    private requestController: AbortController | null = null;
 
     constructor(
         meta: JarvixSessionMeta,
@@ -60,6 +76,9 @@ export class Session {
             throw new Error(`Session is busy: ${this.meta.id}`);
         }
         this.running = true;
+        const controller = new AbortController();
+        const { signal } = controller;
+        this.requestController = controller;
 
         try {
             const resolved = resolveConfiguredModel(runtime.config.providers, runtime.config.selectedModel);
@@ -72,6 +91,17 @@ export class Session {
             if (!model) {
                 throw new Error(`Model not found: ${selection.provider}/${selection.id}`);
             }
+            const turn: TurnContext = {
+                runtime,
+                signal,
+                request: {
+                    model,
+                    systemPrompt: systemPromptFor(runtime.workingDirectories),
+                    reasoning: resolveReasoningLevel(definition, runtime.config.reasoning),
+                    apiKey: provider?.apiKey,
+                    tools: this.tools.definitions
+                }
+            };
 
             const questionMessage: LlmUserMessage = {
                 role: "user",
@@ -80,61 +110,127 @@ export class Session {
             };
             this.append(questionMessage);
 
-            for (let round = 0; ; round += 1) {
+            for (let round = 0; ;) {
+                if (signal.aborted) {
+                    break;
+                }
                 if (round >= MAX_TOOL_ROUNDS) {
                     throw new Error(`Tool call limit exceeded (${MAX_TOOL_ROUNDS})`);
                 }
 
-                const stream = runtime.llm.stream({
-                    model,
-                    messages: [...this.history],
-                    systemPrompt: systemPromptFor(runtime.workingDirectories),
-                    reasoning: resolveReasoningLevel(definition, runtime.config.reasoning),
-                    apiKey: provider?.apiKey,
-                    tools: this.tools.definitions
-                });
-
-                let completed: LlmAssistantMessage | undefined;
-                for await (const event of stream) {
-                    runtime.emit(event);
-                    if (event.type === "done") {
-                        completed = event.message;
-                        this.append(event.message);
-                        this.toolUseOpen = event.message.stopReason === "toolUse";
-                    } else if (event.type === "error") {
-                        completed = undefined;
-                    }
-                }
-
-                if (completed?.stopReason !== "toolUse") {
+                const decision = await this.takeTurn(turn);
+                if (signal.aborted || decision === "failed") {
                     break;
                 }
-                const toolCalls = completed.content.filter(
-                    (block): block is LlmToolCallBlock => block.type === "toolCall"
-                );
-                if (toolCalls.length === 0) {
-                    this.toolUseOpen = false;
-                    this.flushPendingSystemMessages(runtime);
+                if (this.pendingPrompts.length > 0) {
+                    this.insertPendingPrompts(runtime);
+                    round = 0;
+                    continue;
+                }
+                if (decision === "complete") {
                     break;
                 }
-                try {
-                    for (const toolCall of toolCalls) {
-                        await this.executeToolCall(toolCall, runtime);
-                    }
-                } finally {
-                    this.toolUseOpen = false;
-                    this.flushPendingSystemMessages(runtime);
-                }
+                round += 1;
             }
         } catch (error) {
+            if (signal.aborted) {
+                return;
+            }
             const reason = error instanceof Error ? error.message : String(error);
             runtime.emit({ type: "request.error", error: reason });
             throw error;
         } finally {
             this.toolUseOpen = false;
             this.flushPendingSystemMessages(runtime);
+            this.pendingPrompts.length = 0;
             this.running = false;
+            if (this.requestController === controller) {
+                this.requestController = null;
+            }
         }
+    }
+
+    abort(): void {
+        this.pendingPrompts.length = 0;
+        this.requestController?.abort();
+    }
+
+    injectPrompt(question: string, promptId: string): boolean {
+        const text = question.trim();
+        const id = promptId.trim();
+        if (
+            !this.running ||
+            this.requestController?.signal.aborted ||
+            text.length === 0 ||
+            id.length === 0
+        ) {
+            return false;
+        }
+        this.pendingPrompts.push({ id, text });
+        return true;
+    }
+
+    private async takeTurn(
+        turn: TurnContext
+    ): Promise<TurnDecision> {
+        const { runtime, signal } = turn;
+        if (signal.aborted) {
+            return "failed";
+        }
+
+        let completed: LlmAssistantMessage | undefined;
+        for await (const event of runtime.llm.stream({
+            ...turn.request,
+            messages: [...this.history],
+            signal
+        })) {
+            if (signal.aborted) {
+                break;
+            }
+            runtime.emit(event);
+            if (event.type === "done") {
+                completed = event.message;
+                this.append(event.message);
+                this.toolUseOpen = event.message.stopReason === "toolUse";
+            } else if (event.type === "error") {
+                completed = undefined;
+            }
+        }
+
+        if (signal.aborted || !completed) {
+            return "failed";
+        }
+
+        const toolCalls = completed.stopReason === "toolUse"
+            ? completed.content.filter(
+                (block): block is LlmToolCallBlock => block.type === "toolCall"
+            )
+            : [];
+        if (toolCalls.length > 0) {
+            try {
+                for (const [index, toolCall] of toolCalls.entries()) {
+                    if (signal.aborted) {
+                        for (const remaining of toolCalls.slice(index)) {
+                            this.finishCancelledToolCall(remaining, runtime);
+                        }
+                        break;
+                    }
+                    await this.executeToolCall(toolCall, runtime, signal);
+                }
+            } finally {
+                this.toolUseOpen = false;
+                this.flushPendingSystemMessages(runtime);
+            }
+        } else {
+            this.toolUseOpen = false;
+            this.flushPendingSystemMessages(runtime);
+        }
+
+        if (signal.aborted) {
+            return "failed";
+        }
+
+        return toolCalls.length > 0 ? "continue" : "complete";
     }
 
     snapshot(): JarvixSession {
@@ -145,10 +241,20 @@ export class Session {
     }
 
     dispose(): void {
+        this.abort();
         this.tools.dispose();
     }
 
-    private async executeToolCall(toolCall: LlmToolCallBlock, runtime: SessionRuntime): Promise<void> {
+    private async executeToolCall(
+        toolCall: LlmToolCallBlock,
+        runtime: SessionRuntime,
+        signal: AbortSignal
+    ): Promise<void> {
+        if (signal.aborted) {
+            this.finishCancelledToolCall(toolCall, runtime);
+            return;
+        }
+
         runtime.emit({
             type: "tool.start",
             toolCallId: toolCall.id,
@@ -165,6 +271,9 @@ export class Session {
                     toolCall,
                     {
                         onOutput: (data) => {
+                            if (signal.aborted) {
+                                return;
+                            }
                             runtime.emit({
                                 type: "tool.output",
                                 toolCallId: toolCall.id,
@@ -181,7 +290,11 @@ export class Session {
                                 isError,
                                 endReason: "exited"
                             });
-                            if (unreadOutput.length > 0 && !this.backgroundExitNotices.has(taskId)) {
+                            if (
+                                !signal.aborted &&
+                                unreadOutput.length > 0 &&
+                                !this.backgroundExitNotices.has(taskId)
+                            ) {
                                 this.backgroundExitNotices.add(taskId);
                                 this.queueBackgroundExitNotice(
                                     runtime,
@@ -192,14 +305,35 @@ export class Session {
                                 );
                             }
                         },
-                        onTaskEvent: (event) => runtime.emit(event)
-                    }
+                        onTaskEvent: (event) => {
+                            if (!signal.aborted) {
+                                runtime.emit(event);
+                            }
+                        }
+                    },
+                    signal
                 );
             } catch (error) {
                 result = failedToolResult(toolCall, error instanceof Error ? error.message : String(error));
             }
         }
 
+        this.completeToolCall(toolCall, result, runtime);
+    }
+
+    private finishCancelledToolCall(toolCall: LlmToolCallBlock, runtime: SessionRuntime): void {
+        this.completeToolCall(
+            toolCall,
+            failedToolResult(toolCall, "Tool execution stopped."),
+            runtime
+        );
+    }
+
+    private completeToolCall(
+        toolCall: LlmToolCallBlock,
+        result: ToolExecutionResult,
+        runtime: SessionRuntime
+    ): void {
         runtime.emit({
             type: "tool.end",
             toolCallId: toolCall.id,
@@ -249,6 +383,24 @@ export class Session {
         this.pendingSystemMessages.push(message);
         runtime.emit({ type: "system.message", message });
         this.flushPendingSystemMessages(runtime);
+    }
+
+    private insertPendingPrompts(runtime: SessionRuntime): void {
+        while (this.pendingPrompts.length > 0) {
+            const pending = this.pendingPrompts[0]!;
+            const message: LlmUserMessage = {
+                role: "user",
+                content: pending.text,
+                timestamp: Date.now()
+            };
+            this.append(message);
+            this.pendingPrompts.shift();
+            runtime.emit({
+                type: "prompt.injected",
+                promptId: pending.id,
+                text: pending.text
+            });
+        }
     }
 
     private flushPendingSystemMessages(runtime: SessionRuntime): void {

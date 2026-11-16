@@ -2,19 +2,19 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, expect, test, vi } from "vitest";
-import type { LlmAdapter } from "../llm/index.ts";
+import type { LlmAdapter } from "../../llm/index.ts";
 import type {
     LlmAssistantMessage,
     LlmMessage,
     LlmModelInfo,
     LlmStreamEvent
-} from "../llm/types.ts";
-import type { JarvixEvent } from "../protocol/event.ts";
-import type { JarvixSessionMeta } from "../protocol/session.ts";
-import { Session } from "./session.ts";
+} from "../../llm/types.ts";
+import type { JarvixEvent } from "../../protocol/event.ts";
+import type { JarvixSessionMeta } from "../../protocol/session.ts";
+import { MAX_TOOL_ROUNDS, Session } from "./session.ts";
 import { appendSessionMessage } from "./store.ts";
-import { providerConfigSchema } from "../protocol/providers.ts";
-import { BackgroundTaskManager, type ToolExecutor } from "../tools/index.ts";
+import { providerConfigSchema } from "../../protocol/providers.ts";
+import { BackgroundTaskManager, type ToolExecutor } from "../../tools/index.ts";
 
 vi.mock("./store.ts", () => ({
     appendSessionMessage: vi.fn()
@@ -333,6 +333,365 @@ test("executes tool calls, streams tool data, and resumes with the tool result",
         "toolResult",
         "assistant"
     ]);
+});
+
+test("injects prompts after the active LLM request and before the next round", async () => {
+    const requests: LlmMessage[][] = [];
+    const events: JarvixEvent[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let call = 0;
+    const llm: LlmAdapter = {
+        getModel: () => MODEL,
+        stream(request) {
+            requests.push([...request.messages]);
+            const current = call;
+            call += 1;
+            return (async function* (): AsyncIterable<LlmStreamEvent> {
+                yield { type: "start" };
+                if (current === 0) {
+                    await gate;
+                }
+                yield {
+                    type: "done",
+                    message: {
+                        ...assistantMessage(),
+                        content: [{ type: "text", text: current === 0 ? "first reply" : "second reply" }]
+                    }
+                };
+            })();
+        }
+    };
+    const session = new Session(meta);
+
+    const request = session.request("first", {
+        llm,
+        config: TEST_CONFIG,
+        emit: (event) => {
+            events.push(event);
+        }
+    });
+
+    await vi.waitFor(() => {
+        expect(requests).toHaveLength(1);
+    });
+    expect(session.injectPrompt("follow up one", "prompt-1")).toBe(true);
+    expect(session.injectPrompt("follow up two", "prompt-2")).toBe(true);
+    expect(session.snapshot().messages.map((message) => message.role)).toEqual(["user"]);
+
+    release();
+    await request;
+
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.map((message) => message.role)).toEqual([
+        "user",
+        "assistant",
+        "user",
+        "user"
+    ]);
+    expect(requests[1]?.slice(-2).map((message) => (
+        message.role === "user" ? message.content : ""
+    ))).toEqual(["follow up one", "follow up two"]);
+    expect(session.snapshot().messages.map((message) => message.role)).toEqual([
+        "user",
+        "assistant",
+        "user",
+        "user",
+        "assistant"
+    ]);
+    expect(events.filter((event) => event.type === "prompt.injected")).toEqual([
+        { type: "prompt.injected", promptId: "prompt-1", text: "follow up one" },
+        { type: "prompt.injected", promptId: "prompt-2", text: "follow up two" }
+    ]);
+});
+
+test("injects prompts after tool execution before the next LLM request", async () => {
+    const toolCall = {
+        type: "toolCall" as const,
+        id: "call-inject",
+        name: "exec_command",
+        arguments: { command: "echo hi", cwd: process.cwd(), timeoutMs: 1000 }
+    };
+    const toolUseMessage: LlmAssistantMessage = {
+        ...assistantMessage(),
+        content: [toolCall],
+        stopReason: "toolUse"
+    };
+    const requests: LlmMessage[][] = [];
+    const events: JarvixEvent[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let call = 0;
+    const llm: LlmAdapter = {
+        getModel: () => MODEL,
+        stream(request) {
+            requests.push([...request.messages]);
+            const message = call === 0 ? toolUseMessage : assistantMessage();
+            call += 1;
+            return (async function* (): AsyncIterable<LlmStreamEvent> {
+                yield { type: "done", message };
+            })();
+        }
+    };
+    const tools: ToolExecutor = {
+        definitions: [{
+            name: "exec_command",
+            description: "Run a command",
+            parameters: { type: "object", properties: {} }
+        }],
+        handles: (name) => name === "exec_command",
+        execute: async () => {
+            await gate;
+            return {
+                content: "Command exited with code 0.",
+                data: {
+                    kind: "shell.exec_command",
+                    command: "echo hi",
+                    output: "hi\n",
+                    status: "completed"
+                },
+                isError: false,
+                endReason: "exited"
+            };
+        },
+        dispose: () => undefined
+    };
+    const session = new Session(meta, [], tools);
+
+    const request = session.request("first", {
+        llm,
+        config: TEST_CONFIG,
+        emit: (event) => {
+            events.push(event);
+        }
+    });
+
+    await vi.waitFor(() => {
+        expect(events.some((event) => event.type === "tool.start")).toBe(true);
+    });
+    expect(session.injectPrompt("after tools", "prompt-tools")).toBe(true);
+    expect(session.snapshot().messages.map((message) => message.role)).toEqual([
+        "user",
+        "assistant"
+    ]);
+
+    release();
+    await request;
+
+    expect(requests[1]?.map((message) => message.role)).toEqual([
+        "user",
+        "assistant",
+        "toolResult",
+        "user"
+    ]);
+    expect(requests[1]?.at(-1)).toMatchObject({
+        role: "user",
+        content: "after tools"
+    });
+    const toolEnd = events.findIndex((event) => event.type === "tool.end");
+    const injected = events.findIndex((event) => event.type === "prompt.injected");
+    expect(toolEnd).toBeGreaterThan(-1);
+    expect(injected).toBeGreaterThan(toolEnd);
+});
+
+test("resets the round limit after injecting a prompt", async () => {
+    let session!: Session;
+    let toolRuns = 0;
+    const tools: ToolExecutor = {
+        definitions: [{
+            name: "exec_command",
+            description: "Run a command",
+            parameters: { type: "object", properties: {} }
+        }],
+        handles: (name) => name === "exec_command",
+        execute: async () => {
+            toolRuns += 1;
+            if (toolRuns === MAX_TOOL_ROUNDS) {
+                expect(session.injectPrompt("fresh prompt", "fresh-prompt")).toBe(true);
+            }
+            return {
+                content: "Command exited with code 0.",
+                data: {
+                    kind: "shell.exec_command",
+                    command: "echo hi",
+                    output: "hi\n",
+                    status: "completed"
+                },
+                isError: false,
+                endReason: "exited"
+            };
+        },
+        dispose: () => undefined
+    };
+    let llmCalls = 0;
+    const llm: LlmAdapter = {
+        getModel: () => MODEL,
+        stream(request) {
+            llmCalls += 1;
+            const last = request.messages.at(-1);
+            const injected = last?.role === "user" && last.content === "fresh prompt";
+            const message: LlmAssistantMessage = injected
+                ? assistantMessage()
+                : {
+                    ...assistantMessage(),
+                    content: [{
+                        type: "toolCall",
+                        id: `call-${llmCalls}`,
+                        name: "exec_command",
+                        arguments: { command: "echo hi", cwd: process.cwd(), timeoutMs: 1000 }
+                    }],
+                    stopReason: "toolUse"
+                };
+            return (async function* (): AsyncIterable<LlmStreamEvent> {
+                yield { type: "done", message };
+            })();
+        }
+    };
+    session = new Session(meta, [], tools);
+
+    await session.request("first", {
+        llm,
+        config: TEST_CONFIG,
+        emit: () => undefined
+    });
+
+    expect(toolRuns).toBe(MAX_TOOL_ROUNDS);
+    expect(llmCalls).toBe(MAX_TOOL_ROUNDS + 1);
+    expect(session.snapshot().messages.at(-2)).toMatchObject({
+        role: "user",
+        content: "fresh prompt"
+    });
+    expect(session.snapshot().messages.at(-1)).toMatchObject({ role: "assistant" });
+});
+
+test("stops accepting stream events after an abort", async () => {
+    let release!: () => void;
+    let requestSignal: AbortSignal | undefined;
+    const events: JarvixEvent[] = [];
+    const llm: LlmAdapter = {
+        getModel: () => MODEL,
+        stream(request) {
+            requestSignal = request.signal;
+            return (async function* (): AsyncIterable<LlmStreamEvent> {
+                yield { type: "start" };
+                yield { type: "thinking.start", index: 0 };
+                yield { type: "thinking.delta", index: 0, delta: "plan" };
+                yield { type: "text.start", index: 1 };
+                yield { type: "text.delta", index: 1, delta: "partial" };
+                await new Promise<void>((resolvePromise) => {
+                    release = resolvePromise;
+                });
+                yield { type: "done", message: assistantMessage() };
+            })();
+        }
+    };
+    const session = new Session(meta);
+
+    const request = session.request("hello", {
+        llm,
+        config: TEST_CONFIG,
+        emit: (event) => {
+            events.push(event);
+        }
+    });
+
+    await vi.waitFor(() => {
+        expect(events).toHaveLength(5);
+    });
+    expect(session.injectPrompt("should not run", "prompt-aborted")).toBe(true);
+    session.abort();
+    release();
+    await request;
+
+    expect(requestSignal?.aborted).toBe(true);
+    expect(events.map((event) => event.type)).toEqual([
+        "start",
+        "thinking.start",
+        "thinking.delta",
+        "text.start",
+        "text.delta"
+    ]);
+    expect(events.some((event) => event.type === "request.error")).toBe(false);
+    expect(events.some((event) => event.type === "prompt.injected")).toBe(false);
+    expect(session.snapshot().messages.map((message) => message.role)).toEqual(["user"]);
+});
+
+test("accepts an in-flight tool result but does not start another round after abort", async () => {
+    const toolCall = {
+        type: "toolCall" as const,
+        id: "call-abort",
+        name: "exec_command",
+        arguments: { command: "echo hi", cwd: process.cwd(), timeoutMs: 10_000 }
+    };
+    const toolUseMessage: LlmAssistantMessage = {
+        ...assistantMessage(),
+        content: [toolCall],
+        stopReason: "toolUse"
+    };
+    let release!: () => void;
+    const stream = vi.fn(() => (async function* (): AsyncIterable<LlmStreamEvent> {
+        yield { type: "done", message: toolUseMessage };
+    })());
+    const tools: ToolExecutor = {
+        definitions: [{
+            name: "exec_command",
+            description: "Run a command",
+            parameters: { type: "object", properties: {} }
+        }],
+        handles: (name) => name === "exec_command",
+        execute: async (_call, observer) => {
+            observer.onOutput({ kind: "shell.exec_command", output: "partial\n" });
+            await new Promise<void>((resolvePromise) => {
+                release = resolvePromise;
+            });
+            return {
+                content: "Command aborted.",
+                data: {
+                    kind: "shell.exec_command",
+                    command: "echo hi",
+                    output: "partial\n",
+                    status: "failed"
+                },
+                isError: true,
+                endReason: "exited"
+            };
+        },
+        dispose: () => undefined
+    };
+    const events: JarvixEvent[] = [];
+    const session = new Session(meta, [], tools);
+
+    const request = session.request("run it", {
+        llm: { getModel: () => MODEL, stream },
+        config: TEST_CONFIG,
+        emit: (event) => {
+            events.push(event);
+        }
+    });
+
+    await vi.waitFor(() => {
+        expect(events.some((event) => event.type === "tool.output")).toBe(true);
+    });
+    session.abort();
+    release();
+    await request;
+
+    expect(stream).toHaveBeenCalledTimes(1);
+    expect(events.map((event) => event.type)).toEqual([
+        "done",
+        "tool.start",
+        "tool.output",
+        "tool.end"
+    ]);
+    expect(session.snapshot().messages.at(-1)).toMatchObject({
+        role: "toolResult",
+        toolCallId: "call-abort",
+        content: "Command aborted."
+    });
 });
 
 test("routes background task output outside the tool call after timeout", async () => {

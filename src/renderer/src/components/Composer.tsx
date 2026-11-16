@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { ArrowUp, ChevronUp, Folder } from "lucide-react";
+import { ArrowUp, ChevronUp, Folder, Square } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
@@ -13,9 +13,11 @@ import { SessionContextDialog } from "./SessionContextDialog.tsx";
 
 type ComposerProps = {
     disabled: boolean;
+    running: boolean;
     projects: JarvixProject[];
     sessionContext: JarvixSessionContext;
     onSubmit: (question: string) => void;
+    onStop: () => void;
     config: JarvixConfig | null;
     onConfigChange: (config: JarvixConfig) => Promise<void>;
     onContextChange: (context: JarvixSessionContext) => Promise<void>;
@@ -23,9 +25,11 @@ type ComposerProps = {
 
 export function Composer({
     disabled,
+    running,
     projects,
     sessionContext,
     onSubmit,
+    onStop,
     config,
     onConfigChange,
     onContextChange
@@ -82,59 +86,79 @@ export function Composer({
 
     return (
         <>
-            <form onSubmit={handleSubmit} className={cn(CONTENT_GUTTER, "py-3")}>
-                <div className={cn(CHAT_COLUMN, "flex flex-col gap-1 rounded-xl border bg-composer p-1.5 shadow-sm")}>
-                    <Textarea
-                        ref={textareaRef}
-                        rows={1}
-                        autoComplete="off"
-                        autoFocus
-                        value={value}
-                        onChange={(event) => setValue(event.target.value)}
-                        onKeyDown={handleKeyDown}
-                        placeholder={t("composer.placeholder")}
-                        className="max-h-48 min-h-8 w-full resize-none border-0 bg-transparent px-1.5 py-1.5 shadow-none focus-visible:ring-0 dark:bg-transparent"
-                    />
-
-                    <div className="flex min-w-0 items-center gap-1">
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setContextOpen(true)}
+            <div className={cn(CONTENT_GUTTER, "py-3")}>
+                <form onSubmit={handleSubmit}>
+                    <div className={cn(CHAT_COLUMN, "flex flex-col gap-1 rounded-xl border bg-composer p-1.5 shadow-sm")}>
+                        <Textarea
+                            ref={textareaRef}
+                            rows={1}
+                            autoComplete="off"
+                            autoFocus
+                            value={value}
+                            onChange={(event) => setValue(event.target.value)}
+                            onKeyDown={handleKeyDown}
                             disabled={disabled || saving}
-                            aria-haspopup="dialog"
-                            aria-expanded={contextOpen}
-                            className="h-8 min-w-0 max-w-[45%] shrink justify-start gap-1 px-2 text-xs font-normal"
-                            title={contextLabel}
-                        >
-                            <Folder className="size-3.5 shrink-0" />
-                            <span className="truncate">{contextLabel}</span>
-                            <ChevronUp className="size-3.5 shrink-0 opacity-60" />
-                        </Button>
+                            placeholder={t("composer.placeholder")}
+                            className="max-h-48 min-h-8 w-full resize-none border-0 bg-transparent px-1.5 py-1.5 shadow-none focus-visible:ring-0 dark:bg-transparent"
+                        />
 
-                        <div className="ml-auto flex min-w-0 items-center justify-end gap-1">
-                            <ComposerModelMenu
-                                config={config}
-                                disabled={disabled}
-                                saving={saving}
-                                onSave={saveConfig}
-                            />
-
+                        <div className="flex min-w-0 items-center gap-1">
                             <Button
-                                type="submit"
-                                size="icon-sm"
-                                className="shrink-0 p-0"
-                                aria-label={t("composer.send")}
-                                disabled={disabled || saving || value.trim().length === 0}
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setContextOpen(true)}
+                                disabled={disabled || running || saving}
+                                aria-haspopup="dialog"
+                                aria-expanded={contextOpen}
+                                className="h-8 min-w-0 max-w-[45%] shrink justify-start gap-1 px-2 text-xs font-normal"
+                                title={contextLabel}
                             >
-                                <ArrowUp aria-hidden="true" className="size-4" />
+                                <Folder className="size-3.5 shrink-0" />
+                                <span className="truncate">{contextLabel}</span>
+                                <ChevronUp className="size-3.5 shrink-0 opacity-60" />
                             </Button>
+
+                            <div className="ml-auto flex min-w-0 items-center justify-end gap-1">
+                                <ComposerModelMenu
+                                    config={config}
+                                    disabled={disabled || running}
+                                    saving={saving}
+                                    onSave={saveConfig}
+                                />
+
+                                {running && value.trim().length === 0 ? (
+                                    <Button
+                                        type="button"
+                                        size="icon-sm"
+                                        className="shrink-0 p-0 dark:bg-[#E6EDF3] dark:text-[#0D1117] dark:hover:bg-[#E6EDF3]/90"
+                                        aria-label={t("composer.stop")}
+                                        title={t("composer.stop")}
+                                        onClick={onStop}
+                                    >
+                                        <Square aria-hidden="true" className="size-3 fill-current" />
+                                    </Button>
+                                ) : (
+                                    <Button
+                                        type="submit"
+                                        size="icon-sm"
+                                        className="shrink-0 p-0 dark:bg-[#E6EDF3] dark:text-[#0D1117] dark:hover:bg-[#E6EDF3]/90"
+                                        aria-label={t("composer.send")}
+                                        disabled={disabled || saving || value.trim().length === 0}
+                                    >
+                                        <ArrowUp aria-hidden="true" className="size-4" />
+                                    </Button>
+                                )}
+                            </div>
                         </div>
                     </div>
-                </div>
-                {error ? <p role="alert" className="mt-1 text-xs text-destructive">{error}</p> : null}
-            </form>
+                    {error ? (
+                        <p role="alert" className={cn(CHAT_COLUMN, "mt-1 text-xs text-destructive")}>
+                            {error}
+                        </p>
+                    ) : null}
+                </form>
+            </div>
 
             <SessionContextDialog
                 open={contextOpen}

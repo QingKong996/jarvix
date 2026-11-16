@@ -20,8 +20,19 @@ export type TranscriptAction =
         assistantId: string;
         text: string;
     } | {
+        type: "turn.inject";
+        userId: string;
+        text: string;
+    } | {
+        type: "turn.discard";
+        userId: string;
+    } | {
+        type: "turn.finish";
+    } | {
         type: "events.batch";
         events: JarvixEvent[];
+    } | {
+        type: "turn.stop";
     } | {
         type: "request.error";
         error: string;
@@ -32,7 +43,8 @@ export type TranscriptAction =
 
 export const initialTranscriptState: TranscriptState = {
     committed: [],
-    live: null
+    live: null,
+    injected: []
 };
 
 /** Single write path for user actions and events relayed from main. */
@@ -51,14 +63,38 @@ export function transcriptReducer(state: TranscriptState, action: TranscriptActi
                         reason: null
                     }
                 ],
-                live: { id: action.assistantId, blocks: [] }
+                live: { id: action.assistantId, blocks: [] },
+                injected: []
             };
+        case "turn.inject":
+            return {
+                ...state,
+                injected: [...state.injected, {
+                    id: action.userId,
+                    role: "user",
+                    text: action.text,
+                    blocks: [],
+                    error: null,
+                    reason: null
+                }]
+            };
+        case "turn.discard":
+            return {
+                ...state,
+                injected: state.injected.filter((turn) => turn.id !== action.userId)
+            };
+        case "turn.finish":
+            return state.injected.length === 0
+                ? state
+                : { ...state, injected: [] };
+        case "turn.stop":
+            return stopLive(state);
         case "request.error":
             return commitLive(state, action.error);
         case "events.batch":
             return action.events.reduce(applyEvent, state);
         case "session.loaded":
-            return { committed: hydrateSession(action.messages), live: null };
+            return { committed: hydrateSession(action.messages), live: null, injected: [] };
     }
 }
 
@@ -189,6 +225,8 @@ function applyEvent(state: TranscriptState, event: JarvixEvent): TranscriptState
         case "log":
         case "session.renamed":
             return state;
+        case "prompt.injected":
+            return commitInjectedPrompt(state, event.promptId, event.text);
         case "tool.start":
             return updateToolBlock(state, event.toolCallId, (block) => ({
                 ...block,
@@ -220,6 +258,26 @@ function appendSystemMessage(state: TranscriptState, message: LlmSystemMessage):
     return {
         ...state,
         committed: [...state.committed, systemTurn(id, message)]
+    };
+}
+
+function commitInjectedPrompt(state: TranscriptState, promptId: string, text: string): TranscriptState {
+    if (state.committed.some((turn) => turn.id === promptId)) {
+        return state.injected.some((turn) => turn.id === promptId)
+            ? { ...state, injected: state.injected.filter((turn) => turn.id !== promptId) }
+            : state;
+    }
+    return {
+        ...state,
+        committed: [...state.committed, {
+            id: promptId,
+            role: "user",
+            text,
+            blocks: [],
+            error: null,
+            reason: null
+        }],
+        injected: state.injected.filter((turn) => turn.id !== promptId)
     };
 }
 
@@ -288,14 +346,15 @@ function commitMessage(state: TranscriptState, message: LlmAssistantMessage): Tr
             error: message.errorMessage ?? null,
             reason: message.stopReason
         }],
-        live: null
+        live: null,
+        injected: state.injected
     };
 }
 
 function commitLive(state: TranscriptState, error: string): TranscriptState {
     const live = state.live;
     if (!live) {
-        return state;
+        return state.injected.length === 0 ? state : { ...state, injected: [] };
     }
     return {
         committed: [...state.committed, {
@@ -308,6 +367,31 @@ function commitLive(state: TranscriptState, error: string): TranscriptState {
             error,
             reason: null
         }],
-        live: null
+        live: null,
+        injected: []
+    };
+}
+
+function stopLive(state: TranscriptState): TranscriptState {
+    const live = state.live;
+    if (!live) {
+        return state.injected.length === 0 ? state : { ...state, injected: [] };
+    }
+    if (live.blocks.length === 0) {
+        return { ...state, live: null, injected: [] };
+    }
+    return {
+        committed: [...state.committed, {
+            id: live.id,
+            role: "assistant",
+            text: "",
+            blocks: live.blocks.map((block) => block.kind === "text"
+                ? { type: "text", text: block.text }
+                : { type: "thinking", thinking: block.text }),
+            error: null,
+            reason: "aborted"
+        }],
+        live: null,
+        injected: []
     };
 }

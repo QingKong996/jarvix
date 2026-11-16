@@ -7,7 +7,8 @@ import { z } from "zod";
 import type { LlmToolCallBlock, LlmToolDefinition } from "../llm/types.ts";
 import {
     applyParsedPatch,
-    formatPatchSummary
+    formatPatchSummary,
+    type AffectedPaths
 } from "./apply-patch-engine.ts";
 import {
     ApplyPatchParseError,
@@ -94,7 +95,10 @@ export class ApplyPatchTool implements ToolExecutor {
         }
 
         try {
-            const affected = applyParsedPatch(parsed, arguments_.data.cwd);
+            const affected = await applyParsedPatch(parsed, arguments_.data.cwd, signal);
+            if (affected.aborted) {
+                return abortedResult(call, arguments_.data, affected);
+            }
             const summary = formatPatchSummary(affected);
             const data: ApplyPatchView = {
                 kind: "apply_patch",
@@ -124,6 +128,30 @@ function failedResult(call: LlmToolCallBlock, message: string): ToolExecutionRes
     return {
         content: message,
         data: { ...data, output: message },
+        isError: true,
+        endReason: "exited"
+    };
+}
+
+function abortedResult(
+    call: LlmToolCallBlock,
+    arguments_: z.infer<typeof applyPatchArguments>,
+    affected: AffectedPaths
+): ToolExecutionResult {
+    const applied = affected.added.length + affected.modified.length + affected.deleted.length;
+    const output = applied === 0
+        ? "Apply patch stopped. No changes were applied."
+        : `Apply patch stopped.\n${formatPatchSummary(affected)}`;
+    const data: ApplyPatchView = {
+        kind: "apply_patch",
+        patch: arguments_.patch,
+        cwd: arguments_.cwd,
+        output,
+        status: "failed"
+    };
+    return {
+        content: output,
+        data,
         isError: true,
         endReason: "exited"
     };

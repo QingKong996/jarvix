@@ -141,3 +141,53 @@ test("keeps a timed-out shell addressable through write_stdin", async () => {
         rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
 });
+
+test("aborts a running command before timeout and returns its output", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-shell-abort-"));
+    const script = join(directory, "wait.mjs");
+    writeFileSync(script, [
+        "process.stdout.write('ready\\n');",
+        "setTimeout(() => process.exit(0), 10_000);"
+    ].join("\n"), "utf8");
+    const tool = new ShellTool();
+    tools.push(tool);
+    const command = process.platform === "win32"
+        ? `& ${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`
+        : `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`;
+    const outputs: string[] = [];
+    const controller = new AbortController();
+
+    try {
+        const execution = tool.execute(call("exec_command", {
+            command,
+            cwd: directory,
+            timeoutMs: 10_000
+        }), {
+            onOutput: (data) => {
+                outputs.push(data.output);
+            }
+        }, controller.signal);
+
+        await vi.waitFor(() => {
+            expect(outputs.join("")).toContain("ready");
+        }, { timeout: 5_000 });
+
+        const startedAt = Date.now();
+        controller.abort();
+        const result = await execution;
+
+        expect(Date.now() - startedAt).toBeLessThan(2_000);
+        expect(result).toMatchObject({
+            isError: true,
+            data: {
+                kind: "shell.exec_command",
+                status: "failed"
+            }
+        });
+        expect(result.content).toContain("Command aborted");
+        expect(result.data.output).toContain("ready");
+    } finally {
+        tool.dispose();
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});

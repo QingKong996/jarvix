@@ -34,10 +34,15 @@ export type AffectedPaths = {
     added: string[];
     modified: string[];
     deleted: string[];
+    aborted?: boolean;
 };
 
 /** Apply parsed OpenAI apply_patch hunks to the filesystem. */
-export function applyParsedPatch(patch: ParsedApplyPatch, cwd: string): AffectedPaths {
+export async function applyParsedPatch(
+    patch: ParsedApplyPatch,
+    cwd: string,
+    signal?: AbortSignal
+): Promise<AffectedPaths> {
     if (patch.hunks.length === 0) {
         throw new Error("No files were modified.");
     }
@@ -47,10 +52,17 @@ export function applyParsedPatch(patch: ParsedApplyPatch, cwd: string): Affected
     const affected: AffectedPaths = {
         added: [],
         modified: [],
-        deleted: []
+        deleted: [],
+        aborted: false
     };
 
     for (const hunk of patch.hunks) {
+        await yieldForCancellation(signal);
+        if (signal?.aborted) {
+            affected.aborted = true;
+            return affected;
+        }
+
         const target = resolve(baseDirectory, hunk.path);
         switch (hunk.kind) {
             case "add": {
@@ -79,6 +91,8 @@ export function applyParsedPatch(patch: ParsedApplyPatch, cwd: string): Affected
         }
     }
 
+    await yieldForCancellation(signal);
+    affected.aborted = signal?.aborted ?? false;
     return affected;
 }
 
@@ -90,6 +104,13 @@ export function formatPatchSummary(affected: AffectedPaths): string {
         ...affected.modified.map((path) => `M ${path}`),
         ...affected.deleted.map((path) => `D ${path}`)
     ].join("\n");
+}
+
+async function yieldForCancellation(signal?: AbortSignal): Promise<void> {
+    if (!signal) {
+        return;
+    }
+    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 0));
 }
 
 function assertUniqueTargets(hunks: readonly ApplyPatchHunk[], cwd: string): void {
