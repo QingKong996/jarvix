@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, test } from "vitest";
-import { DEFAULT_THEME } from "../protocol/config.ts";
-import { providerConfigSchema } from "../protocol/providers.ts";
+import { DEFAULT_THEME } from "../../protocol/config.ts";
+import { providerConfigSchema } from "../../protocol/providers.ts";
 import {
     configPaths,
     loadConfig,

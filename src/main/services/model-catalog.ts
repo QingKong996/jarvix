@@ -1,8 +1,8 @@
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
-import { parseModelsDevCatalog } from "../llm/catalog.ts";
-import { providerCatalogEntrySchema, type ModelCatalog } from "../protocol/providers.ts";
+import { parseModelsDevCatalog } from "../../llm/catalog.ts";
+import { providerCatalogEntrySchema, type ModelCatalog } from "../../protocol/providers.ts";
 
 const TTL = 24 * 60 * 60 * 1000;
 const CACHE_VERSION = 4;

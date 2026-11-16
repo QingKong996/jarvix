@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { modelDefinitionSchema, type ModelDefinition } from "../protocol/providers.ts";
+import { modelDefinitionSchema, type ModelDefinition } from "../../protocol/providers.ts";
 
 const requestSchema = z.object({
     baseUrl: z.string().trim().min(1).refine((value) => {
