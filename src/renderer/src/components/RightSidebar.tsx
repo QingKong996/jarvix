@@ -1,10 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import {
-    ChevronRight,
-    PanelRightClose,
-    Terminal,
-    X
-} from "lucide-react";
+import { ChevronRight, PanelRightClose, Terminal } from "lucide-react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
@@ -13,7 +8,6 @@ import { useBackgroundTasks } from "../background-task-store.ts";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type RightSidebarProps = {
     open: boolean;
@@ -21,78 +15,57 @@ type RightSidebarProps = {
     onToggle(): void;
 };
 
-const TABS = [{
-    id: "background",
-    icon: Terminal,
-    labelKey: "rightSidebar.tabs.background"
-}] as const;
-
-type TabId = typeof TABS[number]["id"];
-
 export function RightSidebar({ open, sessionId, onToggle }: RightSidebarProps) {
     const { t } = useTranslation();
-    const [activeTab, setActiveTab] = useState<TabId>("background");
+
+    useEffect(() => {
+        if (!open) return;
+        const handleKeyDown = (event: KeyboardEvent): void => {
+            if (event.key === "Escape") onToggle();
+        };
+        window.addEventListener("keydown", handleKeyDown);
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [open, onToggle]);
 
     if (!open) {
         return null;
     }
 
     return (
-        <aside className="flex h-full w-80 shrink-0 flex-col border-l border-border bg-secondary/20">
-            <Tabs
-                value={activeTab}
-                onValueChange={(value) => setActiveTab(value as TabId)}
-                className="min-h-0 flex-1 gap-0"
+        <>
+            <div
+                aria-hidden="true"
+                onClick={onToggle}
+                className="fixed inset-0 z-20 bg-background/70 backdrop-blur-[1px] xl:hidden"
+            />
+            <aside
+                aria-labelledby="background-tasks-title"
+                className="fixed inset-y-0 right-0 z-30 flex h-full w-[min(20rem,calc(100vw-2rem))] shrink-0 flex-col border-l border-border bg-popover shadow-xl xl:static xl:z-auto xl:w-80 xl:shadow-none"
             >
-                <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-2">
-                    <div className="relative flex min-w-0 flex-1">
-                        <TabsList className="h-8 min-w-0 flex-1 justify-start rounded-none bg-transparent p-0">
-                            {TABS.map((tab) => {
-                                const Icon = tab.icon;
-                                return (
-                                    <TabsTrigger
-                                        key={tab.id}
-                                        value={tab.id}
-                                        className="h-full min-w-0 justify-start gap-2 rounded-lg border-border bg-accent/40 pr-8 text-xs shadow-xs data-[state=active]:bg-accent/70"
-                                    >
-                                        <Icon className="size-3.5" />
-                                        <span className="truncate">{t(tab.labelKey)}</span>
-                                    </TabsTrigger>
-                                );
-                            })}
-                        </TabsList>
-                        <button
-                            type="button"
-                            aria-label={t("rightSidebar.close")}
-                            title={t("rightSidebar.close")}
-                            onClick={onToggle}
-                            className="absolute top-1/2 right-1 z-10 -translate-y-1/2 rounded-sm p-0.5 text-muted-foreground opacity-70 transition-colors hover:text-foreground hover:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
-                        >
-                            <X className="size-3.5" />
-                        </button>
+                <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4">
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                        <Terminal className="size-4 shrink-0 text-muted-foreground" />
+                        <h2 id="background-tasks-title" className="truncate text-sm font-medium">
+                            {t("rightSidebar.tabs.background")}
+                        </h2>
                     </div>
                     <Button
                         type="button"
-                        variant="secondary"
+                        variant="ghost"
                         size="icon-sm"
+                        autoFocus
                         aria-label={t("rightSidebar.close")}
                         title={t("rightSidebar.close")}
                         onClick={onToggle}
-                        className="shrink-0 rounded-lg"
+                        className="shrink-0"
                     >
                         <PanelRightClose />
                     </Button>
                 </header>
 
-                <div className="flex min-h-0 flex-1 flex-col">
-                    {activeTab === "background" ? (
-                        <TabsContent value="background" className="flex min-h-0 flex-col">
-                            <BackgroundTaskList sessionId={sessionId} />
-                        </TabsContent>
-                    ) : null}
-                </div>
-            </Tabs>
-        </aside>
+                <BackgroundTaskList sessionId={sessionId} />
+            </aside>
+        </>
     );
 }
 
@@ -129,14 +102,14 @@ function BackgroundTaskItem({ task }: { task: ToolTaskSnapshot }) {
             <CollapsibleTrigger
                 type="button"
                 title={task.command}
-                className="group flex w-full items-center gap-2 px-2.5 py-2 text-left"
+                className="group flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             >
                 <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
-                <code className="min-w-0 flex-1 truncate font-mono text-[12px]">
+                <code className="min-w-0 flex-1 truncate font-mono text-xs">
                     {task.command}
                 </code>
                 <span className={cn(
-                    "shrink-0 text-[11px] text-muted-foreground",
+                    "shrink-0 text-xs text-muted-foreground",
                     streaming && "animate-pulse"
                 )}>
                     {taskStatus(task, t)}
@@ -164,7 +137,7 @@ function TaskOutput({ text, streaming, open }: { text: string; streaming: boolea
             className="max-h-64 border-t border-border"
             viewportClassName="h-auto max-h-[inherit]"
         >
-            <pre className="px-2.5 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-muted-foreground">
+            <pre className="px-2.5 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words text-muted-foreground">
                 {text}
             </pre>
         </ScrollArea>

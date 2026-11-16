@@ -1,0 +1,100 @@
+import { useDraggable } from "@dnd-kit/core";
+import { Archive, Pencil, Sparkles, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { cn } from "cn";
+import type { JarvixSessionSummary } from "../../../../protocol/session.ts";
+import { Button } from "../ui/button.tsx";
+import {
+    ContextMenu,
+    ContextMenuContent,
+    ContextMenuItem,
+    ContextMenuTrigger
+} from "../ui/context-menu.tsx";
+
+type SidebarSessionItemProps = {
+    session: JarvixSessionSummary;
+    active: boolean;
+    busy: boolean;
+    onSelect(sessionId: string): void;
+    onRename(session: JarvixSessionSummary): void;
+    onAutoName(sessionId: string): void;
+    onArchive(sessionId: string): void;
+    onRequestDelete(session: JarvixSessionSummary): void;
+};
+
+export function SidebarSessionItem({
+    session,
+    active,
+    busy,
+    onSelect,
+    onRename,
+    onAutoName,
+    onArchive,
+    onRequestDelete
+}: SidebarSessionItemProps) {
+    const { t } = useTranslation();
+    const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+        id: session.id,
+        data: { session },
+        disabled: busy
+    });
+
+    return (
+        <ContextMenu>
+            <ContextMenuTrigger asChild disabled={busy}>
+                <div
+                    ref={setNodeRef}
+                    style={{ opacity: isDragging ? 0.35 : undefined }}
+                    className={cn(
+                        "group flex w-full items-center rounded-md text-sm transition-colors",
+                        active
+                            ? "bg-accent text-accent-foreground"
+                            : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                    )}
+                >
+                    <button
+                        type="button"
+                        aria-current={active ? "page" : undefined}
+                        title={isDragging ? undefined : session.name}
+                        onClick={() => onSelect(session.id)}
+                        disabled={busy}
+                        className="flex min-w-0 flex-1 cursor-grab items-center rounded-md py-2 pl-9 text-left text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring/50 active:cursor-grabbing"
+                        {...attributes}
+                        {...listeners}
+                    >
+                        <span className="min-w-0 flex-1 truncate">{session.name}</span>
+                    </button>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={t("sessions.archive")}
+                        title={t("sessions.archive")}
+                        disabled={busy}
+                        onClick={() => onArchive(session.id)}
+                        className="mr-1 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                    >
+                        <Archive />
+                    </Button>
+                </div>
+            </ContextMenuTrigger>
+            <ContextMenuContent className="w-44">
+                <ContextMenuItem onSelect={() => onRename(session)}>
+                    <Pencil />
+                    {t("sessions.rename")}
+                </ContextMenuItem>
+                <ContextMenuItem onSelect={() => onAutoName(session.id)}>
+                    <Sparkles />
+                    {t("sessions.autoName")}
+                </ContextMenuItem>
+                <ContextMenuItem
+                    className="text-destructive focus:bg-destructive/10 focus:text-destructive"
+                    onSelect={() => onRequestDelete(session)}
+                >
+                    <Trash2 />
+                    {t("sessions.delete")}
+                </ContextMenuItem>
+            </ContextMenuContent>
+        </ContextMenu>
+    );
+}

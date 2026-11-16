@@ -5,6 +5,8 @@ import {
     SESSION_NAME_MAX_LENGTH,
     type JarvixSessionSummary
 } from "../../../protocol/session.ts";
+import { DialogFooter } from "./DialogFooter.tsx";
+import { FormField } from "./FormField.tsx";
 import { Button } from "./ui/button.tsx";
 import {
     Dialog,
@@ -66,8 +68,7 @@ export function RenameSessionDialog({
                 </DialogHeader>
 
                 <form onSubmit={(event) => void handleSubmit(event)} className="flex flex-col gap-5">
-                    <label className="flex flex-col gap-2 text-sm font-medium">
-                        {t("sessions.name")}
+                    <FormField label={t("sessions.name")}>
                         <Input
                             autoFocus
                             value={name}
@@ -76,11 +77,9 @@ export function RenameSessionDialog({
                             maxLength={SESSION_NAME_MAX_LENGTH}
                             disabled={saving}
                         />
-                    </label>
+                    </FormField>
 
-                    {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
-
-                    <div className="flex justify-end gap-2">
+                    <DialogFooter error={error}>
                         <DialogClose asChild>
                             <Button type="button" variant="ghost" disabled={saving}>
                                 {t("sessions.cancel")}
@@ -90,7 +89,7 @@ export function RenameSessionDialog({
                             <Save />
                             {t("sessions.save")}
                         </Button>
-                    </div>
+                    </DialogFooter>
                 </form>
             </DialogContent>
         </Dialog>
