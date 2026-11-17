@@ -90,7 +90,6 @@ export const modelSelectionSchema = z.object({ provider: identifier, id: identif
 export type ReasoningCapabilities = Pick<ModelDefinition, "reasoning" | "reasoningLevels">;
 export type ModelDefinition = z.infer<typeof modelDefinitionSchema>;
 export type ProviderCatalogEntry = z.infer<typeof providerCatalogEntrySchema>;
-export type ProviderDefinition = z.infer<typeof providerDefinitionSchema>;
 export type ProviderConfig = z.infer<typeof providerConfigSchema>;
 export type ProviderModelSyncRequest = Pick<ProviderConfig, "baseUrl" | "apiKey" | "env">;
 export type ModelSelection = z.infer<typeof modelSelectionSchema>;

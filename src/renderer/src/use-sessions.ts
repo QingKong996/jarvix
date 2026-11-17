@@ -6,7 +6,7 @@ import {
     type JarvixSessionContext,
     type JarvixSessionSummary
 } from "../../protocol/session.ts";
-import { ingestBackgroundTasks } from "./background-task-store.ts";
+import { ingestBackgroundTasks } from "./components/transcript/tools/background-task-store.ts";
 import { RequestEventGate } from "./request-event-gate.ts";
 import {
     beginTurn,
@@ -17,7 +17,7 @@ import {
     ingest,
     injectUserPrompt,
     stopTurn
-} from "./transcript-store.ts";
+} from "./components/transcript/transcript-store.ts";
 
 const bridge = window.jarvix;
 

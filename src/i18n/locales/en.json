@@ -94,11 +94,26 @@
         "execCommand": "Run command",
         "writeStdin": "Write to shell",
         "applyPatch": "Edit files",
+        "localTime": "Local time",
+        "sleep": "Wait",
+        "localTimeDetails": {
+            "utcOffset": "UTC offset",
+            "unixTimestamp": "Unix timestamp"
+        },
+        "sleepDetails": {
+            "remaining": "Remaining",
+            "elapsed": "Slept for",
+            "interrupted": "Interrupted"
+        },
+        "shellDetails": {
+            "polling": "Reading output"
+        },
         "generic": "Tool call",
         "status": {
             "running": "Running…",
             "completed": "Completed",
             "background": "Running in background",
+            "terminated": "Ended",
             "failed": "Failed"
         }
     },

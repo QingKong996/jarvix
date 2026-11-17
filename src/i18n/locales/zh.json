@@ -94,11 +94,26 @@
         "execCommand": "执行命令",
         "writeStdin": "写入 Shell",
         "applyPatch": "修改文件",
+        "localTime": "本地时间",
+        "sleep": "等待",
+        "localTimeDetails": {
+            "utcOffset": "UTC 偏移",
+            "unixTimestamp": "Unix 时间戳"
+        },
+        "sleepDetails": {
+            "remaining": "剩余时间",
+            "elapsed": "睡眠时间",
+            "interrupted": "已中断"
+        },
+        "shellDetails": {
+            "polling": "读取输出"
+        },
         "generic": "调用工具",
         "status": {
             "running": "运行中…",
             "completed": "已完成",
             "background": "后台运行中",
+            "terminated": "已结束",
             "failed": "失败"
         }
     },

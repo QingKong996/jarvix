@@ -1,6 +1,6 @@
 import type { LlmStreamEvent, LlmSystemMessage } from "../llm/types.ts";
-import type { ToolCallEndReason, ToolTaskEvent } from "../tools/types.ts";
-import type { ToolCallOutputDelta, ToolCallViewData } from "../tools/view.ts";
+import type { ToolCallEndReason, ToolTaskEvent } from "../core/tools/types.ts";
+import type { ToolCallOutputDelta, ToolCallViewData } from "../core/tools/view.ts";
 
 export const LOG_LEVELS = ["log", "info", "warn", "error", "debug"] as const;
 export type LogLevel = typeof LOG_LEVELS[number];
