@@ -11,6 +11,7 @@ import type {
 } from "../../llm/index.ts";
 import type { JarvixConfig } from "../../protocol/config.ts";
 import type { JarvixEvent } from "../../protocol/event.ts";
+import type { PermissionMode } from "../../protocol/permission.ts";
 import type { JarvixSession, JarvixSessionMeta } from "../../protocol/session.ts";
 import {
     resolveConfiguredModel,
@@ -29,9 +30,17 @@ const PERSIST_ATTEMPTS = 2;
 export const MAX_TOOL_ROUNDS = 32;
 
 type PendingPrompt = {
+    type: "prompt";
     id: string;
     text: string;
 };
+
+type PendingSystemMessage = {
+    type: "system";
+    message: LlmSystemMessage;
+};
+
+type PendingTurnMessage = PendingPrompt | PendingSystemMessage;
 
 type TurnDecision = "continue" | "complete" | "failed";
 
@@ -53,12 +62,12 @@ export class Session {
     readonly meta: JarvixSessionMeta;
     private readonly history: LlmMessage[];
     private readonly pendingPersistence: LlmMessage[] = [];
-    private readonly pendingSystemMessages: LlmSystemMessage[] = [];
-    private readonly pendingPrompts: PendingPrompt[] = [];
+    private pendingTurnMessages: PendingTurnMessage[] = [];
     private readonly backgroundExitNotices = new Set<string>();
     private readonly tools: ToolExecutor;
     private readonly idleWaiters = new Set<() => void>();
     private running = false;
+    private streamOpen = false;
     private toolUseOpen = false;
     private requestController: AbortController | null = null;
     private lastRuntime: SessionRuntime | null = null;
@@ -126,8 +135,7 @@ export class Session {
                 if (signal.aborted || decision === "failed") {
                     break;
                 }
-                if (this.pendingPrompts.length > 0) {
-                    this.insertPendingPrompts(runtime);
+                if (this.flushPendingTurnMessages(runtime)) {
                     round = 0;
                     continue;
                 }
@@ -145,8 +153,9 @@ export class Session {
             throw error;
         } finally {
             this.toolUseOpen = false;
+            this.streamOpen = false;
+            this.discardPendingPrompts();
             this.flushPendingSystemMessages(runtime);
-            this.pendingPrompts.length = 0;
             this.running = false;
             if (this.requestController === controller) {
                 this.requestController = null;
@@ -156,7 +165,7 @@ export class Session {
     }
 
     abort(): void {
-        this.pendingPrompts.length = 0;
+        this.discardPendingPrompts();
         this.requestController?.abort();
     }
 
@@ -171,8 +180,31 @@ export class Session {
         ) {
             return false;
         }
-        this.pendingPrompts.push({ id, text });
+        this.pendingTurnMessages.push({ type: "prompt", id, text });
         return true;
+    }
+
+    applyPermission(permission: PermissionMode): void {
+        const previous = this.meta.permission;
+        this.meta.permission = permission;
+        if (
+            previous === permission ||
+            !this.running ||
+            this.requestController?.signal.aborted
+        ) {
+            return;
+        }
+        this.pendingTurnMessages.push({
+            type: "system",
+            message: {
+                role: "system",
+                content: [
+                    `Permission mode changed from "${previous}" to "${permission}" during this task.`,
+                    "Subsequent tool calls use the new permission mode."
+                ].join(" "),
+                timestamp: Date.now()
+            }
+        });
     }
 
     private async takeTurn(
@@ -184,22 +216,27 @@ export class Session {
         }
 
         let completed: LlmAssistantMessage | undefined;
-        for await (const event of runtime.llm.stream({
-            ...turn.request,
-            messages: [...this.history],
-            signal
-        })) {
-            if (signal.aborted) {
-                break;
+        this.streamOpen = true;
+        try {
+            for await (const event of runtime.llm.stream({
+                ...turn.request,
+                messages: [...this.history],
+                signal
+            })) {
+                if (signal.aborted) {
+                    break;
+                }
+                runtime.emit(event);
+                if (event.type === "done") {
+                    completed = event.message;
+                    this.append(event.message);
+                    this.toolUseOpen = event.message.stopReason === "toolUse";
+                } else if (event.type === "error") {
+                    completed = undefined;
+                }
             }
-            runtime.emit(event);
-            if (event.type === "done") {
-                completed = event.message;
-                this.append(event.message);
-                this.toolUseOpen = event.message.stopReason === "toolUse";
-            } else if (event.type === "error") {
-                completed = undefined;
-            }
+        } finally {
+            this.streamOpen = false;
         }
 
         if (signal.aborted || !completed) {
@@ -224,11 +261,9 @@ export class Session {
                 }
             } finally {
                 this.toolUseOpen = false;
-                this.flushPendingSystemMessages(runtime);
             }
         } else {
             this.toolUseOpen = false;
-            this.flushPendingSystemMessages(runtime);
         }
 
         if (signal.aborted) {
@@ -422,44 +457,72 @@ export class Session {
             timestamp: Date.now(),
             notice
         };
-        this.pendingSystemMessages.push(message);
-        runtime.emit({ type: "system.message", message });
+        this.pendingTurnMessages.push({ type: "system", message });
         this.flushPendingSystemMessages(runtime);
     }
 
-    private insertPendingPrompts(runtime: SessionRuntime): void {
-        while (this.pendingPrompts.length > 0) {
-            const pending = this.pendingPrompts[0]!;
-            const message: LlmUserMessage = {
-                role: "user",
-                content: pending.text,
-                timestamp: Date.now()
-            };
-            this.append(message);
-            this.pendingPrompts.shift();
-            runtime.emit({
-                type: "prompt.injected",
-                promptId: pending.id,
-                text: pending.text
-            });
+    private flushPendingTurnMessages(runtime: SessionRuntime): boolean {
+        let injectedPrompt = false;
+        while (this.pendingTurnMessages.length > 0) {
+            const pending = this.pendingTurnMessages.shift()!;
+            if (pending.type === "prompt") {
+                injectedPrompt = true;
+                this.insertPrompt(pending, runtime);
+            } else {
+                this.insertSystemMessage(pending, runtime);
+            }
         }
+        return injectedPrompt;
+    }
+
+    private insertPrompt(pending: PendingPrompt, runtime: SessionRuntime): void {
+        const message: LlmUserMessage = {
+            role: "user",
+            content: pending.text,
+            timestamp: Date.now()
+        };
+        this.append(message);
+        runtime.emit({
+            type: "prompt.injected",
+            promptId: pending.id,
+            text: pending.text
+        });
+    }
+
+    private insertSystemMessage(
+        pending: PendingSystemMessage,
+        runtime: SessionRuntime
+    ): void {
+        try {
+            this.append(pending.message);
+        } catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
+            runtime.emit({
+                type: "request.error",
+                error: `Failed to persist system message: ${reason}`
+            });
+            return;
+        }
+        runtime.emit({ type: "system.message", message: pending.message });
+    }
+
+    private discardPendingPrompts(): void {
+        this.pendingTurnMessages = this.pendingTurnMessages.filter(
+            (pending) => pending.type !== "prompt"
+        );
     }
 
     private flushPendingSystemMessages(runtime: SessionRuntime): void {
-        if (this.toolUseOpen) {
+        if (this.streamOpen || this.toolUseOpen) {
             return;
         }
-        while (this.pendingSystemMessages.length > 0) {
-            const message = this.pendingSystemMessages.shift()!;
-            try {
-                this.append(message);
-            } catch (error) {
-                const reason = error instanceof Error ? error.message : String(error);
-                runtime.emit({
-                    type: "request.error",
-                    error: `Failed to persist background notice: ${reason}`
-                });
+        while (true) {
+            const pending = this.pendingTurnMessages[0];
+            if (pending?.type !== "system") {
+                break;
             }
+            this.pendingTurnMessages.shift();
+            this.insertSystemMessage(pending, runtime);
         }
     }
 

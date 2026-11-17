@@ -37,6 +37,37 @@ export type AffectedPaths = {
     aborted?: boolean;
 };
 
+export type PatchWriteTarget = {
+    path: string;
+    operation: "add" | "delete" | "update" | "move source" | "move destination";
+};
+
+/** Resolve every path a patch would write or delete, before touching disk. */
+export function patchWriteTargets(
+    patch: ParsedApplyPatch,
+    cwd: string
+): PatchWriteTarget[] {
+    const baseDirectory = resolve(cwd);
+    const targets: PatchWriteTarget[] = [];
+    for (const hunk of patch.hunks) {
+        const target = resolve(baseDirectory, hunk.path);
+        if (hunk.kind === "add") {
+            targets.push({ path: target, operation: "add" });
+        } else if (hunk.kind === "delete") {
+            targets.push({ path: target, operation: "delete" });
+        } else if (hunk.movePath === null) {
+            targets.push({ path: target, operation: "update" });
+        } else {
+            targets.push({ path: target, operation: "move source" });
+            targets.push({
+                path: resolve(baseDirectory, hunk.movePath),
+                operation: "move destination"
+            });
+        }
+    }
+    return targets;
+}
+
 /** Apply parsed OpenAI apply_patch hunks to the filesystem. */
 export async function applyParsedPatch(
     patch: ParsedApplyPatch,

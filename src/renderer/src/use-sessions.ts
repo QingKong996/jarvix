@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+    DEFAULT_PERMISSION_MODE,
+    type PermissionMode
+} from "../../protocol/permission.ts";
 import type { JarvixProject } from "../../protocol/project.ts";
 import {
     sessionContextFrom,
@@ -28,6 +32,9 @@ export function useSessions() {
     const [archivedSessions, setArchivedSessions] = useState<JarvixSessionSummary[]>([]);
     const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
     const [sessionContext, setSessionContext] = useState<JarvixSessionContext>({});
+    const [sessionPermission, setSessionPermission] = useState<PermissionMode>(
+        DEFAULT_PERMISSION_MODE
+    );
     const [busy, setBusy] = useState(false);
     const [running, setRunning] = useState(false);
     const [ready, setReady] = useState(false);
@@ -37,6 +44,7 @@ export function useSessions() {
     const requestCompletionRef = useRef<Promise<void> | null>(null);
     const requestInFlightRef = useRef(false);
     const sessionContextRef = useRef<JarvixSessionContext>({});
+    const sessionPermissionRef = useRef<PermissionMode>(DEFAULT_PERMISSION_MODE);
     const hasUserMessagesRef = useRef(false);
 
     const updateContextState = useCallback((context: JarvixSessionContext): void => {
@@ -50,13 +58,19 @@ export function useSessions() {
         )));
     }, []);
 
+    const updatePermissionState = useCallback((permission: PermissionMode): void => {
+        sessionPermissionRef.current = permission;
+        setSessionPermission(permission);
+    }, []);
+
     const activateSession = useCallback((session: JarvixSession | null): void => {
         activeSessionIdRef.current = session?.meta.id ?? null;
         hasUserMessagesRef.current = session?.messages.some((message) => message.role === "user") ?? false;
         setActiveSessionId(session?.meta.id ?? null);
         updateContextState(session ? sessionContextFrom(session.meta) : {});
+        updatePermissionState(session?.meta.permission ?? DEFAULT_PERMISSION_MODE);
         hydrate(session?.messages ?? []);
-    }, [updateContextState]);
+    }, [updateContextState, updatePermissionState]);
 
     const refreshSessions = useCallback(async (): Promise<void> => {
         if (!bridge) {
@@ -158,8 +172,9 @@ export function useSessions() {
         hasUserMessagesRef.current = false;
         setActiveSessionId(null);
         updateContextState(projectId ? { projectId } : {});
+        updatePermissionState(DEFAULT_PERMISSION_MODE);
         hydrate([]);
-    }, [busy, ready, updateContextState]);
+    }, [busy, ready, updateContextState, updatePermissionState]);
 
     const createProject = useCallback(async (
         name: string,
@@ -219,6 +234,24 @@ export function useSessions() {
             setBusy(false);
         }
     }, [busy, ready, refreshSessions, updateContextState]);
+
+    const updateSessionPermission = useCallback(async (
+        permission: PermissionMode
+    ): Promise<void> => {
+        if (!bridge || !ready) {
+            return;
+        }
+        const sessionId = activeSessionIdRef.current;
+        if (!sessionId) {
+            updatePermissionState(permission);
+            return;
+        }
+
+        const updated = await bridge.setPermission(sessionId, permission);
+        if (activeSessionIdRef.current === sessionId) {
+            updatePermissionState(updated);
+        }
+    }, [ready, updatePermissionState]);
 
     const renameSession = useCallback(async (sessionId: string, name: string): Promise<boolean> => {
         if (!bridge || !ready || busy) {
@@ -337,7 +370,10 @@ export function useSessions() {
         try {
             const shouldAutoName = !hasUserMessagesRef.current;
             if (!sessionId) {
-                const created = await bridge.createSession(sessionContextRef.current);
+                const created = await bridge.createSession(
+                    sessionContextRef.current,
+                    sessionPermissionRef.current
+                );
                 activateSession(created);
                 await refreshSessions();
                 sessionId = created.meta.id;
@@ -437,6 +473,7 @@ export function useSessions() {
         sessions,
         archivedSessions,
         sessionContext,
+        sessionPermission,
         activeSessionId,
         busy,
         running,
@@ -444,6 +481,7 @@ export function useSessions() {
         createProject,
         startNewSession,
         updateSessionContext,
+        updateSessionPermission,
         renameSession,
         autoNameSession,
         archiveSession,

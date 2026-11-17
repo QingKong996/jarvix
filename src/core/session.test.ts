@@ -324,3 +324,21 @@ test("permanently deletes a session", () => {
     expect(jarvix.loadSession(session.meta.id)).toBeNull();
     expect(() => jarvix.deleteSession(session.meta.id)).toThrow("Session not found");
 });
+
+test("persists permissions in session metadata", () => {
+    home.path = join(base, "permission-home");
+    const sessionDirectory = join(home.path, ".jarvix", "sessions");
+    const jarvix = new Jarvix({ llm: fakeLlm("ok", []), config: TEST_CONFIG });
+    const session = jarvix.createSession({}, "Permission session", "project-read-write");
+
+    expect(jarvix.getPermission(session.meta.id)).toBe("project-read-write");
+    expect(loadSession(session.meta.id, sessionDirectory)?.meta.permission)
+        .toBe("project-read-write");
+
+    const reloaded = new Jarvix({ llm: fakeLlm("ok", []), config: TEST_CONFIG });
+    expect(reloaded.getPermission(session.meta.id)).toBe("project-read-write");
+    reloaded.setPermission(session.meta.id, "full-access");
+    expect(reloaded.getPermission(session.meta.id)).toBe("full-access");
+    expect(loadSession(session.meta.id, sessionDirectory)?.meta.permission)
+        .toBe("full-access");
+});

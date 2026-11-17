@@ -10,6 +10,10 @@ import type {
 } from "../protocol/session.ts";
 import { sessionContextSchema, sessionNameSchema } from "../protocol/session.ts";
 import {
+    DEFAULT_PERMISSION_MODE,
+    type PermissionMode
+} from "../protocol/permission.ts";
+import {
     createProject as createStoredProject,
     listProjects as listStoredProjects,
     loadProject
@@ -45,13 +49,17 @@ export class Jarvix {
         return listStoredProjects();
     }
 
-    createSession(context: JarvixSessionContext = {}, name?: string): JarvixSession {
+    createSession(
+        context: JarvixSessionContext = {},
+        name?: string,
+        permission: PermissionMode = DEFAULT_PERMISSION_MODE
+    ): JarvixSession {
         const normalizedContext = sessionContextSchema.parse(context);
         if (normalizedContext.projectId && !loadProject(normalizedContext.projectId)) {
             throw new Error(`Project not found: ${normalizedContext.projectId}`);
         }
         const sessionName = name?.trim() || i18n.t("sessions.untitled", { lng: this.config.language ?? "zh" });
-        return this.sessions.create(normalizedContext, sessionName).snapshot();
+        return this.sessions.create(normalizedContext, sessionName, permission).snapshot();
     }
 
     loadSession(sessionId: string): JarvixSession | null {
@@ -87,6 +95,14 @@ export class Jarvix {
             throw new Error(`Project not found: ${normalizedContext.projectId}`);
         }
         return this.sessions.updateContext(sessionId, normalizedContext);
+    }
+
+    getPermission(sessionId: string): PermissionMode {
+        return this.sessions.require(sessionId).meta.permission;
+    }
+
+    setPermission(sessionId: string, permission: PermissionMode): PermissionMode {
+        return this.sessions.updatePermission(sessionId, permission);
     }
 
     renameSession(sessionId: string, name: string): string {

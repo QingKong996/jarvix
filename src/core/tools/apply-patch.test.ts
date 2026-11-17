@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
 import type { LlmToolCallBlock } from "../../llm/types.ts";
+import { createSandboxPolicy } from "../permissions/sandbox.ts";
 import {
     APPLY_PATCH_TOOL,
     ApplyPatchTool,
@@ -185,6 +186,92 @@ test("returns completed changes when cancelled between file hunks", async () => 
         expect(result.content).not.toContain("second.txt");
         expect(existsSync(join(directory, "first.txt"))).toBe(true);
         expect(existsSync(join(directory, "second.txt"))).toBe(false);
+    } finally {
+        tool.dispose();
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
+test("rejects apply_patch writes in read-only mode", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-apply-patch-readonly-"));
+    const tool = new ApplyPatchTool({
+        sandboxPolicy: () => createSandboxPolicy("read-only", [directory])
+    });
+    try {
+        const result = await tool.execute(call(directory, [
+            "*** Begin Patch",
+            "*** Add File: blocked.txt",
+            "+blocked",
+            "*** End Patch"
+        ]), { onOutput: () => undefined });
+
+        expect(result).toMatchObject({
+            isError: true,
+            data: {
+                kind: "apply_patch",
+                status: "failed"
+            }
+        });
+        expect(result.content).toContain("<sandbox_violations>");
+        expect(result.content).toContain("(invocation call-apply-patch)");
+        expect(result.content).toContain("no writable roots");
+        expect(existsSync(join(directory, "blocked.txt"))).toBe(false);
+    } finally {
+        tool.dispose();
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
+test("checks every apply_patch target before writing any file", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-apply-patch-targets-"));
+    const tool = new ApplyPatchTool({
+        sandboxPolicy: () => createSandboxPolicy("project-read-write", [directory])
+    });
+    const outside = join(directory, "..", `jarvix-outside-${Date.now()}.txt`);
+    try {
+        const result = await tool.execute(call(directory, [
+            "*** Begin Patch",
+            "*** Add File: allowed.txt",
+            "+allowed",
+            `*** Add File: ../${outside.split(/[\\/]/).at(-1)}`,
+            "+outside",
+            "*** End Patch"
+        ]), { onOutput: () => undefined });
+
+        expect(result.isError).toBe(true);
+        expect(result.content).toContain("outside sandbox allowWrite roots");
+        expect(existsSync(join(directory, "allowed.txt"))).toBe(false);
+        expect(existsSync(outside)).toBe(false);
+    } finally {
+        tool.dispose();
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
+test("rejects an apply_patch move whose destination is outside the workspace", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-apply-patch-move-"));
+    const source = join(directory, "source.txt");
+    const outside = join(directory, "..", `jarvix-move-${Date.now()}.txt`);
+    const tool = new ApplyPatchTool({
+        sandboxPolicy: () => createSandboxPolicy("project-read-write", [directory])
+    });
+    try {
+        writeFileSync(source, "old\n", "utf8");
+
+        const result = await tool.execute(call(directory, [
+            "*** Begin Patch",
+            "*** Update File: source.txt",
+            `*** Move to: ../${outside.split(/[\\/]/).at(-1)}`,
+            "@@",
+            "-old",
+            "+new",
+            "*** End Patch"
+        ]), { onOutput: () => undefined });
+
+        expect(result.isError).toBe(true);
+        expect(result.content).toContain("move destination");
+        expect(readFileSync(source, "utf8")).toBe("old\n");
+        expect(existsSync(outside)).toBe(false);
     } finally {
         tool.dispose();
         rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });

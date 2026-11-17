@@ -3,6 +3,11 @@ import type { IpcMainInvokeEvent } from "electron";
 import type { Jarvix } from "../core/index.ts";
 import type { JarvixConfig } from "../protocol/config.ts";
 import { IPC_CHANNELS } from "../protocol/ipc.ts";
+import {
+    DEFAULT_PERMISSION_MODE,
+    permissionModeSchema,
+    type PermissionMode
+} from "../protocol/permission.ts";
 import { createProjectInputSchema } from "../protocol/project.ts";
 import {
     sessionContextSchema,
@@ -47,6 +52,14 @@ function parseSessionName(value: unknown): string {
     const parsed = sessionNameSchema.safeParse(value);
     if (!parsed.success) {
         throw new Error("Invalid session name");
+    }
+    return parsed.data;
+}
+
+function parsePermissionMode(value: unknown): PermissionMode {
+    const parsed = permissionModeSchema.safeParse(value);
+    if (!parsed.success) {
+        throw new Error("Invalid permission mode");
     }
     return parsed.data;
 }
@@ -148,7 +161,22 @@ export function registerIpc(dependencies: IpcDependencies): void {
     ipcMain.handle(IPC_CHANNELS.sessionCreate, (event, payload: unknown) => {
         assertSender(event);
         const session = requirePayload(payload, "Invalid session payload");
-        return jarvix.createSession(parseSessionContext(session.context));
+        return jarvix.createSession(
+            parseSessionContext(session.context),
+            undefined,
+            session.permission === undefined
+                ? DEFAULT_PERMISSION_MODE
+                : parsePermissionMode(session.permission)
+        );
+    });
+
+    ipcMain.handle(IPC_CHANNELS.permissionSet, (event, payload: unknown) => {
+        assertSender(event);
+        const request = requirePayload(payload, "Invalid permission payload");
+        return jarvix.setPermission(
+            requireSessionId(request.sessionId),
+            parsePermissionMode(request.permission)
+        );
     });
 
     ipcMain.handle(IPC_CHANNELS.sessionUpdateContext, (event, payload: unknown) => {

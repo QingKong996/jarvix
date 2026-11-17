@@ -34,6 +34,7 @@ export function App() {
         sessions,
         archivedSessions,
         sessionContext,
+        sessionPermission,
         activeSessionId,
         busy,
         running,
@@ -41,6 +42,7 @@ export function App() {
         createProject,
         startNewSession,
         updateSessionContext,
+        updateSessionPermission,
         renameSession,
         autoNameSession,
         archiveSession,
@@ -145,11 +147,13 @@ export function App() {
                                     running={running}
                                     projects={projects}
                                     sessionContext={sessionContext}
+                                    sessionPermission={sessionPermission}
                                     onSubmit={send}
                                     onStop={stop}
                                     config={config}
                                     onConfigChange={handleConfigChange}
                                     onContextChange={updateSessionContext}
+                                    onPermissionChange={updateSessionPermission}
                                 />
                             </main>
                         </ResizablePanel>

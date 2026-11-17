@@ -1,9 +1,24 @@
 import { randomUUID } from "node:crypto";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import {
+    spawn,
+    type ChildProcessWithoutNullStreams,
+    type StdioOptions
+} from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
+import type { WindowsBinShell } from "@anthropic-ai/sandbox-runtime";
 import { z } from "zod";
 import type { LlmToolCallBlock, LlmToolDefinition } from "../../llm/types.ts";
+import {
+    createSandboxLaunch,
+    type SandboxLaunch
+} from "../permissions/sandbox-launch.ts";
+import { isSandboxRunnerMessage } from "../permissions/sandbox-protocol.ts";
+import type { SandboxPolicy } from "../permissions/sandbox.ts";
+import {
+    appendSandboxViolations,
+    formatSandboxViolations
+} from "../permissions/violations.ts";
 import type {
     ToolExecutionResult,
     ToolExecutionObserver,
@@ -87,10 +102,20 @@ type ShellSession = {
     ended: boolean;
     exitCode: number | null;
     error: string | null;
+    sandbox: SandboxSessionState | null;
     done: Promise<void>;
     finish(): void;
+    cleanup?: () => void;
     listener: ((chunk: string) => void) | null;
     exitListener: (() => void) | null;
+};
+
+type SandboxSessionState = {
+    commandId: string;
+    violations: string[];
+    seenViolations: Set<string>;
+    reportedViolations: number;
+    done: boolean;
 };
 
 type ShellLaunch = {
@@ -105,21 +130,31 @@ export type ShellSessionExit = {
     exitCode: number | null;
     error: string | null;
     unreadOutput: string;
+    /** Whether this sandbox session has produced any violation. */
+    intercepted: boolean;
+    /** Violations not yet included in a previous tool result. */
+    violations: readonly string[];
 };
 
 export type ShellToolOptions = {
     defaultCwd?: string;
+    sandboxPolicy?: () => SandboxPolicy | null;
+    sandboxRunnerPath?: string;
 };
 
 /** Executes shell commands in child processes and keeps timed-out sessions addressable. */
 export class ShellTool implements ToolExecutor {
     readonly definitions = SHELL_TOOL_DEFINITIONS;
     private readonly defaultCwd: string;
+    private readonly sandboxPolicy?: () => SandboxPolicy | null;
+    private readonly sandboxRunnerPath?: string;
     private readonly addressableSessions = new Map<string, ShellSession>();
     private readonly children = new Set<ShellSession>();
 
     constructor(options: ShellToolOptions = {}) {
         this.defaultCwd = resolve(options.defaultCwd ?? DEFAULT_CWD);
+        this.sandboxPolicy = options.sandboxPolicy;
+        this.sandboxRunnerPath = options.sandboxRunnerPath;
     }
 
     handles(name: string): boolean {
@@ -202,11 +237,16 @@ export class ShellTool implements ToolExecutor {
         }
 
         const notifyExit = (): void => {
-            onExit?.({
+            if (!onExit) {
+                return;
+            }
+            onExit({
                 sessionId: session.id,
                 exitCode: session.exitCode,
                 error: session.error,
-                unreadOutput: session.output.slice(session.readOffset)
+                unreadOutput: session.output.slice(session.readOffset),
+                intercepted: (session.sandbox?.violations.length ?? 0) > 0,
+                violations: takeViolations(session)
             });
         };
         const pending = session.output.slice(session.broadcastOffset);
@@ -257,7 +297,7 @@ export class ShellTool implements ToolExecutor {
             session = this.start(command, resolve(this.defaultCwd, parsed.data.cwd), (chunk) => {
                 session.broadcastOffset = session.output.length;
                 observer.onOutput({ kind: "shell.exec_command", output: chunk });
-            });
+            }, call.id);
         } catch (error) {
             const message = errorMessage(error);
             return {
@@ -271,9 +311,11 @@ export class ShellTool implements ToolExecutor {
         const outcome = await waitForSession(session, timeoutMs, signal);
         if (outcome === "aborted") {
             await interruptSession(session);
+            const violations = takeViolations(session);
+            const output = appendSandboxViolations(session.output, violations);
             return {
-                content: "Command aborted.",
-                data: { kind: "shell.exec_command", command, output: session.output, status: "failed" },
+                content: appendViolationContent("Command aborted.", violations),
+                data: { kind: "shell.exec_command", command, output, status: "failed" },
                 isError: true,
                 endReason: "exited"
             };
@@ -282,11 +324,20 @@ export class ShellTool implements ToolExecutor {
         if (outcome === "timeout" && !session.ended) {
             session.listener = null;
             session.readOffset = session.output.length;
+            const violations = takeViolations(session);
             this.addressableSessions.set(session.id, session);
             return {
-                content: timedOutContent(session.id, timeoutMs, session.output),
-                data: { kind: "shell.exec_command", command, output: session.output, status: "timed_out" },
-                isError: false,
+                content: appendViolationContent(
+                    timedOutContent(session.id, timeoutMs, session.output),
+                    violations
+                ),
+                data: {
+                    kind: "shell.exec_command",
+                    command,
+                    output: appendSandboxViolations(session.output, violations),
+                    status: violations.length > 0 ? "failed" : "timed_out"
+                },
+                isError: violations.length > 0,
                 endReason: "background",
                 task: taskSnapshot(session)
             };
@@ -342,6 +393,7 @@ export class ShellTool implements ToolExecutor {
 
         const buffered = session.output.slice(session.readOffset);
         session.readOffset = session.output.length;
+        const violations = takeViolations(session);
         let commandState: WriteCommandState = "none";
         if (command.length > 0) {
             if (!session.ended && session.child.stdin.writable) {
@@ -352,32 +404,51 @@ export class ShellTool implements ToolExecutor {
             }
         }
 
-        const status = sessionStatus(session);
+        const processStatus = sessionStatus(session);
+        const status = violations.length > 0 ? "failed" : processStatus;
         const data: ShellWriteStdinView = {
             kind: "shell.write_stdin",
             sessionId,
             command,
-            output: buffered,
+            output: appendSandboxViolations(buffered, violations),
             status
         };
         return {
-            content: writeResultContent(sessionId, status, session.exitCode, session.error, buffered, commandState),
+            content: appendViolationContent(
+                writeResultContent(sessionId, processStatus, session.exitCode, session.error, buffered, commandState),
+                violations
+            ),
             data,
             isError: status === "failed",
-            endReason: status === "running" ? "background" : "exited",
+            endReason: processStatus === "running" ? "background" : "exited",
             task: taskSnapshot(session)
         };
     }
 
-    private start(command: string, cwd: string, listener: (chunk: string) => void): ShellSession {
-        const launch = shellLaunch(command);
-        const child = spawn(launch.command, launch.args, {
-            cwd,
-            env: process.env,
-            stdio: ["pipe", "pipe", "pipe"],
-            windowsHide: true,
-            detached: process.platform !== "win32"
-        });
+    private start(
+        command: string,
+        cwd: string,
+        listener: (chunk: string) => void,
+        toolCallId: string
+    ): ShellSession {
+        const sandboxed = this.sandboxLaunch(command, cwd, toolCallId);
+        const launch = sandboxed?.launch ?? shellLaunch(command);
+        let child: ChildProcessWithoutNullStreams;
+        try {
+            const stdio: StdioOptions = sandboxed
+                ? ["pipe", "pipe", "pipe", "ipc"]
+                : ["pipe", "pipe", "pipe"];
+            child = spawn(launch.command, launch.args, {
+                cwd,
+                env: sandboxed?.env ?? process.env,
+                stdio,
+                windowsHide: true,
+                detached: process.platform !== "win32"
+            }) as ChildProcessWithoutNullStreams;
+        } catch (error) {
+            sandboxed?.cleanup();
+            throw error;
+        }
         let resolveDone!: () => void;
         const done = new Promise<void>((resolvePromise) => {
             resolveDone = resolvePromise;
@@ -395,6 +466,15 @@ export class ShellTool implements ToolExecutor {
             ended: false,
             exitCode: null,
             error: null,
+            sandbox: sandboxed
+                ? {
+                    commandId: sandboxed.commandId,
+                    violations: [],
+                    seenViolations: new Set(),
+                    reportedViolations: 0,
+                    done: false
+                }
+                : null,
             done,
             finish: () => {
                 if (session.ended) {
@@ -406,10 +486,13 @@ export class ShellTool implements ToolExecutor {
                 session.writing = false;
                 const exitListener = session.exitListener;
                 session.exitListener = null;
+                session.cleanup?.();
+                session.cleanup = undefined;
                 this.children.delete(session);
                 resolveDone();
                 exitListener?.();
             },
+            cleanup: sandboxed?.cleanup,
             listener,
             exitListener: null
         };
@@ -419,25 +502,132 @@ export class ShellTool implements ToolExecutor {
         child.stderr.setEncoding("utf8");
         child.stdout.on("data", (chunk: string) => appendOutput(session, chunk));
         child.stderr.on("data", (chunk: string) => appendOutput(session, chunk));
+        let closeReceived = false;
+        let completionTimer: NodeJS.Timeout | undefined;
+        const finishWhenReady = (): void => {
+            if (!closeReceived || (session.sandbox !== null && !session.sandbox.done)) {
+                return;
+            }
+            if (completionTimer !== undefined) {
+                clearTimeout(completionTimer);
+                completionTimer = undefined;
+            }
+            session.finish();
+        };
+        child.on("message", (message: unknown) => {
+            const sandbox = session.sandbox;
+            if (
+                !sandboxed ||
+                !sandbox ||
+                !isSandboxRunnerMessage(message) ||
+                message.commandId !== sandboxed.commandId
+            ) {
+                return;
+            }
+            if (message.type === "violations") {
+                addSandboxViolations(sandbox, message.violations);
+                return;
+            }
+            sandbox.done = true;
+            session.exitCode = message.exitCode;
+            finishWhenReady();
+        });
         child.once("error", (error) => {
             session.error = error.message;
+            if (completionTimer !== undefined) {
+                clearTimeout(completionTimer);
+            }
             session.finish();
         });
         child.once("close", (code) => {
+            closeReceived = true;
             session.exitCode = code;
-            session.finish();
+            if (session.sandbox !== null) {
+                completionTimer = setTimeout(() => {
+                    completionTimer = undefined;
+                    if (session.sandbox !== null) {
+                        session.sandbox.done = true;
+                    }
+                    finishWhenReady();
+                }, 75);
+            }
+            finishWhenReady();
         });
         child.stdin.on("error", (error) => {
             session.error = error.message;
+            if (completionTimer !== undefined) {
+                clearTimeout(completionTimer);
+            }
             session.finish();
         });
         return session;
     }
+
+    private sandboxLaunch(
+        command: string,
+        cwd: string,
+        toolCallId: string
+    ): SandboxLaunch | null {
+        const policy = this.sandboxPolicy?.();
+        if (!policy) {
+            return null;
+        }
+
+        return createSandboxLaunch({
+            command,
+            cwd,
+            commandId: toolCallId,
+            policy,
+            binShell: sandboxBinShell(),
+            runnerPath: this.sandboxRunnerPath
+        });
+    }
+}
+
+function sandboxBinShell(): string | WindowsBinShell | undefined {
+    if (process.platform === "win32") {
+        return WINDOWS_POWERSHELL
+            ? {
+                exe: WINDOWS_POWERSHELL,
+                args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"]
+            }
+            : "cmd";
+    }
+    return process.env.SHELL || undefined;
 }
 
 function appendOutput(session: ShellSession, chunk: string): void {
     session.output += chunk;
     session.listener?.(chunk);
+}
+
+function addSandboxViolations(
+    sandbox: SandboxSessionState,
+    violations: readonly { line: string }[]
+): void {
+    for (const violation of violations) {
+        const line = violation.line.trim();
+        if (line.length === 0 || sandbox.seenViolations.has(line)) {
+            continue;
+        }
+        sandbox.seenViolations.add(line);
+        sandbox.violations.push(line);
+    }
+}
+
+function takeViolations(session: ShellSession): string[] {
+    const sandbox = session.sandbox;
+    if (!sandbox) {
+        return [];
+    }
+    const violations = sandbox.violations.slice(sandbox.reportedViolations);
+    sandbox.reportedViolations = sandbox.violations.length;
+    return violations;
+}
+
+function appendViolationContent(content: string, violations: readonly string[]): string {
+    const block = formatSandboxViolations(violations);
+    return block.length > 0 ? `${content}\n\n${block}` : content;
 }
 
 function enqueueCommand(session: ShellSession, command: string): void {
@@ -527,7 +717,9 @@ async function stopSession(session: ShellSession): Promise<ShellSessionExit> {
         sessionId: session.id,
         exitCode: session.exitCode,
         error: session.error,
-        unreadOutput: session.output.slice(session.readOffset)
+        unreadOutput: session.output.slice(session.readOffset),
+        intercepted: (session.sandbox?.violations.length ?? 0) > 0,
+        violations: takeViolations(session)
     };
 }
 
@@ -605,8 +797,9 @@ async function taskkill(pid: number, session: ShellSession): Promise<void> {
 }
 
 function finishedResult(command: string, session: ShellSession): ToolExecutionResult {
-    const status = sessionStatus(session);
-    const output = session.output;
+    const violations = takeViolations(session);
+    const status = violations.length > 0 ? "failed" : sessionStatus(session);
+    const output = appendSandboxViolations(session.output, violations);
     const details: ShellExecCommandView = {
         kind: "shell.exec_command",
         command,
@@ -614,7 +807,10 @@ function finishedResult(command: string, session: ShellSession): ToolExecutionRe
         status
     };
     return {
-        content: finishedContent(session.exitCode, session.error, output),
+        content: appendViolationContent(
+            finishedContent(session.exitCode, session.error, session.output),
+            violations
+        ),
         data: details,
         isError: status === "failed",
         endReason: "exited"

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, expect, test } from "vitest";
 import type { LlmAssistantMessage, LlmUserMessage } from "../../llm/types.ts";
+import { DEFAULT_PERMISSION_MODE } from "../../protocol/permission.ts";
 import type { JarvixSessionMeta } from "../../protocol/session.ts";
 import {
     SESSION_FORMAT_VERSION,
@@ -15,6 +16,7 @@ import {
     sessionFile,
     updateSessionContext,
     updateSessionName,
+    updateSessionPermission,
     updateSessionStatus
 } from "./store.ts";
 
@@ -61,7 +63,7 @@ test("sessionFile places <id>.jsonl in the given directory", () => {
     expect(sessionFile("abc", base)).toBe(join(base, "abc.jsonl"));
 });
 
-test("createSession writes a v2 header to a <uuid>.jsonl file", () => {
+test("createSession writes the current header version to a <uuid>.jsonl file", () => {
     const directory = join(base, "create");
     const session = createSession({ projectId: PROJECT_ID }, SESSION_NAME, directory);
 
@@ -70,6 +72,7 @@ test("createSession writes a v2 header to a <uuid>.jsonl file", () => {
     expect(session.meta.version).toBe(SESSION_FORMAT_VERSION);
     expect(session.meta.name).toBe(SESSION_NAME);
     expect(session.meta.projectId).toBe(PROJECT_ID);
+    expect(session.meta.permission).toBe(DEFAULT_PERMISSION_MODE);
     expect(typeof session.meta.createdAt).toBe("number");
 
     const fileName = `${session.meta.id}.jsonl`;
@@ -167,6 +170,27 @@ test("loadSession returns null for an unknown id", () => {
     expect(loadSession("00000000-0000-4000-8000-000000000000", join(base, "missing"))).toBeNull();
 });
 
+test("loadSession defaults legacy sessions to read-only", () => {
+    const directory = join(base, "legacy-header");
+    const id = "legacy-session";
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(sessionFile(id, directory), `${JSON.stringify({
+        type: "session",
+        version: 1,
+        id,
+        name: "Legacy session",
+        createdAt: 1_700_000_000_000,
+        status: "active"
+    })}\n`, "utf8");
+
+    expect(loadSession(id, directory)?.meta).toMatchObject({
+        id,
+        name: "Legacy session",
+        status: "active",
+        permission: "read-only"
+    });
+});
+
 test("listSessionSummaries reads names from headers without loading messages", () => {
     const directory = join(base, "summaries");
     const firstMeta: JarvixSessionMeta = {
@@ -175,7 +199,8 @@ test("listSessionSummaries reads names from headers without loading messages", (
         id: "named-session",
         name: "Named session",
         createdAt: 1_700_000_000_000,
-        status: "active"
+        status: "active",
+        permission: DEFAULT_PERMISSION_MODE
     };
     mkdirSync(directory, { recursive: true });
     writeFileSync(sessionFile(firstMeta.id, directory), `${JSON.stringify(firstMeta)}\n`, "utf8");
@@ -252,6 +277,20 @@ test("updateSessionName rewrites the header and preserves messages", () => {
     });
     expect(listSessionSummaries(directory)[0]?.name).toBe("Renamed session");
     expect(() => updateSessionName(created.meta.id, "   ", directory)).toThrow();
+});
+
+test("updateSessionPermission rewrites the header and preserves messages", () => {
+    const directory = join(base, "permission");
+    const created = createSession({ projectId: PROJECT_ID }, SESSION_NAME, directory);
+    appendSessionMessage(created.meta.id, userMessage, directory);
+
+    const meta = updateSessionPermission(created.meta.id, "project-read-write", directory);
+
+    expect(meta.permission).toBe("project-read-write");
+    expect(loadSession(created.meta.id, directory)).toEqual({
+        meta,
+        messages: [userMessage]
+    });
 });
 
 test("updateSessionStatus archives in the header and sorts archives by archive time", () => {
