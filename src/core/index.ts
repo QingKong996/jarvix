@@ -108,6 +108,10 @@ export class Jarvix {
         return this.sessions.updatePermission(sessionId, permission);
     }
 
+    respondPermission(sessionId: string, requestId: string, approved: boolean): boolean {
+        return this.sessions.respondPermission(sessionId, requestId, approved);
+    }
+
     renameSession(sessionId: string, name: string): string {
         const renamed = this.sessions.rename(sessionId, sessionNameSchema.parse(name));
         this.emit(sessionId, { type: "session.renamed", name: renamed });

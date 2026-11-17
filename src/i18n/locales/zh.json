@@ -112,6 +112,28 @@
         "streaming": "思考中…",
         "label": "思考过程"
     },
+    "permissionRequest": {
+        "title": "请求额外权限",
+        "description": "Agent 请求临时调整以下域名和目录的访问权限。批准仅对当前会话生效，退出应用后失效。",
+        "domains": "域名",
+        "directories": "目录",
+        "action": {
+            "enable": "启用",
+            "disable": "禁用"
+        },
+        "access": {
+            "read": "读取",
+            "write": "写入"
+        },
+        "approve": "批准",
+        "cancel": "取消",
+        "respondFailed": "无法提交权限请求结果。",
+        "status": {
+            "pending": "等待批准…",
+            "approved": "已批准",
+            "cancelled": "已取消"
+        }
+    },
     "tools": {
         "execCommand": "执行命令",
         "writeStdin": "写入 Shell",

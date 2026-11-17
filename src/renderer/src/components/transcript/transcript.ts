@@ -225,6 +225,8 @@ function applyEvent(state: TranscriptState, event: JarvixEvent): TranscriptState
         case "backgroundTask.consume":
         case "log":
         case "session.renamed":
+        case "permission.request":
+        case "permission.resolved":
             return state;
         case "prompt.injected":
             return commitInjectedPrompt(state, event.promptId, event.text);

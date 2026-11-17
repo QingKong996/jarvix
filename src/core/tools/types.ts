@@ -1,4 +1,9 @@
 import type { LlmToolCallBlock, LlmToolDefinition } from "../../llm/types.ts";
+import type {
+    PermissionDecision,
+    PermissionGrantInput,
+    PermissionMode
+} from "../../protocol/permission.ts";
 import type { ToolCallOutputDelta, ToolCallViewData } from "./view.ts";
 
 export type ToolCallEndReason = "exited" | "background" | "terminated";
@@ -62,10 +67,12 @@ export type ToolExecutionObserver = {
     onOutput: ToolOutputHandler;
     onBackgroundEnd?: ToolBackgroundEndHandler;
     onTaskEvent?: ToolTaskEventHandler;
+    requestPermission?: (request: PermissionGrantInput) => Promise<PermissionDecision>;
 };
 
 export type ToolExecutor = {
     readonly definitions: readonly LlmToolDefinition[];
+    getRegisteredTools?(permission: PermissionMode): readonly LlmToolDefinition[];
     handles(name: string): boolean;
     execute(
         call: LlmToolCallBlock,

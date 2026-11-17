@@ -15,7 +15,11 @@ import type { JarvixSessionMeta } from "../../protocol/session.ts";
 import { MAX_TOOL_ROUNDS, Session } from "./session.ts";
 import { appendSessionMessage } from "./store.ts";
 import { providerConfigSchema } from "../../protocol/providers.ts";
-import { BackgroundTaskManager, type ToolExecutor } from "../tools/index.ts";
+import {
+    BackgroundTaskManager,
+    REQUEST_PERMISSION_TOOL,
+    type ToolExecutor
+} from "../tools/index.ts";
 
 vi.mock("./store.ts", () => ({
     appendSessionMessage: vi.fn()
@@ -83,6 +87,35 @@ test("adds the session working directories to the system prompt", async () => {
     expect(stream).toHaveBeenCalledWith(expect.objectContaining({
         systemPrompt: expect.stringContaining("C:\\workspace-a\n- C:\\workspace-b")
     }));
+});
+
+test("registers request_permission unless the session has full access", async () => {
+    const toolNames: string[][] = [];
+    const llm: LlmAdapter = {
+        getModel: () => MODEL,
+        stream(request) {
+            toolNames.push(request.tools?.map((tool) => tool.name) ?? []);
+            return (async function* (): AsyncIterable<LlmStreamEvent> {
+                yield { type: "done", message: assistantMessage() };
+            })();
+        }
+    };
+    const session = new Session({ ...meta, permission: "read-only" });
+    const runtime = {
+        llm,
+        config: TEST_CONFIG,
+        emit: () => undefined
+    };
+
+    await session.request("read-only", runtime);
+    session.applyPermission("auto-review");
+    await session.request("auto-review", runtime);
+    session.applyPermission("full-access");
+    await session.request("full-access", runtime);
+
+    expect(toolNames[0]).toContain(REQUEST_PERMISSION_TOOL);
+    expect(toolNames[1]).toContain(REQUEST_PERMISSION_TOOL);
+    expect(toolNames[2]).not.toContain(REQUEST_PERMISSION_TOOL);
 });
 
 test("appends refreshed access-control context to each request without persisting it", async () => {
