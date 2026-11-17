@@ -55,7 +55,19 @@ const bridge: JarvixBridge = {
     deleteSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.sessionDelete, sessionId),
     openSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.sessionOpen, sessionId),
     listSessions: () => ipcRenderer.invoke(IPC_CHANNELS.sessionsList),
-    listArchivedSessions: () => ipcRenderer.invoke(IPC_CHANNELS.sessionsListArchived)
+    listArchivedSessions: () => ipcRenderer.invoke(IPC_CHANNELS.sessionsListArchived),
+    getSandboxStatus: () => ipcRenderer.invoke(IPC_CHANNELS.sandboxStatus),
+    installSandbox: () => ipcRenderer.invoke(IPC_CHANNELS.sandboxInstall),
+    dismissSandboxSetup: () => ipcRenderer.invoke(IPC_CHANNELS.sandboxDismiss),
+    onSandboxSetupRequired: (listener) => {
+        const handler = (): void => {
+            listener();
+        };
+        ipcRenderer.on(IPC_CHANNELS.sandboxSetupRequired, handler);
+        return () => {
+            ipcRenderer.removeListener(IPC_CHANNELS.sandboxSetupRequired, handler);
+        };
+    }
 };
 
 contextBridge.exposeInMainWorld("jarvix", bridge);

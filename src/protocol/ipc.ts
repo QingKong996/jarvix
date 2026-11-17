@@ -32,13 +32,27 @@ export const IPC_CHANNELS = {
     sessionDelete: "jarvix:session:delete",
     sessionOpen: "jarvix:session:open",
     sessionsList: "jarvix:sessions:list",
-    sessionsListArchived: "jarvix:sessions:list-archived"
+    sessionsListArchived: "jarvix:sessions:list-archived",
+    sandboxStatus: "jarvix:sandbox:status",
+    sandboxInstall: "jarvix:sandbox:install",
+    sandboxDismiss: "jarvix:sandbox:dismiss",
+    sandboxSetupRequired: "jarvix:sandbox:setup-required"
 } as const;
 
 export type JarvixEventBatch = {
     sessionId: string;
     events: JarvixEvent[];
 };
+
+export type SandboxStatus = {
+    ready: boolean;
+    warnings: string[];
+};
+
+export type SandboxInstallOutcome =
+    | { status: "installed" }
+    | { status: "cancelled" }
+    | { status: "failed"; errors: string[] };
 
 export type JarvixBridge = {
     request(question: string, sessionId: string): Promise<void>;
@@ -70,4 +84,8 @@ export type JarvixBridge = {
     openSession(sessionId: string): Promise<JarvixSession | null>;
     listSessions(): Promise<JarvixSessionSummary[]>;
     listArchivedSessions(): Promise<JarvixSessionSummary[]>;
+    getSandboxStatus(): Promise<SandboxStatus>;
+    installSandbox(): Promise<SandboxInstallOutcome>;
+    dismissSandboxSetup(): Promise<void>;
+    onSandboxSetupRequired(listener: () => void): () => void;
 };

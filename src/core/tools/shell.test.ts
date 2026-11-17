@@ -2,11 +2,16 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
+import type { SandboxPreflight } from "../permissions/sandbox-launch.ts";
 import { createSandboxPolicy } from "../permissions/sandbox.ts";
 import { ShellTool, type ShellSessionExit } from "./shell.ts";
 import type { LlmToolCallBlock } from "../../llm/types.ts";
 
 const tools: ShellTool[] = [];
+const readySandboxPreflight: SandboxPreflight = async () => ({
+    ready: true,
+    warnings: []
+});
 
 afterEach(() => {
     for (const tool of tools.splice(0)) {
@@ -221,6 +226,7 @@ test("returns sandbox violations from the runner under the invocation id", async
     ].join("\n"), "utf8");
     const tool = new ShellTool({
         sandboxPolicy: () => createSandboxPolicy("read-only", [directory]),
+        sandboxPreflight: readySandboxPreflight,
         sandboxRunnerPath: runner
     });
     tools.push(tool);
@@ -279,6 +285,7 @@ test("returns only new sandbox violations when a timed-out task exits", async ()
     ].join("\n"), "utf8");
     const tool = new ShellTool({
         sandboxPolicy: () => createSandboxPolicy("read-only", [directory]),
+        sandboxPreflight: readySandboxPreflight,
         sandboxRunnerPath: runner
     });
     tools.push(tool);
@@ -307,4 +314,32 @@ test("returns only new sandbox violations when a timed-out task exits", async ()
         tool.dispose();
         rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
+});
+
+test("returns a setup error before starting a sandboxed command", async () => {
+    const tool = new ShellTool({
+        sandboxPolicy: () => createSandboxPolicy("project-read-write", [process.cwd()]),
+        sandboxPreflight: async () => ({
+            ready: false,
+            errors: ["Sandbox user is not provisioned (user=false, cred=false)."],
+            warnings: []
+        })
+    });
+    tools.push(tool);
+
+    const result = await tool.execute(call("exec_command", {
+        command: "echo ok",
+        cwd: process.cwd(),
+        timeoutMs: 5_000
+    }), { onOutput: () => undefined });
+
+    expect(result.isError).toBe(true);
+    expect(result.data).toMatchObject({
+        kind: "shell.exec_command",
+        command: "echo ok",
+        status: "failed"
+    });
+    expect(result.content).toContain("was not executed");
+    expect(result.content).toContain("not a permission-mode denial");
+    expect(result.content).toContain("Install or repair the Windows sandbox from Jarvix");
 });

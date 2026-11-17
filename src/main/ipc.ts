@@ -16,12 +16,14 @@ import {
 } from "../protocol/session.ts";
 import type { ModelCatalogService } from "./services/model-catalog.ts";
 import { syncProviderModels } from "./services/provider-model-sync.ts";
+import type { SandboxSetupService } from "./services/sandbox-setup.ts";
 import type { MainWindowController } from "./window.ts";
 
 export type IpcDependencies = {
     jarvix: Jarvix;
     windows: MainWindowController;
     catalog: ModelCatalogService;
+    sandboxSetup: SandboxSetupService;
     getConfig(): JarvixConfig;
     updateConfig(payload: unknown): JarvixConfig;
 };
@@ -65,7 +67,7 @@ function parsePermissionMode(value: unknown): PermissionMode {
 }
 
 export function registerIpc(dependencies: IpcDependencies): void {
-    const { jarvix, windows, catalog, getConfig, updateConfig } = dependencies;
+    const { jarvix, windows, catalog, sandboxSetup, getConfig, updateConfig } = dependencies;
     const assertSender = (event: IpcMainInvokeEvent): void => windows.assertSender(event);
 
     ipcMain.handle(IPC_CHANNELS.request, async (event, payload: unknown) => {
@@ -235,5 +237,20 @@ export function registerIpc(dependencies: IpcDependencies): void {
     ipcMain.handle(IPC_CHANNELS.sessionsListArchived, (event) => {
         assertSender(event);
         return jarvix.listArchivedSessions();
+    });
+
+    ipcMain.handle(IPC_CHANNELS.sandboxStatus, async (event) => {
+        assertSender(event);
+        return sandboxSetup.status();
+    });
+
+    ipcMain.handle(IPC_CHANNELS.sandboxInstall, async (event) => {
+        assertSender(event);
+        return sandboxSetup.install();
+    });
+
+    ipcMain.handle(IPC_CHANNELS.sandboxDismiss, (event) => {
+        assertSender(event);
+        sandboxSetup.dismiss();
     });
 }

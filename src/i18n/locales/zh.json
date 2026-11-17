@@ -211,6 +211,17 @@
         "save": "保存",
         "cancel": "取消"
     },
+    "sandbox": {
+        "setup": {
+            "title": "需要安装 Windows 沙箱",
+            "message": "安装 Windows 沙箱需要管理员权限。",
+            "install": "安装",
+            "installing": "正在安装…",
+            "dismiss": "稍后",
+            "cancelledMessage": "Windows 沙箱未安装，系统未做任何更改。",
+            "failedMessage": "安装程序未能完成 Windows 沙箱配置。"
+        }
+    },
     "markdown": {
         "footnoteLabel": "脚注",
         "footnoteBackLabel": "返回正文",

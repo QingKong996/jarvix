@@ -220,7 +220,13 @@ export class Session {
         try {
             for await (const event of runtime.llm.stream({
                 ...turn.request,
-                messages: [...this.history],
+                messages: [
+                    ...this.history,
+                    environmentContextFor(
+                        this.meta.permission,
+                        runtime.workingDirectories
+                    )
+                ],
                 signal
             })) {
                 if (signal.aborted) {
@@ -570,6 +576,47 @@ function systemPromptFor(workingDirectories: readonly string[] = []): string {
         ...workingDirectories.map((directory) => `- ${directory}`),
         "Use one of these directories as cwd for shell commands and apply_patch when appropriate."
     ].join("\n");
+}
+
+function environmentContextFor(
+    permission: PermissionMode,
+    workingDirectories: readonly string[] = []
+): LlmSystemMessage {
+    const writableRoots = permission === "project-read-write" || permission === "auto-review"
+        ? workingDirectories
+        : [];
+    const access = permission === "full-access"
+        ? [
+            `- permission: ${permission}`,
+            "- sandbox: off",
+            "- access: OS permissions only"
+        ]
+        : [
+            `- permission: ${permission}`,
+            "- sandbox: on",
+            writableRoots.length > 0
+                ? "- writes: writable roots and the sandbox's private temp only"
+                : "- writes: denied except the sandbox's private temp",
+            "- reads: not restricted by Jarvix; sandbox/OS rules apply"
+        ];
+    const writableRootsLine = permission === "full-access"
+        ? null
+        : writableRoots.length === 0
+            ? "- writable roots: none"
+            : "- writable roots:";
+
+    return {
+        role: "system",
+        content: [
+            "<environment_context>",
+            "Access control:",
+            ...access,
+            ...(writableRootsLine === null ? [] : [writableRootsLine]),
+            ...writableRoots.map((root) => `  - ${root}`),
+            "</environment_context>"
+        ].join("\n"),
+        timestamp: Date.now()
+    };
 }
 
 function failedToolResult(toolCall: LlmToolCallBlock, output: string): ToolExecutionResult {

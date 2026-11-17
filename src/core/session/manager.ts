@@ -7,6 +7,7 @@ import type {
 import { sessionContextFrom } from "../../protocol/session.ts";
 import type { PermissionMode } from "../../protocol/permission.ts";
 import { loadProject } from "../../project/store.ts";
+import type { SandboxPreflight } from "../permissions/sandbox-launch.ts";
 import { createSandboxPolicy } from "../permissions/sandbox.ts";
 import { createDefaultTools } from "../tools/index.ts";
 import { Session } from "./session.ts";
@@ -25,6 +26,11 @@ import {
 /** Owns the session instances currently loaded by the app. */
 export class SessionManager {
     private readonly sessions = new Map<string, Session>();
+    private readonly sandboxPreflight?: SandboxPreflight;
+
+    constructor(sandboxPreflight?: SandboxPreflight) {
+        this.sandboxPreflight = sandboxPreflight;
+    }
 
     create(
         context: JarvixSessionContext = {},
@@ -136,7 +142,8 @@ export class SessionManager {
             createDefaultTools({
                 shell: {
                     defaultCwd: directories[0],
-                    sandboxPolicy
+                    sandboxPolicy,
+                    sandboxPreflight: this.sandboxPreflight
                 },
                 applyPatch: {
                     sandboxPolicy

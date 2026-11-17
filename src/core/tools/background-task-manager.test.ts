@@ -3,10 +3,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
 import type { LlmToolCallBlock } from "../../llm/types.ts";
+import type { SandboxPreflight } from "../permissions/sandbox-launch.ts";
 import { createSandboxPolicy } from "../permissions/sandbox.ts";
 import { BackgroundTaskManager } from "./background-task-manager.ts";
 import { ShellTool } from "./shell.ts";
 import type { ToolBackgroundEnd, ToolTaskEvent } from "./types.ts";
+
+const readySandboxPreflight: SandboxPreflight = async () => ({
+    ready: true,
+    warnings: []
+});
 
 test("keeps streaming a timed-out task and isolates it from other managers", async () => {
     const directory = mkdtempSync(join(tmpdir(), "jarvix-background-"));
@@ -218,6 +224,7 @@ test("keeps a timed-out task failed without repeating reported violations", asyn
     ].join("\n"), "utf8");
     const manager = new BackgroundTaskManager(new ShellTool({
         sandboxPolicy: () => createSandboxPolicy("read-only", [directory]),
+        sandboxPreflight: readySandboxPreflight,
         sandboxRunnerPath: runner
     }));
     const completed: ToolBackgroundEnd[] = [];

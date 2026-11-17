@@ -1,10 +1,12 @@
 import { app } from "electron";
 import { join } from "node:path";
 import { Jarvix } from "../core/index.ts";
+import { IPC_CHANNELS } from "../protocol/ipc.ts";
 import { attachEventBridge } from "./event-bridge.ts";
 import { registerIpc } from "./ipc.ts";
 import { configPaths, loadConfig, parseConfig, saveConfig, systemDefaults } from "./services/config.ts";
 import { ModelCatalogService } from "./services/model-catalog.ts";
+import { SandboxSetupService } from "./services/sandbox-setup.ts";
 import { MainWindowController } from "./window.ts";
 
 app.whenReady().then(() => {
@@ -12,8 +14,14 @@ app.whenReady().then(() => {
     const defaults = systemDefaults(app.getLocale());
 
     let config = loadConfig(paths, defaults);
-    const jarvix = new Jarvix();
     const windows = new MainWindowController();
+    const sandboxSetup = new SandboxSetupService({
+        notifyRequired: () => windows.send(IPC_CHANNELS.sandboxSetupRequired, {}),
+        windowAvailable: () => windows.current !== null
+    });
+    const jarvix = new Jarvix({
+        sandboxPreflight: () => sandboxSetup.preflight()
+    });
     const catalog = new ModelCatalogService(join(paths.directory, "tmp", "models-dev.json"));
 
     const updateConfig = (payload: unknown): typeof config => {
@@ -32,6 +40,7 @@ app.whenReady().then(() => {
         jarvix,
         windows,
         catalog,
+        sandboxSetup,
         getConfig: () => config,
         updateConfig
     });
