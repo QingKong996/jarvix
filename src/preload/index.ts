@@ -30,10 +30,17 @@ const bridge: JarvixBridge = {
     listProjects: () => ipcRenderer.invoke(IPC_CHANNELS.projectsList),
     pickWorkingDirectories: () => ipcRenderer.invoke(IPC_CHANNELS.pickWorkingDirectories),
     pickWorkingDirectory: () => ipcRenderer.invoke(IPC_CHANNELS.pickWorkingDirectory),
-    createSession: (context = {}) => ipcRenderer.invoke(IPC_CHANNELS.sessionCreate, { context }),
+    createSession: (context = {}, permission) => ipcRenderer.invoke(
+        IPC_CHANNELS.sessionCreate,
+        { context, permission }
+    ),
     updateSessionContext: (sessionId, context) => ipcRenderer.invoke(
         IPC_CHANNELS.sessionUpdateContext,
         { sessionId, context }
+    ),
+    setPermission: (sessionId, permission) => ipcRenderer.invoke(
+        IPC_CHANNELS.permissionSet,
+        { sessionId, permission }
     ),
     renameSession: (sessionId, name) => ipcRenderer.invoke(
         IPC_CHANNELS.sessionRename,

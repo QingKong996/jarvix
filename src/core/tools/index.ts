@@ -1,5 +1,6 @@
-import { ApplyPatchTool } from "./apply-patch.ts";
+import { ApplyPatchTool, type ApplyPatchToolOptions } from "./apply-patch.ts";
 import { BackgroundTaskManager } from "./background-task-manager.ts";
+import { ShellTool, type ShellToolOptions } from "./shell.ts";
 import { LocalTimeTool, SleepTool } from "./time.ts";
 import { ToolRegistry } from "./tool-registry.ts";
 import type { ToolExecutor } from "./types.ts";
@@ -43,11 +44,16 @@ export type {
     ToolCallViewData
 } from "./view.ts";
 
+export type DefaultToolsOptions = {
+    shell?: ShellToolOptions;
+    applyPatch?: ApplyPatchToolOptions;
+};
+
 /** Build the tool set available to a standard Jarvix conversation. */
-export function createDefaultTools(): ToolExecutor {
+export function createDefaultTools(options: DefaultToolsOptions = {}): ToolExecutor {
     return new ToolRegistry([
-        new BackgroundTaskManager(),
-        new ApplyPatchTool(),
+        new BackgroundTaskManager(new ShellTool(options.shell)),
+        new ApplyPatchTool(options.applyPatch),
         new LocalTimeTool(),
         new SleepTool()
     ]);

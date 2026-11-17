@@ -19,6 +19,12 @@ import { StringDecoder } from "node:string_decoder";
 import { i18n } from "../../i18n/index.ts";
 import type { LlmMessage } from "../../llm/types.ts";
 import {
+    DEFAULT_PERMISSION_MODE,
+    permissionModeOrDefault,
+    permissionModeSchema,
+    type PermissionMode
+} from "../../protocol/permission.ts";
+import {
     type JarvixSession,
     type JarvixSessionContext,
     type JarvixSessionMeta,
@@ -28,7 +34,7 @@ import {
     sessionNameSchema
 } from "../../protocol/session.ts";
 
-export const SESSION_FORMAT_VERSION = 2;
+export const SESSION_FORMAT_VERSION = 3;
 
 const SESSION_FILE_EXTENSION = ".jsonl";
 const SESSION_FILE_MODE = 0o600;
@@ -51,7 +57,8 @@ export function sessionFile(id: string, directory = defaultSessionDirectory()): 
 export function createSession(
     context: JarvixSessionContext = {},
     name = "",
-    directory = defaultSessionDirectory()
+    directory = defaultSessionDirectory(),
+    permission: PermissionMode = DEFAULT_PERMISSION_MODE
 ): JarvixSession {
     const normalizedContext = normalizeSessionContext(context);
     const meta: JarvixSessionMeta = {
@@ -61,6 +68,7 @@ export function createSession(
         name: name.trim() || i18n.t("sessions.untitled"),
         createdAt: Date.now(),
         status: "active",
+        permission: permissionModeSchema.parse(permission),
         ...normalizedContext
     };
 
@@ -94,6 +102,27 @@ export function updateSessionContext(
     delete meta.workingDirectory;
     Object.assign(meta, normalizedContext);
 
+    writeSessionMeta(file, meta);
+    return meta;
+}
+
+/** Replace a session's permission without changing its messages. */
+export function updateSessionPermission(
+    id: string,
+    permission: PermissionMode,
+    directory = defaultSessionDirectory()
+): JarvixSessionMeta {
+    const file = sessionFile(id, directory);
+    const current = readSessionMeta(file);
+    if (!current || current.id !== id) {
+        throw new Error(`Session not found: ${id}`);
+    }
+
+    const meta: JarvixSessionMeta = {
+        ...current,
+        version: SESSION_FORMAT_VERSION,
+        permission: permissionModeSchema.parse(permission)
+    };
     writeSessionMeta(file, meta);
     return meta;
 }
@@ -416,6 +445,7 @@ function parseSessionMeta(value: unknown): JarvixSessionMeta | null {
         name,
         createdAt: value.createdAt,
         status: archived ? "archived" : "active",
+        permission: permissionModeOrDefault(value.permission),
         ...(archived ? { archivedAt } : {}),
         ...(parsedContext.success ? parsedContext.data : {})
     };

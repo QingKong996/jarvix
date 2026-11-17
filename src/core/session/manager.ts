@@ -5,6 +5,10 @@ import type {
     JarvixSessionStatus
 } from "../../protocol/session.ts";
 import { sessionContextFrom } from "../../protocol/session.ts";
+import type { PermissionMode } from "../../protocol/permission.ts";
+import { loadProject } from "../../project/store.ts";
+import { createSandboxPolicy } from "../permissions/sandbox.ts";
+import { createDefaultTools } from "../tools/index.ts";
 import { Session } from "./session.ts";
 import {
     createSession,
@@ -14,6 +18,7 @@ import {
     loadSession,
     updateSessionContext,
     updateSessionName,
+    updateSessionPermission as updateStoredSessionPermission,
     updateSessionStatus
 } from "./store.ts";
 
@@ -21,8 +26,12 @@ import {
 export class SessionManager {
     private readonly sessions = new Map<string, Session>();
 
-    create(context: JarvixSessionContext = {}, name?: string): Session {
-        return this.track(createSession(context, name));
+    create(
+        context: JarvixSessionContext = {},
+        name?: string,
+        permission?: PermissionMode
+    ): Session {
+        return this.track(createSession(context, name, undefined, permission));
     }
 
     load(id: string): Session | null {
@@ -49,6 +58,16 @@ export class SessionManager {
         const updated = sessionContextFrom(meta);
         this.applyContext(session, updated);
         return updated;
+    }
+
+    updatePermission(id: string, permission: PermissionMode): PermissionMode {
+        const session = this.require(id);
+        if (session.meta.permission === permission) {
+            return permission;
+        }
+        const meta = updateStoredSessionPermission(id, permission);
+        session.applyPermission(meta.permission);
+        return meta.permission;
     }
 
     rename(id: string, name: string): string {
@@ -106,7 +125,24 @@ export class SessionManager {
     }
 
     private track(session: JarvixSession): Session {
-        const instance = new Session(session.meta, session.messages);
+        const directories = workingDirectories(session.meta);
+        const sandboxPolicy = () => createSandboxPolicy(
+            session.meta.permission,
+            workingDirectories(session.meta)
+        );
+        const instance = new Session(
+            session.meta,
+            session.messages,
+            createDefaultTools({
+                shell: {
+                    defaultCwd: directories[0],
+                    sandboxPolicy
+                },
+                applyPatch: {
+                    sandboxPolicy
+                }
+            })
+        );
         this.sessions.set(instance.meta.id, instance);
         return instance;
     }
@@ -116,4 +152,11 @@ export class SessionManager {
         delete session.meta.workingDirectory;
         Object.assign(session.meta, context);
     }
+}
+
+function workingDirectories(meta: JarvixSession["meta"]): readonly string[] {
+    if (meta.projectId) {
+        return loadProject(meta.projectId)?.workingDirectories ?? [];
+    }
+    return meta.workingDirectory ? [meta.workingDirectory] : [];
 }

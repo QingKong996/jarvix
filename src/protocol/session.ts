@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { LlmMessage } from "../llm/types.ts";
+import type { PermissionMode } from "./permission.ts";
 
 export const SESSION_NAME_MAX_LENGTH = 80;
 
@@ -39,6 +40,7 @@ export type JarvixSessionMeta = JarvixSessionContext & {
     createdAt: number;
     status: JarvixSessionStatus;
     archivedAt?: number;
+    permission: PermissionMode;
 };
 
 /** A session loaded into memory. */

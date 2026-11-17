@@ -64,6 +64,28 @@
             "chooseDirectory": "Choose directory",
             "chooseDirectoryFailed": "Could not choose a working directory.",
             "updateFailed": "Could not update the session context."
+        },
+        "permissions": {
+            "title": "How should Jarvix approve actions?",
+            "updateFailed": "Could not update the session permission.",
+            "options": {
+                "readOnly": {
+                    "label": "Read only",
+                    "description": "View files and run read-only commands without changing them"
+                },
+                "projectReadWrite": {
+                    "label": "Project read-write",
+                    "description": "Read and edit files in the current project"
+                },
+                "fullAccess": {
+                    "label": "Full access",
+                    "description": "Access the internet and any file on your computer without restrictions"
+                },
+                "autoReview": {
+                    "label": "Auto review",
+                    "description": "Run in the project sandbox and report blocked actions for review"
+                }
+            }
         }
     },
     "transcript": {

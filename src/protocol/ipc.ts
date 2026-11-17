@@ -1,8 +1,13 @@
 import type { JarvixConfig } from "./config.ts";
 import type { JarvixEvent } from "./event.ts";
+import type { PermissionMode } from "./permission.ts";
 import type { JarvixProject } from "./project.ts";
 import type { ModelCatalog, ModelDefinition, ProviderModelSyncRequest } from "./providers.ts";
-import type { JarvixSession, JarvixSessionContext, JarvixSessionSummary } from "./session.ts";
+import type {
+    JarvixSession,
+    JarvixSessionContext,
+    JarvixSessionSummary
+} from "./session.ts";
 
 export const IPC_CHANNELS = {
     request: "jarvix:request",
@@ -19,6 +24,7 @@ export const IPC_CHANNELS = {
     pickWorkingDirectory: "jarvix:working-directory:pick",
     sessionCreate: "jarvix:session:create",
     sessionUpdateContext: "jarvix:session:update-context",
+    permissionSet: "jarvix:permission:set",
     sessionRename: "jarvix:session:rename",
     sessionAutoName: "jarvix:session:auto-name",
     sessionArchive: "jarvix:session:archive",
@@ -47,11 +53,15 @@ export type JarvixBridge = {
     listProjects(): Promise<JarvixProject[]>;
     pickWorkingDirectories(): Promise<string[]>;
     pickWorkingDirectory(): Promise<string | null>;
-    createSession(context?: JarvixSessionContext): Promise<JarvixSession>;
+    createSession(context?: JarvixSessionContext, permission?: PermissionMode): Promise<JarvixSession>;
     updateSessionContext(
         sessionId: string,
         context: JarvixSessionContext
     ): Promise<JarvixSessionContext>;
+    setPermission(
+        sessionId: string,
+        permission: PermissionMode
+    ): Promise<PermissionMode>;
     renameSession(sessionId: string, name: string): Promise<string>;
     autoNameSession(sessionId: string, firstPrompt?: string): Promise<string>;
     archiveSession(sessionId: string): Promise<void>;

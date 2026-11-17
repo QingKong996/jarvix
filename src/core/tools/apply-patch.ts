@@ -8,12 +8,19 @@ import type { LlmToolCallBlock, LlmToolDefinition } from "../../llm/types.ts";
 import {
     applyParsedPatch,
     formatPatchSummary,
+    patchWriteTargets,
     type AffectedPaths
 } from "./apply-patch-engine.ts";
 import {
     ApplyPatchParseError,
     parseApplyPatch
 } from "./apply-patch-parser.ts";
+import {
+    authorizeSandboxWrites,
+    type SandboxPathDecision
+} from "../permissions/path-access.ts";
+import type { SandboxPolicy } from "../permissions/sandbox.ts";
+import { formatSandboxViolations } from "../permissions/violations.ts";
 import type {
     ToolExecutionResult,
     ToolExecutionObserver,
@@ -66,9 +73,18 @@ export const APPLY_PATCH_TOOL_DEFINITIONS: readonly LlmToolDefinition[] = [{
     }
 }];
 
+export type ApplyPatchToolOptions = {
+    sandboxPolicy?: () => SandboxPolicy | null;
+};
+
 /** Executes OpenAI apply_patch hunks against the local filesystem. */
 export class ApplyPatchTool implements ToolExecutor {
     readonly definitions = APPLY_PATCH_TOOL_DEFINITIONS;
+    private readonly sandboxPolicy?: () => SandboxPolicy | null;
+
+    constructor(options: ApplyPatchToolOptions = {}) {
+        this.sandboxPolicy = options.sandboxPolicy;
+    }
 
     handles(name: string): boolean {
         return name === APPLY_PATCH_TOOL;
@@ -93,6 +109,26 @@ export class ApplyPatchTool implements ToolExecutor {
             parsed = parseApplyPatch(arguments_.data.patch);
         } catch (error) {
             return failedResult(call, formatParseError(error));
+        }
+
+        const targets = patchWriteTargets(parsed, arguments_.data.cwd);
+        let decisions: SandboxPathDecision[];
+        try {
+            decisions = authorizeSandboxWrites(
+                this.sandboxPolicy?.() ?? null,
+                targets.map((target) => target.path)
+            );
+        } catch (error) {
+            return failedResult(call, `Failed to check sandbox policy: ${errorMessage(error)}`);
+        }
+        const denied = decisions.flatMap((decision, index) => {
+            const target = targets[index];
+            return target && !decision.allowed
+                ? [{ decision, target }]
+                : [];
+        });
+        if (denied.length > 0) {
+            return sandboxDeniedResult(call, arguments_.data, denied);
         }
 
         try {
@@ -133,6 +169,40 @@ function failedResult(call: LlmToolCallBlock, message: string): ToolExecutionRes
     return {
         content: message,
         data: { ...data, output: message },
+        isError: true,
+        endReason: "exited"
+    };
+}
+
+function sandboxDeniedResult(
+    call: LlmToolCallBlock,
+    arguments_: z.infer<typeof applyPatchArguments>,
+    denied: ReadonlyArray<{
+        decision: Extract<SandboxPathDecision, { allowed: false }>;
+        target: {
+            path: string;
+            operation: string;
+        };
+    }>
+): ToolExecutionResult {
+    const invocationId = call.id;
+    const lines = denied.map(({ decision, target }) =>
+        `apply_patch ${invocationId} blocked ${target.operation} ${decision.path}: ${decision.reason}`
+    );
+    const output = [
+        `Apply patch blocked by the sandbox policy (invocation ${invocationId}).`,
+        formatSandboxViolations(lines)
+    ].join("\n");
+    const data: ApplyPatchView = {
+        kind: "apply_patch",
+        patch: arguments_.patch,
+        cwd: arguments_.cwd,
+        output,
+        status: "failed"
+    };
+    return {
+        content: output,
+        data,
         isError: true,
         endReason: "exited"
     };

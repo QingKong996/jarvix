@@ -10,6 +10,7 @@ import type {
     LlmStreamEvent
 } from "../../llm/types.ts";
 import type { JarvixEvent } from "../../protocol/event.ts";
+import { DEFAULT_PERMISSION_MODE } from "../../protocol/permission.ts";
 import type { JarvixSessionMeta } from "../../protocol/session.ts";
 import { MAX_TOOL_ROUNDS, Session } from "./session.ts";
 import { appendSessionMessage } from "./store.ts";
@@ -27,7 +28,8 @@ const meta: JarvixSessionMeta = {
     id: "session-test",
     name: "Session test",
     createdAt: 1,
-    status: "active"
+    status: "active",
+    permission: DEFAULT_PERMISSION_MODE
 };
 const MODEL: LlmModelInfo = {
     provider: "test",
@@ -498,6 +500,151 @@ test("injects prompts after tool execution before the next LLM request", async (
     const injected = events.findIndex((event) => event.type === "prompt.injected");
     expect(toolEnd).toBeGreaterThan(-1);
     expect(injected).toBeGreaterThan(toolEnd);
+});
+
+test("injects permission notices after tool results before the next LLM request", async () => {
+    const toolCall = {
+        type: "toolCall" as const,
+        id: "call-permission",
+        name: "exec_command",
+        arguments: { command: "echo hi", cwd: process.cwd(), timeoutMs: 1000 }
+    };
+    const toolUseMessage: LlmAssistantMessage = {
+        ...assistantMessage(),
+        content: [toolCall],
+        stopReason: "toolUse"
+    };
+    const requests: LlmMessage[][] = [];
+    const events: JarvixEvent[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let call = 0;
+    const llm: LlmAdapter = {
+        getModel: () => MODEL,
+        stream(request) {
+            requests.push([...request.messages]);
+            const message = call === 0 ? toolUseMessage : assistantMessage();
+            call += 1;
+            return (async function* (): AsyncIterable<LlmStreamEvent> {
+                yield { type: "done", message };
+            })();
+        }
+    };
+    const tools: ToolExecutor = {
+        definitions: [{
+            name: "exec_command",
+            description: "Run a command",
+            parameters: { type: "object", properties: {} }
+        }],
+        handles: (name) => name === "exec_command",
+        execute: async () => {
+            await gate;
+            return {
+                content: "Command exited with code 0.",
+                data: {
+                    kind: "shell.exec_command",
+                    command: "echo hi",
+                    output: "hi\n",
+                    status: "completed"
+                },
+                isError: false,
+                endReason: "exited"
+            };
+        },
+        stop: async () => [],
+        dispose: () => undefined
+    };
+    const session = new Session({ ...meta, permission: "read-only" }, [], tools);
+
+    const request = session.request("first", {
+        llm,
+        config: TEST_CONFIG,
+        emit: (event) => {
+            events.push(event);
+        }
+    });
+
+    await vi.waitFor(() => {
+        expect(events.some((event) => event.type === "tool.start")).toBe(true);
+    });
+    session.applyPermission("full-access");
+    expect(session.injectPrompt("after permission", "prompt-after-permission")).toBe(true);
+    expect(session.snapshot().messages.map((message) => message.role)).toEqual([
+        "user",
+        "assistant"
+    ]);
+
+    release();
+    await request;
+
+    expect(requests[1]?.map((message) => message.role)).toEqual([
+        "user",
+        "assistant",
+        "toolResult",
+        "system",
+        "user"
+    ]);
+    expect(requests[1]?.[3]).toMatchObject({
+        role: "system",
+        content: expect.stringContaining('changed from "read-only" to "full-access"')
+    });
+    expect(requests[1]?.[4]).toMatchObject({
+        role: "user",
+        content: "after permission"
+    });
+    const toolEnd = events.findIndex((event) => event.type === "tool.end");
+    const systemMessage = events.findIndex((event) => event.type === "system.message");
+    const injected = events.findIndex((event) => event.type === "prompt.injected");
+    expect(toolEnd).toBeGreaterThan(-1);
+    expect(systemMessage).toBeGreaterThan(toolEnd);
+    expect(injected).toBeGreaterThan(systemMessage);
+});
+
+test("records a permission change during the final round without another LLM request", async () => {
+    const events: JarvixEvent[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    const stream = vi.fn(() => (async function* (): AsyncIterable<LlmStreamEvent> {
+        yield { type: "start" };
+        await gate;
+        yield { type: "done", message: assistantMessage() };
+    })());
+    const session = new Session({ ...meta, permission: "read-only" });
+
+    const request = session.request("first", {
+        llm: { getModel: () => MODEL, stream },
+        config: TEST_CONFIG,
+        emit: (event) => {
+            events.push(event);
+        }
+    });
+
+    await vi.waitFor(() => {
+        expect(events.some((event) => event.type === "start")).toBe(true);
+    });
+    session.applyPermission("full-access");
+    release();
+    await request;
+
+    expect(stream).toHaveBeenCalledTimes(1);
+    expect(session.snapshot().messages.map((message) => message.role)).toEqual([
+        "user",
+        "assistant",
+        "system"
+    ]);
+    expect(events.filter((event) => event.type === "system.message")).toEqual([
+        {
+            type: "system.message",
+            message: expect.objectContaining({
+                role: "system",
+                content: expect.stringContaining('changed from "read-only" to "full-access"')
+            })
+        }
+    ]);
 });
 
 test("resets the round limit after injecting a prompt", async () => {

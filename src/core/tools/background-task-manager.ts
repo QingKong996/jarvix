@@ -1,4 +1,5 @@
 import type { LlmToolCallBlock, LlmToolDefinition } from "../../llm/types.ts";
+import { appendSandboxViolations } from "../permissions/violations.ts";
 import { ShellTool, type ShellSessionExit } from "./shell.ts";
 import type {
     ToolBackgroundEndHandler,
@@ -89,23 +90,33 @@ export class BackgroundTaskManager implements ToolExecutor {
             const error = exit?.error
                 ?? (exit ? null : "Process state was unavailable during shutdown.");
             const exitCode = exit?.exitCode ?? null;
+            const violations = exit?.violations ?? [];
+            const intercepted = exit?.intercepted ?? false;
+            const unreadOutput = appendSandboxViolations(exit?.unreadOutput ?? "", violations);
             const state: ToolTaskState = {
                 ...task.state,
-                status: error || exitCode !== 0 ? "failed" : "completed",
+                status: error || exitCode !== 0 || intercepted ? "failed" : "completed",
                 exitCode,
                 error,
-                unreadCharacters: exit?.unreadOutput.length ?? 0
+                unreadCharacters: unreadOutput.length
             };
             task.state = state;
             events.push({ type: "backgroundTask.end", task: state });
 
             for (const subscription of task.subscriptions.splice(0)) {
+                const failed = state.status === "failed";
                 events.push({
                     type: "tool.end",
                     toolCallId: subscription.toolCallId,
                     toolName: subscription.toolName,
-                    data: { ...subscription.data, status: "completed" },
-                    isError: false,
+                    data: withViolations(
+                        {
+                            ...subscription.data,
+                            status: failed ? "failed" : "completed"
+                        },
+                        violations
+                    ),
+                    isError: failed,
                     endReason: "terminated"
                 });
             }
@@ -175,28 +186,32 @@ export class BackgroundTaskManager implements ToolExecutor {
         }
         task.unwatch?.();
         task.unwatch = null;
+        const unreadOutput = appendSandboxViolations(exit.unreadOutput, exit.violations);
         task.state = {
             ...task.state,
-            status: exit.error || exit.exitCode !== 0 ? "failed" : "completed",
+            status: exit.error || exit.exitCode !== 0 || exit.intercepted ? "failed" : "completed",
             exitCode: exit.exitCode,
             error: exit.error,
-            unreadCharacters: exit.unreadOutput.length
+            unreadCharacters: unreadOutput.length
         };
         task.onTaskEvent?.({ type: "backgroundTask.end", task: task.state });
 
         const subscriptions = task.subscriptions.splice(0);
         const isError = task.state.status === "failed";
         for (const subscription of subscriptions) {
-            const completed: ToolCallViewData = {
-                ...subscription.data,
-                status: isError ? "failed" : "completed"
-            };
+            const completed: ToolCallViewData = withViolations(
+                {
+                    ...subscription.data,
+                    status: isError ? "failed" : "completed"
+                },
+                exit.violations
+            );
             setTimeout(() => {
                 subscription.onBackgroundEnd?.({
                     taskId: task.state.id,
                     exitCode: task.state.exitCode,
                     error: task.state.error,
-                    unreadOutput: exit.unreadOutput,
+                    unreadOutput,
                     data: completed,
                     isError
                 });
@@ -219,4 +234,12 @@ export class BackgroundTaskManager implements ToolExecutor {
 function taskState(snapshot: ToolTaskSnapshot): ToolTaskState {
     const { output: _output, ...state } = snapshot;
     return state;
+}
+
+function withViolations(
+    data: ToolCallViewData,
+    violations: readonly string[]
+): ToolCallViewData {
+    const output = appendSandboxViolations(data.output, violations);
+    return output === data.output ? data : { ...data, output };
 }

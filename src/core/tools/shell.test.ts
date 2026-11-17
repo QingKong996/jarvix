@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
-import { ShellTool } from "./shell.ts";
+import { createSandboxPolicy } from "../permissions/sandbox.ts";
+import { ShellTool, type ShellSessionExit } from "./shell.ts";
 import type { LlmToolCallBlock } from "../../llm/types.ts";
 
 const tools: ShellTool[] = [];
@@ -13,8 +14,12 @@ afterEach(() => {
     }
 });
 
-function call(name: string, arguments_: Record<string, unknown>): LlmToolCallBlock {
-    return { type: "toolCall", id: "call-1", name, arguments: arguments_ };
+function call(
+    name: string,
+    arguments_: Record<string, unknown>,
+    id = "call-1"
+): LlmToolCallBlock {
+    return { type: "toolCall", id, name, arguments: arguments_ };
 }
 
 test("executes a command and returns its output", async () => {
@@ -186,6 +191,118 @@ test("aborts a running command before timeout and returns its output", async () 
         });
         expect(result.content).toContain("Command aborted");
         expect(result.data.output).toContain("ready");
+    } finally {
+        tool.dispose();
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
+test("returns sandbox violations from the runner under the invocation id", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-shell-sandbox-"));
+    const runner = join(directory, "fake-sandbox-runner.mjs");
+    writeFileSync(runner, [
+        "import { readFileSync } from 'node:fs';",
+        "const invocation = JSON.parse(readFileSync(process.argv[2], 'utf8'));",
+        "process.stdout.write('sandboxed output\\n');",
+        "process.send?.({",
+        "  type: 'violations',",
+        "  commandId: invocation.commandId,",
+        "  violations: [{",
+        "    line: `blocked for ${invocation.commandId}`,",
+        "    timestamp: Date.now()",
+        "  }]",
+        "});",
+        "process.send?.({",
+        "  type: 'done',",
+        "  commandId: invocation.commandId,",
+        "  exitCode: 0",
+        "}, () => process.exit(0));",
+        "setTimeout(() => process.exit(0), 250).unref();"
+    ].join("\n"), "utf8");
+    const tool = new ShellTool({
+        sandboxPolicy: () => createSandboxPolicy("read-only", [directory]),
+        sandboxRunnerPath: runner
+    });
+    tools.push(tool);
+
+    try {
+        const first = await tool.execute(call("exec_command", {
+            command: "ignored",
+            cwd: directory,
+            timeoutMs: 5_000
+        }, "call-shell-1"), { onOutput: () => undefined });
+        const second = await tool.execute(call("exec_command", {
+            command: "ignored",
+            cwd: directory,
+            timeoutMs: 5_000
+        }, "call-shell-2"), { onOutput: () => undefined });
+
+        expect(first.isError).toBe(true);
+        expect(first.data).toMatchObject({
+            kind: "shell.exec_command",
+            status: "failed"
+        });
+        expect(first.content).toContain("sandboxed output");
+        expect(first.content).toContain("<sandbox_violations>");
+        expect(first.content).toContain("blocked for call-shell-1");
+        expect(second.content).toContain("<sandbox_violations>");
+
+        expect(second.content).toContain("blocked for call-shell-2");
+        expect(first.content).not.toContain("call-shell-2");
+        expect(second.content).not.toContain("call-shell-1");
+    } finally {
+        tool.dispose();
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
+test("returns only new sandbox violations when a timed-out task exits", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-shell-sandbox-background-"));
+    const runner = join(directory, "fake-sandbox-runner.mjs");
+    writeFileSync(runner, [
+        "import { readFileSync } from 'node:fs';",
+        "const invocation = JSON.parse(readFileSync(process.argv[2], 'utf8'));",
+        "const sendViolation = (line) => process.send?.({",
+        "  type: 'violations',",
+        "  commandId: invocation.commandId,",
+        "  violations: [{ line, timestamp: Date.now() }]",
+        "});",
+        "sendViolation('blocked before timeout');",
+        "setTimeout(() => {",
+        "  sendViolation('blocked after timeout');",
+        "  process.send?.({",
+        "    type: 'done',",
+        "    commandId: invocation.commandId,",
+        "    exitCode: 0",
+        "  }, () => process.exit(0));",
+        "}, 1_500);"
+    ].join("\n"), "utf8");
+    const tool = new ShellTool({
+        sandboxPolicy: () => createSandboxPolicy("read-only", [directory]),
+        sandboxRunnerPath: runner
+    });
+    tools.push(tool);
+
+    try {
+        const started = await tool.execute(call("exec_command", {
+            command: "ignored",
+            cwd: directory,
+            timeoutMs: 1_000
+        }, "call-background-violations"), { onOutput: () => undefined });
+        const sessionId = started.task?.id;
+        expect(sessionId).toBeTruthy();
+        if (!sessionId) {
+            throw new Error("Expected a background task.");
+        }
+        expect(started.content).toContain("blocked before timeout");
+        expect(started.content).not.toContain("blocked after timeout");
+
+        const exit = await new Promise<ShellSessionExit>((resolvePromise) => {
+            tool.watchSession(sessionId, () => undefined, resolvePromise);
+        });
+
+        expect(exit.intercepted).toBe(true);
+        expect(exit.violations).toEqual(["blocked after timeout"]);
     } finally {
         tool.dispose();
         rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });

@@ -15,7 +15,18 @@ function devCspPlugin(): Plugin {
 }
 
 export default defineConfig({
-    main: {},
+    main: {
+        build: {
+            rollupOptions: {
+                input: {
+                    index: fileURLToPath(new URL("./src/main/index.ts", import.meta.url)),
+                    "sandbox-runner": fileURLToPath(
+                        new URL("./src/core/permissions/sandbox-runner.ts", import.meta.url)
+                    )
+                }
+            }
+        }
+    },
     preload: {
         build: {
             rollupOptions: {

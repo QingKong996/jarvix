@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
 import type { LlmToolCallBlock } from "../../llm/types.ts";
+import { createSandboxPolicy } from "../permissions/sandbox.ts";
 import { BackgroundTaskManager } from "./background-task-manager.ts";
+import { ShellTool } from "./shell.ts";
 import type { ToolBackgroundEnd, ToolTaskEvent } from "./types.ts";
 
 test("keeps streaming a timed-out task and isolates it from other managers", async () => {
@@ -162,17 +164,26 @@ test("stops active tasks and returns their end events", async () => {
                 status: expect.not.stringMatching(/^running$/)
             })
         }));
-        expect(events).toContainEqual(expect.objectContaining({
+        const taskEnd = events.find(
+            (event) => event.type === "backgroundTask.end" && event.task.id === taskId
+        );
+        const toolEnd = events.find(
+            (event) => event.type === "tool.end" && event.toolCallId === "call-1"
+        );
+        if (taskEnd?.type !== "backgroundTask.end" || toolEnd?.type !== "tool.end") {
+            throw new Error("Expected background task end events.");
+        }
+        expect(toolEnd).toMatchObject({
             type: "tool.end",
             toolCallId: "call-1",
             toolName: "exec_command",
             endReason: "terminated",
-            isError: false,
+            isError: taskEnd.task.status === "failed",
             data: expect.objectContaining({
                 kind: "shell.exec_command",
-                status: "completed"
+                status: taskEnd.task.status
             })
-        }));
+        });
 
         const afterStop = await manager.execute(call("write_stdin", {
             sessionId: taskId,
@@ -185,6 +196,58 @@ test("stops active tasks and returns their end events", async () => {
         rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
 }, 15_000);
+
+test("keeps a timed-out task failed without repeating reported violations", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-background-sandbox-"));
+    const runner = join(directory, "fake-sandbox-runner.mjs");
+    writeFileSync(runner, [
+        "import { readFileSync } from 'node:fs';",
+        "const invocation = JSON.parse(readFileSync(process.argv[2], 'utf8'));",
+        "process.send?.({",
+        "  type: 'violations',",
+        "  commandId: invocation.commandId,",
+        "  violations: [{ line: 'blocked before timeout', timestamp: Date.now() }]",
+        "});",
+        "setTimeout(() => {",
+        "  process.send?.({",
+        "    type: 'done',",
+        "    commandId: invocation.commandId,",
+        "    exitCode: 0",
+        "  }, () => process.exit(0));",
+        "}, 1_500);"
+    ].join("\n"), "utf8");
+    const manager = new BackgroundTaskManager(new ShellTool({
+        sandboxPolicy: () => createSandboxPolicy("read-only", [directory]),
+        sandboxRunnerPath: runner
+    }));
+    const completed: ToolBackgroundEnd[] = [];
+
+    try {
+        const started = await manager.execute(call("exec_command", {
+            command: "ignored",
+            cwd: directory,
+            timeoutMs: 1_000
+        }), {
+            onOutput: () => undefined,
+            onBackgroundEnd: (result) => {
+                completed.push(result);
+            }
+        });
+        expect(started.data.status).toBe("failed");
+        expect(started.data.output).toContain("blocked before timeout");
+
+        await vi.waitFor(() => {
+            expect(completed).toHaveLength(1);
+        }, { timeout: 5_000 });
+        const result = completed[0]!;
+        expect(result.isError).toBe(true);
+        expect(result.data.status).toBe("failed");
+        expect(result.data.output.match(/blocked before timeout/g)).toHaveLength(1);
+    } finally {
+        manager.dispose();
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
 
 function call(name: string, arguments_: Record<string, unknown>): LlmToolCallBlock {
     return { type: "toolCall", id: "call-1", name, arguments: arguments_ };

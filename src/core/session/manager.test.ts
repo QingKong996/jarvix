@@ -112,8 +112,57 @@ test("updates a session context in memory and on disk", () => {
     expect(session.meta.workingDirectory).toBeUndefined();
 });
 
+test("notifies an active request when its permission changes", async () => {
+    home.path = join(base, "permission-home");
+    const manager = new SessionManager();
+    const session = manager.create({}, "Permission session");
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    const stream = vi.fn(() => (async function* (): AsyncIterable<LlmStreamEvent> {
+        yield { type: "start" };
+        await gate;
+        yield { type: "done", message: assistantMessage() };
+    })());
+
+    const request = session.request("hello", {
+        llm: { getModel: () => MODEL, stream },
+        config: TEST_CONFIG,
+        emit: () => undefined
+    });
+
+    await vi.waitFor(() => {
+        expect(stream).toHaveBeenCalledTimes(1);
+    });
+    manager.updatePermission(session.meta.id, "full-access");
+    release();
+    await request;
+
+    expect(session.meta.permission).toBe("full-access");
+    expect(session.snapshot().messages.map((message) => message.role)).toEqual([
+        "user",
+        "assistant",
+        "system"
+    ]);
+    expect(session.snapshot().messages.at(-1)).toMatchObject({
+        content: expect.stringContaining('changed from "read-only" to "full-access"')
+    });
+});
+
 function fakeLlm(): LlmAdapter {
-    const message: LlmAssistantMessage = {
+    return {
+        getModel: () => MODEL,
+        stream(): AsyncIterable<LlmStreamEvent> {
+            return (async function* (): AsyncIterable<LlmStreamEvent> {
+                yield { type: "done", message: assistantMessage() };
+            })();
+        }
+    };
+}
+
+function assistantMessage(): LlmAssistantMessage {
+    return {
         role: "assistant",
         content: [{ type: "text", text: "reply" }],
         provider: MODEL.provider,
@@ -129,14 +178,5 @@ function fakeLlm(): LlmAdapter {
         },
         stopReason: "stop",
         timestamp: Date.now()
-    };
-
-    return {
-        getModel: () => MODEL,
-        stream(): AsyncIterable<LlmStreamEvent> {
-            return (async function* (): AsyncIterable<LlmStreamEvent> {
-                yield { type: "done", message };
-            })();
-        }
     };
 }
