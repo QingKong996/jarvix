@@ -42,6 +42,10 @@ const bridge: JarvixBridge = {
         IPC_CHANNELS.permissionSet,
         { sessionId, permission }
     ),
+    respondPermission: (sessionId, requestId, approved) => ipcRenderer.invoke(
+        IPC_CHANNELS.permissionRespond,
+        { sessionId, requestId, approved }
+    ),
     renameSession: (sessionId, name) => ipcRenderer.invoke(
         IPC_CHANNELS.sessionRename,
         { sessionId, name }

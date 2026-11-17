@@ -25,6 +25,7 @@ export const IPC_CHANNELS = {
     sessionCreate: "jarvix:session:create",
     sessionUpdateContext: "jarvix:session:update-context",
     permissionSet: "jarvix:permission:set",
+    permissionRespond: "jarvix:permission:respond",
     sessionRename: "jarvix:session:rename",
     sessionAutoName: "jarvix:session:auto-name",
     sessionArchive: "jarvix:session:archive",
@@ -76,6 +77,11 @@ export type JarvixBridge = {
         sessionId: string,
         permission: PermissionMode
     ): Promise<PermissionMode>;
+    respondPermission(
+        sessionId: string,
+        requestId: string,
+        approved: boolean
+    ): Promise<boolean>;
     renameSession(sessionId: string, name: string): Promise<string>;
     autoNameSession(sessionId: string, firstPrompt?: string): Promise<string>;
     archiveSession(sessionId: string): Promise<void>;

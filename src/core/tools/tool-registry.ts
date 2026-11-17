@@ -1,4 +1,5 @@
 import type { LlmToolCallBlock, LlmToolDefinition } from "../../llm/types.ts";
+import type { PermissionMode } from "../../protocol/permission.ts";
 import type {
     ToolExecutionObserver,
     ToolExecutionResult,
@@ -27,6 +28,12 @@ export class ToolRegistry implements ToolExecutor {
 
     handles(name: string): boolean {
         return this.executors.has(name);
+    }
+
+    getRegisteredTools(permission: PermissionMode): readonly LlmToolDefinition[] {
+        return [...new Set(this.executors.values())].flatMap(
+            (executor) => executor.getRegisteredTools?.(permission) ?? executor.definitions
+        );
     }
 
     async execute(

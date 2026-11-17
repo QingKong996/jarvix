@@ -181,6 +181,23 @@ export function registerIpc(dependencies: IpcDependencies): void {
         );
     });
 
+    ipcMain.handle(IPC_CHANNELS.permissionRespond, (event, payload: unknown) => {
+        assertSender(event);
+        const request = requirePayload(payload, "Invalid permission response payload");
+        const { requestId, approved } = request;
+        if (typeof requestId !== "string" || requestId.length === 0) {
+            throw new Error("Permission request id must be a non-empty string");
+        }
+        if (typeof approved !== "boolean") {
+            throw new Error("Permission response must be a boolean");
+        }
+        return jarvix.respondPermission(
+            requireSessionId(request.sessionId),
+            requestId,
+            approved
+        );
+    });
+
     ipcMain.handle(IPC_CHANNELS.sessionUpdateContext, (event, payload: unknown) => {
         assertSender(event);
         const session = requirePayload(payload, "Invalid session context payload");

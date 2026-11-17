@@ -8,6 +8,7 @@ import { sessionContextFrom } from "../../protocol/session.ts";
 import type { PermissionMode } from "../../protocol/permission.ts";
 import { loadProject } from "../../project/store.ts";
 import type { SandboxPreflight } from "../permissions/sandbox-launch.ts";
+import { SessionPermissions } from "../permissions/session-permissions.ts";
 import { createSandboxPolicy } from "../permissions/sandbox.ts";
 import { createDefaultTools } from "../tools/index.ts";
 import { Session } from "./session.ts";
@@ -76,6 +77,13 @@ export class SessionManager {
         return meta.permission;
     }
 
+    respondPermission(id: string, requestId: string, approved: boolean): boolean {
+        return this.require(id).respondPermission(
+            requestId,
+            approved ? "approved" : "cancelled"
+        );
+    }
+
     rename(id: string, name: string): string {
         const session = this.require(id);
         const meta = updateSessionName(id, name);
@@ -132,10 +140,11 @@ export class SessionManager {
 
     private track(session: JarvixSession): Session {
         const directories = workingDirectories(session.meta);
-        const sandboxPolicy = () => createSandboxPolicy(
+        const permissions = new SessionPermissions();
+        const sandboxPolicy = () => permissions.apply(createSandboxPolicy(
             session.meta.permission,
             workingDirectories(session.meta)
-        );
+        ));
         const instance = new Session(
             session.meta,
             session.messages,
@@ -147,8 +156,12 @@ export class SessionManager {
                 },
                 applyPatch: {
                     sandboxPolicy
+                },
+                requestPermission: {
+                    sandboxPolicy
                 }
-            })
+            }),
+            permissions
         );
         this.sessions.set(instance.meta.id, instance);
         return instance;

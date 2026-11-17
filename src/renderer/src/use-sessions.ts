@@ -3,6 +3,7 @@ import {
     DEFAULT_PERMISSION_MODE,
     type PermissionMode
 } from "../../protocol/permission.ts";
+import type { PermissionRequest } from "../../protocol/permission.ts";
 import type { JarvixProject } from "../../protocol/project.ts";
 import {
     sessionContextFrom,
@@ -35,6 +36,7 @@ export function useSessions() {
     const [sessionPermission, setSessionPermission] = useState<PermissionMode>(
         DEFAULT_PERMISSION_MODE
     );
+    const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
     const [busy, setBusy] = useState(false);
     const [running, setRunning] = useState(false);
     const [ready, setReady] = useState(false);
@@ -45,6 +47,10 @@ export function useSessions() {
     const requestInFlightRef = useRef(false);
     const sessionContextRef = useRef<JarvixSessionContext>({});
     const sessionPermissionRef = useRef<PermissionMode>(DEFAULT_PERMISSION_MODE);
+    const permissionRequestRef = useRef<{
+        sessionId: string;
+        request: PermissionRequest;
+    } | null>(null);
     const hasUserMessagesRef = useRef(false);
 
     const updateContextState = useCallback((context: JarvixSessionContext): void => {
@@ -63,14 +69,24 @@ export function useSessions() {
         setSessionPermission(permission);
     }, []);
 
+    const clearPermissionRequest = useCallback((sessionId?: string): void => {
+        const current = permissionRequestRef.current;
+        if (!current || (sessionId && current.sessionId !== sessionId)) {
+            return;
+        }
+        permissionRequestRef.current = null;
+        setPermissionRequest(null);
+    }, []);
+
     const activateSession = useCallback((session: JarvixSession | null): void => {
         activeSessionIdRef.current = session?.meta.id ?? null;
         hasUserMessagesRef.current = session?.messages.some((message) => message.role === "user") ?? false;
         setActiveSessionId(session?.meta.id ?? null);
         updateContextState(session ? sessionContextFrom(session.meta) : {});
         updatePermissionState(session?.meta.permission ?? DEFAULT_PERMISSION_MODE);
+        clearPermissionRequest();
         hydrate(session?.messages ?? []);
-    }, [updateContextState, updatePermissionState]);
+    }, [clearPermissionRequest, updateContextState, updatePermissionState]);
 
     const refreshSessions = useCallback(async (): Promise<void> => {
         if (!bridge) {
@@ -113,6 +129,26 @@ export function useSessions() {
 
         let cancelled = false;
         const unsubscribe = bridge.onEvents((batch) => {
+            for (const event of batch.events) {
+                if (
+                    event.type === "permission.request" &&
+                    batch.sessionId === activeSessionIdRef.current
+                ) {
+                    permissionRequestRef.current = {
+                        sessionId: batch.sessionId,
+                        request: event.request
+                    };
+                    setPermissionRequest(event.request);
+                } else if (event.type === "permission.resolved") {
+                    const current = permissionRequestRef.current;
+                    if (
+                        current?.sessionId === batch.sessionId &&
+                        current.request.id === event.requestId
+                    ) {
+                        clearPermissionRequest(batch.sessionId);
+                    }
+                }
+            }
             const events = requestEventGate.filter(batch.sessionId, batch.events);
             if (events.length === 0) {
                 return;
@@ -162,7 +198,7 @@ export function useSessions() {
             cancelled = true;
             unsubscribe();
         };
-    }, [activateSession, requestEventGate, updateSessionName]);
+    }, [activateSession, clearPermissionRequest, requestEventGate, updateSessionName]);
 
     const startNewSession = useCallback((projectId?: string | null): void => {
         if (!bridge || !ready || busy) {
@@ -171,10 +207,11 @@ export function useSessions() {
         activeSessionIdRef.current = null;
         hasUserMessagesRef.current = false;
         setActiveSessionId(null);
+        clearPermissionRequest();
         updateContextState(projectId ? { projectId } : {});
         updatePermissionState(DEFAULT_PERMISSION_MODE);
         hydrate([]);
-    }, [busy, ready, updateContextState, updatePermissionState]);
+    }, [busy, clearPermissionRequest, ready, updateContextState, updatePermissionState]);
 
     const createProject = useCallback(async (
         name: string,
@@ -252,6 +289,26 @@ export function useSessions() {
             updatePermissionState(updated);
         }
     }, [ready, updatePermissionState]);
+
+    const respondPermission = useCallback(async (approved: boolean): Promise<boolean> => {
+        const current = permissionRequestRef.current;
+        if (!bridge || !current) {
+            return false;
+        }
+        try {
+            const responded = await bridge.respondPermission(
+                current.sessionId,
+                current.request.id,
+                approved
+            );
+            if (responded) {
+                clearPermissionRequest(current.sessionId);
+            }
+            return responded;
+        } catch {
+            return false;
+        }
+    }, [clearPermissionRequest]);
 
     const renameSession = useCallback(async (sessionId: string, name: string): Promise<boolean> => {
         if (!bridge || !ready || busy) {
@@ -457,6 +514,7 @@ export function useSessions() {
             return;
         }
         stopTurn();
+        clearPermissionRequest(sessionId);
         requestEventGate.pause(sessionId);
         setRunning(false);
         try {
@@ -466,7 +524,7 @@ export function useSessions() {
             setRunning(true);
             return;
         }
-    }, [requestEventGate]);
+    }, [clearPermissionRequest, requestEventGate]);
 
     return {
         projects,
@@ -474,6 +532,7 @@ export function useSessions() {
         archivedSessions,
         sessionContext,
         sessionPermission,
+        permissionRequest,
         activeSessionId,
         busy,
         running,
@@ -482,6 +541,7 @@ export function useSessions() {
         startNewSession,
         updateSessionContext,
         updateSessionPermission,
+        respondPermission,
         renameSession,
         autoNameSession,
         archiveSession,

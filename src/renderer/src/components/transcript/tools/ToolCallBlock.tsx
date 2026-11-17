@@ -8,6 +8,7 @@ import type { ToolCallViewData } from "../../../../../core/tools/view.ts";
 import { ApplyPatchDiff } from "./ApplyPatchDiff.tsx";
 import { ShellToolCall } from "./ShellToolCall.tsx";
 import { LocalTimeToolCall, SleepToolCall } from "./TimeToolCall.tsx";
+import { PermissionRequestToolCall } from "./PermissionRequestToolCall.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -20,6 +21,9 @@ type ToolCallBlockProps = {
 
 export function ToolCallBlock({ toolName, data, isError, endReason }: ToolCallBlockProps) {
     const { t } = useTranslation();
+    if (data.kind === "permission.request") {
+        return <PermissionRequestToolCall data={data} isError={isError} />;
+    }
     const active = endReason === null
         && (data.status === "pending" || data.status === "running");
     const streaming = active;

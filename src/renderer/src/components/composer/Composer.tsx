@@ -5,12 +5,16 @@ import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type { JarvixConfig } from "../../../../protocol/config.ts";
-import type { PermissionMode } from "../../../../protocol/permission.ts";
+import type {
+    PermissionMode,
+    PermissionRequest
+} from "../../../../protocol/permission.ts";
 import type { JarvixProject } from "../../../../protocol/project.ts";
 import type { JarvixSessionContext } from "../../../../protocol/session.ts";
 import { CHAT_COLUMN, CONTENT_GUTTER } from "../../layout.ts";
 import { ComposerModelMenu } from "./ComposerModelMenu.tsx";
 import { ComposerPermissionMenu } from "./ComposerPermissionMenu.tsx";
+import { PermissionRequestDialog } from "./PermissionRequestDialog.tsx";
 import { SessionContextDialog } from "../sessions/SessionContextDialog.tsx";
 
 type ComposerProps = {
@@ -19,12 +23,14 @@ type ComposerProps = {
     projects: JarvixProject[];
     sessionContext: JarvixSessionContext;
     sessionPermission: PermissionMode;
+    permissionRequest: PermissionRequest | null;
     onSubmit: (question: string) => void;
     onStop: () => void;
     config: JarvixConfig | null;
     onConfigChange: (config: JarvixConfig) => Promise<void>;
     onContextChange: (context: JarvixSessionContext) => Promise<void>;
     onPermissionChange: (permission: PermissionMode) => Promise<void>;
+    onPermissionResponse: (approved: boolean) => Promise<boolean>;
 };
 
 export function Composer({
@@ -33,12 +39,14 @@ export function Composer({
     projects,
     sessionContext,
     sessionPermission,
+    permissionRequest,
     onSubmit,
     onStop,
     config,
     onConfigChange,
     onContextChange,
-    onPermissionChange
+    onPermissionChange,
+    onPermissionResponse
 }: ComposerProps) {
     const { t } = useTranslation();
     const [value, setValue] = useState("");
@@ -52,6 +60,7 @@ export function Composer({
         ? sessionContext.workingDirectory.split(/[\\/]/).filter(Boolean).at(-1) ?? sessionContext.workingDirectory
         : null;
     const contextLabel = selectedProject?.name ?? workingDirectoryName ?? t("projects.temporary");
+    const permissionPending = permissionRequest !== null;
 
     async function saveConfig(next: JarvixConfig): Promise<boolean> {
         setSaving(true);
@@ -84,7 +93,7 @@ export function Composer({
     function handleSubmit(event: FormEvent<HTMLFormElement>): void {
         event.preventDefault();
         const question = value.trim();
-        if (!question || disabled || saving || permissionSaving) {
+        if (!question || disabled || saving || permissionSaving || permissionPending) {
             return;
         }
         setValue("");
@@ -110,6 +119,12 @@ export function Composer({
             <div className={cn(CONTENT_GUTTER, "py-3")}>
                 <form onSubmit={handleSubmit}>
                     <div className={cn(CHAT_COLUMN, "flex flex-col gap-1 rounded-xl border bg-composer p-1.5 shadow-sm")}>
+                        {permissionRequest ? (
+                            <PermissionRequestDialog
+                                request={permissionRequest}
+                                onRespond={onPermissionResponse}
+                            />
+                        ) : null}
                         <Textarea
                             ref={textareaRef}
                             rows={1}
@@ -118,7 +133,7 @@ export function Composer({
                             value={value}
                             onChange={(event) => setValue(event.target.value)}
                             onKeyDown={handleKeyDown}
-                            disabled={disabled || saving || permissionSaving}
+                            disabled={disabled || saving || permissionSaving || permissionPending}
                             placeholder={t("composer.placeholder")}
                             className="max-h-48 min-h-8 w-full resize-none border-0 bg-transparent px-1.5 py-1.5 shadow-none focus-visible:ring-0 dark:bg-transparent"
                         />
@@ -129,7 +144,7 @@ export function Composer({
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => setContextOpen(true)}
-                                disabled={disabled || running || saving || permissionSaving}
+                                disabled={disabled || running || saving || permissionSaving || permissionPending}
                                 aria-haspopup="dialog"
                                 aria-expanded={contextOpen}
                                 className="h-8 min-w-0 max-w-[45%] shrink justify-start gap-1 px-2 text-xs font-normal"
@@ -142,7 +157,7 @@ export function Composer({
 
                             <ComposerPermissionMenu
                                 permission={sessionPermission}
-                                disabled={disabled}
+                                disabled={disabled || permissionPending}
                                 saving={saving || permissionSaving}
                                 onChange={savePermission}
                             />
@@ -150,7 +165,7 @@ export function Composer({
                             <div className="ml-auto flex min-w-0 items-center justify-end gap-1">
                                 <ComposerModelMenu
                                     config={config}
-                                    disabled={disabled || running}
+                                    disabled={disabled || running || permissionPending}
                                     saving={saving || permissionSaving}
                                     onSave={saveConfig}
                                 />
@@ -172,7 +187,7 @@ export function Composer({
                                         size="icon-sm"
                                         className="shrink-0 bg-[#1F6FEB] p-0 text-white hover:bg-[#1F6FEB]/90"
                                         aria-label={t("composer.send")}
-                                        disabled={disabled || saving || permissionSaving || value.trim().length === 0}
+                                        disabled={disabled || saving || permissionSaving || permissionPending || value.trim().length === 0}
                                     >
                                         <ArrowUp aria-hidden="true" className="size-4" />
                                     </Button>

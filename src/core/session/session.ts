@@ -11,7 +11,11 @@ import type {
 } from "../../llm/index.ts";
 import type { JarvixConfig } from "../../protocol/config.ts";
 import type { JarvixEvent } from "../../protocol/event.ts";
-import type { PermissionMode } from "../../protocol/permission.ts";
+import type {
+    PermissionDecision,
+    PermissionGrantInput,
+    PermissionMode
+} from "../../protocol/permission.ts";
 import type { JarvixSession, JarvixSessionMeta } from "../../protocol/session.ts";
 import {
     resolveConfiguredModel,
@@ -23,6 +27,7 @@ import {
     type ToolExecutor
 } from "../tools/index.ts";
 import { createToolCallViewData, toToolResultDetails, type ToolCallViewData } from "../tools/view.ts";
+import { SessionPermissions } from "../permissions/session-permissions.ts";
 import { appendSessionMessage } from "./store.ts";
 
 const SYSTEM_PROMPT = `Respond to the user in Chinese. Current operating system: ${process.platform}.`;
@@ -47,7 +52,7 @@ type TurnDecision = "continue" | "complete" | "failed";
 type TurnContext = {
     runtime: SessionRuntime;
     signal: AbortSignal;
-    request: Omit<LlmRequest, "messages" | "signal">;
+    request: Omit<LlmRequest, "messages" | "signal" | "tools">;
 };
 
 export type SessionRuntime = {
@@ -65,6 +70,7 @@ export class Session {
     private pendingTurnMessages: PendingTurnMessage[] = [];
     private readonly backgroundExitNotices = new Set<string>();
     private readonly tools: ToolExecutor;
+    private readonly permissions: SessionPermissions;
     private readonly idleWaiters = new Set<() => void>();
     private running = false;
     private streamOpen = false;
@@ -76,11 +82,13 @@ export class Session {
     constructor(
         meta: JarvixSessionMeta,
         messages: readonly LlmMessage[] = [],
-        tools: ToolExecutor = createDefaultTools()
+        tools: ToolExecutor = createDefaultTools(),
+        permissions: SessionPermissions = new SessionPermissions()
     ) {
         this.meta = meta;
         this.history = [...messages];
         this.tools = tools;
+        this.permissions = permissions;
     }
 
     async request(question: string, runtime: SessionRuntime): Promise<void> {
@@ -111,8 +119,7 @@ export class Session {
                     model,
                     systemPrompt: systemPromptFor(runtime.workingDirectories),
                     reasoning: resolveReasoningLevel(definition, runtime.config.reasoning),
-                    apiKey: provider?.apiKey,
-                    tools: this.tools.definitions
+                    apiKey: provider?.apiKey
                 }
             };
 
@@ -207,6 +214,10 @@ export class Session {
         });
     }
 
+    respondPermission(requestId: string, decision: PermissionDecision): boolean {
+        return this.permissions.respond(requestId, decision);
+    }
+
     private async takeTurn(
         turn: TurnContext
     ): Promise<TurnDecision> {
@@ -220,6 +231,7 @@ export class Session {
         try {
             for await (const event of runtime.llm.stream({
                 ...turn.request,
+                tools: this.tools.getRegisteredTools?.(this.meta.permission) ?? this.tools.definitions,
                 messages: [
                     ...this.history,
                     environmentContextFor(
@@ -293,6 +305,7 @@ export class Session {
 
     dispose(): void {
         this.abort();
+        this.permissions.dispose();
         this.tools.dispose();
     }
 
@@ -392,7 +405,9 @@ export class Session {
                             if (!signal.aborted) {
                                 runtime.emit(event);
                             }
-                        }
+                        },
+                        requestPermission: (request) =>
+                            this.requestSandboxPermission(request, runtime, signal)
                     },
                     signal
                 );
@@ -402,6 +417,28 @@ export class Session {
         }
 
         this.completeToolCall(toolCall, result, runtime);
+    }
+
+    private async requestSandboxPermission(
+        input: PermissionGrantInput,
+        runtime: SessionRuntime,
+        signal: AbortSignal
+    ): Promise<PermissionDecision> {
+        if (signal.aborted) {
+            return "cancelled";
+        }
+        const handle = this.permissions.begin(input, signal);
+        runtime.emit({
+            type: "permission.request",
+            request: handle.request
+        });
+        const decision = await handle.decision;
+        runtime.emit({
+            type: "permission.resolved",
+            requestId: handle.request.id,
+            decision
+        });
+        return decision;
     }
 
     private finishCancelledToolCall(toolCall: LlmToolCallBlock, runtime: SessionRuntime): void {
@@ -597,7 +634,9 @@ function environmentContextFor(
             writableRoots.length > 0
                 ? "- writes: writable roots and the sandbox's private temp only"
                 : "- writes: denied except the sandbox's private temp",
-            "- reads: not restricted by Jarvix; sandbox/OS rules apply"
+            "- reads: not restricted by Jarvix; sandbox/OS rules apply",
+            "- To enable or disable network domains or filesystem read/write access for this session, call request_permission with absolute directory paths.",
+            "- Permission grants are in-memory only and are not restored after Jarvix restarts."
         ];
     const writableRootsLine = permission === "full-access"
         ? null

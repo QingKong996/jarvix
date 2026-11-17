@@ -1,6 +1,10 @@
 import type { LlmStreamEvent, LlmSystemMessage } from "../llm/types.ts";
 import type { ToolCallEndReason, ToolTaskEvent } from "../core/tools/types.ts";
 import type { ToolCallOutputDelta, ToolCallViewData } from "../core/tools/view.ts";
+import type {
+    PermissionDecision,
+    PermissionRequest
+} from "./permission.ts";
 
 export const LOG_LEVELS = ["log", "info", "warn", "error", "debug"] as const;
 export type LogLevel = typeof LOG_LEVELS[number];
@@ -46,6 +50,13 @@ export type JarvixEvent = LlmStreamEvent
     type: "prompt.injected";
     promptId: string;
     text: string;
+  } | {
+    type: "permission.request";
+    request: PermissionRequest;
+  } | {
+    type: "permission.resolved";
+    requestId: string;
+    decision: PermissionDecision;
   };
 
 export type JarvixListener = (jarvixEvent: JarvixEvent, sessionId: string) => void;

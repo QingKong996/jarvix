@@ -112,6 +112,28 @@
         "streaming": "Thinking…",
         "label": "Thought process"
     },
+    "permissionRequest": {
+        "title": "Additional access requested",
+        "description": "The agent requests temporary access changes for these domains and directories. Approval applies only to this session and is discarded when the app exits.",
+        "domains": "Domains",
+        "directories": "Directories",
+        "action": {
+            "enable": "Enable",
+            "disable": "Disable"
+        },
+        "access": {
+            "read": "Read",
+            "write": "Write"
+        },
+        "approve": "Approve",
+        "cancel": "Cancel",
+        "respondFailed": "Could not submit the permission decision.",
+        "status": {
+            "pending": "Waiting for approval…",
+            "approved": "Approved",
+            "cancelled": "Cancelled"
+        }
+    },
     "tools": {
         "execCommand": "Run command",
         "writeStdin": "Write to shell",

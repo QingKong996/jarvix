@@ -1,10 +1,17 @@
 import type { LlmJsonObject } from "../../llm/types.ts";
+import {
+    permissionGrantInputSchema,
+    type PermissionDirectoryChange,
+    type PermissionDomainChange,
+    type PermissionRequestStatus
+} from "../../protocol/permission.ts";
 
 export const EXEC_COMMAND_TOOL = "exec_command";
 export const WRITE_STDIN_TOOL = "write_stdin";
 export const APPLY_PATCH_TOOL = "apply_patch";
 export const LOCAL_TIME_TOOL = "get_local_time";
 export const SLEEP_TOOL = "sleep";
+export const REQUEST_PERMISSION_TOOL = "request_permission";
 
 export type ToolCallStatus = "pending" | "running" | "completed" | "timed_out" | "failed";
 
@@ -58,12 +65,22 @@ export type SleepView = {
     status: ToolCallStatus;
 };
 
+export type PermissionRequestView = {
+    kind: "permission.request";
+    domains: PermissionDomainChange[];
+    directories: PermissionDirectoryChange[];
+    decision: PermissionRequestStatus;
+    output: string;
+    status: ToolCallStatus;
+};
+
 export type ToolCallViewData =
     | ShellExecCommandView
     | ShellWriteStdinView
     | ApplyPatchView
     | LocalTimeView
     | SleepView
+    | PermissionRequestView
     | GenericToolView;
 
 export type ToolCallOutputDelta =
@@ -121,6 +138,17 @@ export function createToolCallViewData(
                 output: "",
                 status
             };
+        case REQUEST_PERMISSION_TOOL: {
+            const parsed = permissionGrantInputSchema.safeParse(arguments_);
+            return {
+                kind: "permission.request",
+                domains: parsed.success ? parsed.data.domains : [],
+                directories: parsed.success ? parsed.data.directories : [],
+                decision: "pending",
+                output: "",
+                status
+            };
+        }
         default:
             return {
                 kind: "generic",
@@ -165,6 +193,12 @@ export function isToolCallViewData(value: unknown): value is ToolCallViewData {
             return typeof value.durationMs === "number"
                 && typeof value.startedAt === "number"
                 && typeof value.elapsedMs === "number";
+        case "permission.request":
+            return isPermissionRequestStatus(value.decision)
+                && permissionGrantInputSchema.safeParse({
+                    domains: value.domains,
+                    directories: value.directories
+                }).success;
         case "generic":
             return typeof value.name === "string" && isRecord(value.arguments);
         default:
@@ -186,6 +220,10 @@ function isToolCallStatus(value: unknown): value is ToolCallStatus {
         || value === "completed"
         || value === "timed_out"
         || value === "failed";
+}
+
+function isPermissionRequestStatus(value: unknown): value is PermissionRequestStatus {
+    return value === "pending" || value === "approved" || value === "cancelled";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
