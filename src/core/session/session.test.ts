@@ -85,6 +85,64 @@ test("adds the session working directories to the system prompt", async () => {
     }));
 });
 
+test("appends refreshed access-control context to each request without persisting it", async () => {
+    const requests: LlmMessage[][] = [];
+    const llm: LlmAdapter = {
+        getModel: () => MODEL,
+        stream(request) {
+            requests.push([...request.messages]);
+            return (async function* (): AsyncIterable<LlmStreamEvent> {
+                yield { type: "done", message: assistantMessage() };
+            })();
+        }
+    };
+    const session = new Session({ ...meta, permission: "read-only" });
+    const runtime = {
+        llm,
+        config: TEST_CONFIG,
+        workingDirectories: ["C:\\workspace-a", "C:\\workspace-b"],
+        emit: () => undefined
+    };
+
+    await session.request("first", runtime);
+    session.applyPermission("project-read-write");
+    await session.request("second", runtime);
+    session.applyPermission("full-access");
+    await session.request("third", runtime);
+
+    const firstContext = requests[0]?.at(-1);
+    const secondContext = requests[1]?.at(-1);
+    const thirdContext = requests[2]?.at(-1);
+    expect(firstContext).toMatchObject({
+        role: "system",
+        content: expect.stringContaining("permission: read-only")
+    });
+    expect(firstContext).toMatchObject({
+        content: expect.stringContaining("writable roots: none")
+    });
+    expect(secondContext).toMatchObject({
+        role: "system",
+        content: expect.stringContaining("permission: project-read-write")
+    });
+    expect(secondContext).toMatchObject({
+        content: expect.stringContaining("  - C:\\workspace-a\n  - C:\\workspace-b")
+    });
+    expect(secondContext).toMatchObject({
+        content: expect.stringContaining("reads: not restricted by Jarvix")
+    });
+    expect(thirdContext).toMatchObject({
+        role: "system",
+        content: expect.stringContaining("sandbox: off")
+    });
+    expect(thirdContext).toMatchObject({
+        content: expect.stringContaining("access: OS permissions only")
+    });
+    expect(session.snapshot().messages.some((message) =>
+        message.role === "system"
+        && message.content.startsWith("<environment_context>")
+    )).toBe(false);
+});
+
 test("retries persistence once and dequeues the message on success", async () => {
     persist.mockImplementationOnce(() => {
         throw new Error("disk full");
@@ -322,9 +380,10 @@ test("executes tool calls, streams tool data, and resumes with the tool result",
     expect(requests[1]?.map((message) => message.role)).toEqual([
         "user",
         "assistant",
-        "toolResult"
+        "toolResult",
+        "system"
     ]);
-    expect(requests[1]?.at(-1)).toMatchObject({
+    expect(requests[1]?.at(-2)).toMatchObject({
         role: "toolResult",
         toolCallId: "call-1",
         toolName: "exec_command",
@@ -392,9 +451,10 @@ test("injects prompts after the active LLM request and before the next round", a
         "user",
         "assistant",
         "user",
-        "user"
+        "user",
+        "system"
     ]);
-    expect(requests[1]?.slice(-2).map((message) => (
+    expect(requests[1]?.slice(-3, -1).map((message) => (
         message.role === "user" ? message.content : ""
     ))).toEqual(["follow up one", "follow up two"]);
     expect(session.snapshot().messages.map((message) => message.role)).toEqual([
@@ -490,9 +550,10 @@ test("injects prompts after tool execution before the next LLM request", async (
         "user",
         "assistant",
         "toolResult",
-        "user"
+        "user",
+        "system"
     ]);
-    expect(requests[1]?.at(-1)).toMatchObject({
+    expect(requests[1]?.at(-2)).toMatchObject({
         role: "user",
         content: "after tools"
     });
@@ -584,7 +645,8 @@ test("injects permission notices after tool results before the next LLM request"
         "assistant",
         "toolResult",
         "system",
-        "user"
+        "user",
+        "system"
     ]);
     expect(requests[1]?.[3]).toMatchObject({
         role: "system",
@@ -682,7 +744,10 @@ test("resets the round limit after injecting a prompt", async () => {
         getModel: () => MODEL,
         stream(request) {
             llmCalls += 1;
-            const last = request.messages.at(-1);
+            const last = request.messages.findLast((message) =>
+                message.role !== "system"
+                || !message.content.startsWith("<environment_context>")
+            );
             const injected = last?.role === "user" && last.content === "fresh prompt";
             const message: LlmAssistantMessage = injected
                 ? assistantMessage()

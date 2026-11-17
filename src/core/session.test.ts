@@ -121,7 +121,8 @@ test("persists each turn and resumes the stored history for the next request", a
     expect(second.loadSession(stored.meta.id)?.messages).toHaveLength(2);
     await second.request("second question", stored.meta.id);
 
-    expect(requests[1]?.map((message) => message.role)).toEqual(["user", "assistant", "user"]);
+    expect(requests[1]?.map((message) => message.role))
+        .toEqual(["user", "assistant", "user", "system"]);
 
     const reloaded = loadSession(stored.meta.id, directory);
     expect(reloaded?.messages.map((message) => message.role)).toEqual(["user", "assistant", "user", "assistant"]);
