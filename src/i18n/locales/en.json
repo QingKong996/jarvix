@@ -211,6 +211,17 @@
         "save": "Save",
         "cancel": "Cancel"
     },
+    "sandbox": {
+        "setup": {
+            "title": "Windows sandbox setup required",
+            "message": "Administrator permission is required to install the Windows sandbox.",
+            "install": "Install",
+            "installing": "Installing…",
+            "dismiss": "Later",
+            "cancelledMessage": "The Windows sandbox was not installed and no changes were made.",
+            "failedMessage": "The installer could not finish configuring the Windows sandbox."
+        }
+    },
     "markdown": {
         "footnoteLabel": "Footnotes",
         "footnoteBackLabel": "Back to content",

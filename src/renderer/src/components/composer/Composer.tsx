@@ -170,7 +170,7 @@ export function Composer({
                                     <Button
                                         type="submit"
                                         size="icon-sm"
-                                        className="shrink-0 p-0 dark:bg-[#E6EDF3] dark:text-[#0D1117] dark:hover:bg-[#E6EDF3]/90"
+                                        className="shrink-0 bg-[#1F6FEB] p-0 text-white hover:bg-[#1F6FEB]/90"
                                         aria-label={t("composer.send")}
                                         disabled={disabled || saving || permissionSaving || value.trim().length === 0}
                                     >

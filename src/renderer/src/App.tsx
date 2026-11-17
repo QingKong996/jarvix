@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useDefaultLayout } from "react-resizable-panels";
 import { Composer } from "./components/composer/Composer.tsx";
 import { CreateProjectDialog } from "./components/projects/CreateProjectDialog.tsx";
+import { SandboxSetupDialog } from "./components/sandbox/SandboxSetupDialog.tsx";
 import { SettingsDialog } from "./components/settings/SettingsDialog.tsx";
 import { Sidebar } from "./components/sidebar/Sidebar.tsx";
 import { Transcript } from "./components/transcript/Transcript.tsx";
@@ -180,6 +181,8 @@ export function App() {
                 archivedSessions={archivedSessions}
                 onUnarchiveSession={unarchiveSession}
             />
+
+            <SandboxSetupDialog />
         </>
     );
 }

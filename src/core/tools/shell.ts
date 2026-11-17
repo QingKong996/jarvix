@@ -11,7 +11,10 @@ import { z } from "zod";
 import type { LlmToolCallBlock, LlmToolDefinition } from "../../llm/types.ts";
 import {
     createSandboxLaunch,
-    type SandboxLaunch
+    preflightSandbox,
+    type SandboxLaunch,
+    type SandboxPreflight,
+    type SandboxPreflightResult
 } from "../permissions/sandbox-launch.ts";
 import { isSandboxRunnerMessage } from "../permissions/sandbox-protocol.ts";
 import type { SandboxPolicy } from "../permissions/sandbox.ts";
@@ -139,6 +142,7 @@ export type ShellSessionExit = {
 export type ShellToolOptions = {
     defaultCwd?: string;
     sandboxPolicy?: () => SandboxPolicy | null;
+    sandboxPreflight?: SandboxPreflight;
     sandboxRunnerPath?: string;
 };
 
@@ -147,6 +151,7 @@ export class ShellTool implements ToolExecutor {
     readonly definitions = SHELL_TOOL_DEFINITIONS;
     private readonly defaultCwd: string;
     private readonly sandboxPolicy?: () => SandboxPolicy | null;
+    private readonly sandboxPreflight: SandboxPreflight;
     private readonly sandboxRunnerPath?: string;
     private readonly addressableSessions = new Map<string, ShellSession>();
     private readonly children = new Set<ShellSession>();
@@ -154,6 +159,7 @@ export class ShellTool implements ToolExecutor {
     constructor(options: ShellToolOptions = {}) {
         this.defaultCwd = resolve(options.defaultCwd ?? DEFAULT_CWD);
         this.sandboxPolicy = options.sandboxPolicy;
+        this.sandboxPreflight = options.sandboxPreflight ?? preflightSandbox;
         this.sandboxRunnerPath = options.sandboxRunnerPath;
     }
 
@@ -292,6 +298,12 @@ export class ShellTool implements ToolExecutor {
         }
 
         const { command, timeoutMs } = parsed.data;
+        if (this.sandboxPolicy?.()) {
+            const preflight = await this.sandboxPreflight();
+            if (!preflight.ready) {
+                return sandboxPreflightResult(command, preflight);
+            }
+        }
         let session: ShellSession;
         try {
             session = this.start(command, resolve(this.defaultCwd, parsed.data.cwd), (chunk) => {
@@ -822,6 +834,29 @@ function invalidArgumentsResult(call: LlmToolCallBlock, message: string): ToolEx
     return {
         content: `Invalid arguments for ${call.name}: ${message}`,
         data: { ...data, output: message },
+        isError: true,
+        endReason: "exited"
+    };
+}
+
+function sandboxPreflightResult(
+    command: string,
+    preflight: Extract<SandboxPreflightResult, { ready: false }>
+): ToolExecutionResult {
+    const message = [
+        "The command was not executed because the local sandbox is not ready.",
+        ...preflight.errors,
+        "Install or repair the Windows sandbox from Jarvix, then retry.",
+        "This is a host setup problem, not a permission-mode denial."
+    ].join("\n\n");
+    return {
+        content: message,
+        data: {
+            kind: "shell.exec_command",
+            command,
+            output: message,
+            status: "failed"
+        },
         isError: true,
         endReason: "exited"
     };

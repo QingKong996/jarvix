@@ -13,6 +13,7 @@ import {
     DEFAULT_PERMISSION_MODE,
     type PermissionMode
 } from "../protocol/permission.ts";
+import type { SandboxPreflight } from "./permissions/sandbox-launch.ts";
 import {
     createProject as createStoredProject,
     listProjects as listStoredProjects,
@@ -24,17 +25,19 @@ import { generateSessionName } from "./session/naming.ts";
 export type JarvixOptions = {
     llm?: LlmAdapter;
     config?: JarvixConfig;
+    sandboxPreflight?: SandboxPreflight;
 };
 
 export class Jarvix {
     private readonly listeners = new Set<JarvixListener>();
     private config: JarvixConfig;
     private readonly llm: LlmAdapter;
-    private readonly sessions = new SessionManager();
+    private readonly sessions: SessionManager;
 
     constructor(options: JarvixOptions = {}) {
         this.config = options.config ?? {};
         this.llm = options.llm ?? createLlm(() => this.config.providers);
+        this.sessions = new SessionManager(options.sandboxPreflight);
     }
 
     setConfig(config: JarvixConfig): void {
