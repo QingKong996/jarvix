@@ -38,7 +38,27 @@ app.whenReady().then(() => {
     windows.ensureOpen();
 
     app.on("activate", () => windows.ensureOpen());
-    app.on("will-quit", () => jarvix.dispose());
+
+    let shutdownStarted = false;
+    let shutdownComplete = false;
+    app.on("before-quit", (event) => {
+        if (shutdownComplete) {
+            return;
+        }
+        event.preventDefault();
+        if (shutdownStarted) {
+            return;
+        }
+        shutdownStarted = true;
+        void jarvix.shutdown()
+            .catch((error: unknown) => {
+                console.error("Failed to shut down tools cleanly.", error);
+            })
+            .finally(() => {
+                shutdownComplete = true;
+                app.quit();
+            });
+    });
 });
 
 app.on("window-all-closed", () => {

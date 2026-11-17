@@ -2,12 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { PanelRightOpen } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useDefaultLayout } from "react-resizable-panels";
-import { Composer } from "./components/Composer.tsx";
-import { CreateProjectDialog } from "./components/CreateProjectDialog.tsx";
-import { RightSidebar } from "./components/RightSidebar.tsx";
-import { SettingsDialog } from "./components/SettingsDialog.tsx";
-import { Sidebar } from "./components/Sidebar.tsx";
-import { Transcript } from "./components/Transcript.tsx";
+import { Composer } from "./components/composer/Composer.tsx";
+import { CreateProjectDialog } from "./components/projects/CreateProjectDialog.tsx";
+import { SettingsDialog } from "./components/settings/SettingsDialog.tsx";
+import { Sidebar } from "./components/sidebar/Sidebar.tsx";
+import { Transcript } from "./components/transcript/Transcript.tsx";
+import { BackgroundTasksSidebar } from "./components/transcript/tools/BackgroundTasksSidebar.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable.tsx";
 import { useSessions } from "./use-sessions.ts";
@@ -155,7 +155,7 @@ export function App() {
                         </ResizablePanel>
                     </ResizablePanelGroup>
                 </div>
-                <RightSidebar
+                <BackgroundTasksSidebar
                     open={rightSidebarOpen}
                     sessionId={activeSessionId}
                     onToggle={toggleRightSidebar}

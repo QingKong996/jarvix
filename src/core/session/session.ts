@@ -20,8 +20,8 @@ import {
     createDefaultTools,
     type ToolExecutionResult,
     type ToolExecutor
-} from "../../tools/index.ts";
-import { createToolCallViewData, toToolResultDetails, type ToolCallViewData } from "../../tools/view.ts";
+} from "../tools/index.ts";
+import { createToolCallViewData, toToolResultDetails, type ToolCallViewData } from "../tools/view.ts";
 import { appendSessionMessage } from "./store.ts";
 
 const SYSTEM_PROMPT = `Respond to the user in Chinese. Current operating system: ${process.platform}.`;
@@ -57,9 +57,12 @@ export class Session {
     private readonly pendingPrompts: PendingPrompt[] = [];
     private readonly backgroundExitNotices = new Set<string>();
     private readonly tools: ToolExecutor;
+    private readonly idleWaiters = new Set<() => void>();
     private running = false;
     private toolUseOpen = false;
     private requestController: AbortController | null = null;
+    private lastRuntime: SessionRuntime | null = null;
+    private shutdownPromise: Promise<void> | null = null;
 
     constructor(
         meta: JarvixSessionMeta,
@@ -76,6 +79,7 @@ export class Session {
             throw new Error(`Session is busy: ${this.meta.id}`);
         }
         this.running = true;
+        this.lastRuntime = runtime;
         const controller = new AbortController();
         const { signal } = controller;
         this.requestController = controller;
@@ -147,6 +151,7 @@ export class Session {
             if (this.requestController === controller) {
                 this.requestController = null;
             }
+            this.notifyIdle();
         }
     }
 
@@ -240,9 +245,46 @@ export class Session {
         };
     }
 
+    shutdown(): Promise<void> {
+        this.shutdownPromise ??= this.shutdownInternal();
+        return this.shutdownPromise;
+    }
+
     dispose(): void {
         this.abort();
         this.tools.dispose();
+    }
+
+    private async shutdownInternal(): Promise<void> {
+        this.abort();
+        await this.waitForIdle();
+        try {
+            const events = await this.tools.stop();
+            if (this.lastRuntime) {
+                for (const event of events) {
+                    this.lastRuntime.emit(event);
+                }
+            }
+        } finally {
+            this.tools.dispose();
+            this.lastRuntime = null;
+        }
+    }
+
+    private waitForIdle(): Promise<void> {
+        if (!this.running) {
+            return Promise.resolve();
+        }
+        return new Promise((resolvePromise) => {
+            this.idleWaiters.add(resolvePromise);
+        });
+    }
+
+    private notifyIdle(): void {
+        for (const resolvePromise of this.idleWaiters) {
+            resolvePromise();
+        }
+        this.idleWaiters.clear();
     }
 
     private async executeToolCall(

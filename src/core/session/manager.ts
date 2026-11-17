@@ -84,6 +84,20 @@ export class SessionManager {
         return session;
     }
 
+    async shutdown(): Promise<void> {
+        const sessions = [...this.sessions.values()];
+        const results = await Promise.allSettled(
+            sessions.map((session) => session.shutdown())
+        );
+        this.sessions.clear();
+        const failed = results.find(
+            (result): result is PromiseRejectedResult => result.status === "rejected"
+        );
+        if (failed) {
+            throw failed.reason;
+        }
+    }
+
     dispose(): void {
         for (const session of this.sessions.values()) {
             session.dispose();

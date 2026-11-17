@@ -14,7 +14,7 @@ import type { JarvixSessionMeta } from "../../protocol/session.ts";
 import { MAX_TOOL_ROUNDS, Session } from "./session.ts";
 import { appendSessionMessage } from "./store.ts";
 import { providerConfigSchema } from "../../protocol/providers.ts";
-import { BackgroundTaskManager, type ToolExecutor } from "../../tools/index.ts";
+import { BackgroundTaskManager, type ToolExecutor } from "../tools/index.ts";
 
 vi.mock("./store.ts", () => ({
     appendSessionMessage: vi.fn()
@@ -290,6 +290,7 @@ test("executes tool calls, streams tool data, and resumes with the tool result",
                 endReason: "exited"
             };
         },
+        stop: async () => [],
         dispose: () => undefined
     };
     const events: JarvixEvent[] = [];
@@ -458,6 +459,7 @@ test("injects prompts after tool execution before the next LLM request", async (
                 endReason: "exited"
             };
         },
+        stop: async () => [],
         dispose: () => undefined
     };
     const session = new Session(meta, [], tools);
@@ -525,6 +527,7 @@ test("resets the round limit after injecting a prompt", async () => {
                 endReason: "exited"
             };
         },
+        stop: async () => [],
         dispose: () => undefined
     };
     let llmCalls = 0;
@@ -660,6 +663,7 @@ test("accepts an in-flight tool result but does not start another round after ab
                 endReason: "exited"
             };
         },
+        stop: async () => [],
         dispose: () => undefined
     };
     const events: JarvixEvent[] = [];
@@ -691,6 +695,85 @@ test("accepts an in-flight tool result but does not start another round after ab
         role: "toolResult",
         toolCallId: "call-abort",
         content: "Command aborted."
+    });
+});
+
+test("shutdown waits for the request and emits events returned by tool stop", async () => {
+    const toolCall = {
+        type: "toolCall" as const,
+        id: "call-shutdown",
+        name: "exec_command",
+        arguments: { command: "echo hi", cwd: process.cwd(), timeoutMs: 10_000 }
+    };
+    const toolUseMessage: LlmAssistantMessage = {
+        ...assistantMessage(),
+        content: [toolCall],
+        stopReason: "toolUse"
+    };
+    const stream = vi.fn(() => (async function* (): AsyncIterable<LlmStreamEvent> {
+        yield { type: "done", message: toolUseMessage };
+    })());
+    let stopCalled = false;
+    const tools: ToolExecutor = {
+        definitions: [{
+            name: "exec_command",
+            description: "Run a command",
+            parameters: { type: "object", properties: {} }
+        }],
+        handles: (name) => name === "exec_command",
+        execute: async (_call, _observer, signal) => new Promise((resolvePromise) => {
+            signal?.addEventListener("abort", () => resolvePromise({
+                content: "Command aborted.",
+                data: {
+                    kind: "shell.exec_command",
+                    command: "echo hi",
+                    output: "",
+                    status: "failed"
+                },
+                isError: true,
+                endReason: "exited"
+            }), { once: true });
+        }),
+        stop: async () => {
+            stopCalled = true;
+            return [{
+                type: "tool.end",
+                toolCallId: toolCall.id,
+                toolName: toolCall.name,
+                data: {
+                    kind: "shell.exec_command",
+                    command: "echo hi",
+                    output: "partial\n",
+                    status: "completed"
+                },
+                isError: false,
+                endReason: "terminated"
+            }];
+        },
+        dispose: () => undefined
+    };
+    const events: JarvixEvent[] = [];
+    const session = new Session(meta, [], tools);
+    const request = session.request("run it", {
+        llm: { getModel: () => MODEL, stream },
+        config: TEST_CONFIG,
+        emit: (event) => {
+            events.push(event);
+        }
+    });
+
+    await vi.waitFor(() => {
+        expect(events.some((event) => event.type === "tool.start")).toBe(true);
+    });
+    await session.shutdown();
+    await request;
+
+    expect(stopCalled).toBe(true);
+    expect(events.at(-1)).toMatchObject({
+        type: "tool.end",
+        toolCallId: toolCall.id,
+        endReason: "terminated",
+        data: { status: "completed" }
     });
 });
 

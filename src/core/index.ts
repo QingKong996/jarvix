@@ -145,6 +145,10 @@ export class Jarvix {
         this.sessions.require(sessionId).abort();
     }
 
+    async shutdown(): Promise<void> {
+        await this.sessions.shutdown();
+    }
+
     dispose(): void {
         this.sessions.dispose();
     }
