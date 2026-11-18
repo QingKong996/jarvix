@@ -131,6 +131,18 @@ export class Session {
         this.requestController = controller;
 
         try {
+            this.ensureEnvironmentContext(runtime);
+            const questionMessage: LlmUserMessage = {
+                role: "user",
+                content: question,
+                timestamp: Date.now()
+            };
+            this.append(questionMessage);
+            const environmentReminder = this.appendEnvironmentReminderIfChanged(runtime);
+            if (environmentReminder) {
+                runtime.emit({ type: "system.message", message: environmentReminder });
+            }
+
             const resolved = resolveConfiguredModel(runtime.config.providers, runtime.config.selectedModel);
             if (!resolved) {
                 throw new Error("No model configured");
@@ -157,17 +169,6 @@ export class Session {
                 }
             };
 
-            this.ensureEnvironmentContext(runtime);
-            const questionMessage: LlmUserMessage = {
-                role: "user",
-                content: question,
-                timestamp: Date.now()
-            };
-            this.append(questionMessage);
-            const environmentReminder = this.appendEnvironmentReminderIfChanged(runtime);
-            if (environmentReminder) {
-                runtime.emit({ type: "system.message", message: environmentReminder });
-            }
             this.emitContextUsage(turn);
 
             for (let round = 0; ;) {
