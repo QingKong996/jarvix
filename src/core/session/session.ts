@@ -30,13 +30,14 @@ import {
 } from "../tools/index.ts";
 import { createToolCallViewData, toToolResultDetails, type ToolCallViewData } from "../tools/view.ts";
 import { SessionPermissions } from "../permissions/session-permissions.ts";
-import { fitMessagesToContext } from "./context-usage.ts";
+import { fitMessagesToContext, type FittedContext } from "./context-usage.ts";
 import {
     SYSTEM_PROMPT,
     environmentContextFor,
     environmentKeyFor,
     environmentReminderFor,
-    isEnvironmentContextMessage
+    isEnvironmentContextMessage,
+    isEnvironmentReminderMessage
 } from "./environment.ts";
 import { appendSessionMessage } from "./store.ts";
 
@@ -347,11 +348,8 @@ export class Session {
         workingDirectories: readonly string[] = [],
         maxOutputTokens = 0
     ): JarvixContextUsage {
-        const fitted = fitMessagesToContext({
+        const fitted = this.fitMessagesForRequest(workingDirectories, {
             contextWindow,
-            systemPrompt: SYSTEM_PROMPT,
-            messages: this.messagesForRequest(workingDirectories),
-            tools: this.registeredTools(),
             maxOutputTokens
         });
         return {
@@ -504,30 +502,10 @@ export class Session {
         budget?: { contextWindow: number; maxOutputTokens?: number },
         strict = false
     ): LlmMessage[] {
-        const key = environmentKeyFor(this.meta.permission, workingDirectories);
-        const messages = !this.environmentContextMessage
-            ? [
-                this.createEnvironmentContext(workingDirectories, key),
-                ...this.history
-            ]
-            : (() => {
-                const next = [...this.history];
-                if (this.environmentKey !== key) {
-                    next.push(
-                        environmentReminderFor(this.meta.permission, workingDirectories).persisted
-                    );
-                }
-                return next;
-            })();
         if (!budget) {
-            return messages;
+            return this.assembleMessagesForRequest(workingDirectories);
         }
-        const fitted = fitMessagesToContext({
-            ...budget,
-            systemPrompt: SYSTEM_PROMPT,
-            messages,
-            tools: this.registeredTools()
-        });
+        const fitted = this.fitMessagesForRequest(workingDirectories, budget);
         if (!fitted.fits && strict) {
             const available = Math.max(
                 0,
@@ -542,6 +520,41 @@ export class Session {
             );
         }
         return fitted.messages;
+    }
+
+    private assembleMessagesForRequest(workingDirectories: readonly string[]): LlmMessage[] {
+        const key = environmentKeyFor(this.meta.permission, workingDirectories);
+        return !this.environmentContextMessage
+            ? [
+                this.createEnvironmentContext(workingDirectories, key),
+                ...this.history
+            ]
+            : (() => {
+                const next = [...this.history];
+                if (this.environmentKey !== key) {
+                    next.push(
+                        environmentReminderFor(this.meta.permission, workingDirectories).persisted
+                    );
+                }
+                return next;
+            })();
+    }
+
+    private fitMessagesForRequest(
+        workingDirectories: readonly string[],
+        budget: { contextWindow: number; maxOutputTokens?: number }
+    ): FittedContext {
+        const messages = this.assembleMessagesForRequest(workingDirectories);
+        const latestEnvironmentReminder = messages.findLast(isEnvironmentReminderMessage);
+        return fitMessagesToContext({
+            ...budget,
+            systemPrompt: SYSTEM_PROMPT,
+            messages,
+            tools: this.registeredTools(),
+            requiredMessages: latestEnvironmentReminder
+                ? [latestEnvironmentReminder]
+                : []
+        });
     }
 
     private createEnvironmentContext(

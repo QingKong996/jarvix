@@ -46,13 +46,19 @@ export type FittedContext = {
     fits: boolean;
 };
 
+type ContextFitInput = ContextUsageInput & {
+    maxOutputTokens?: number;
+    requiredMessages?: readonly LlmMessage[];
+};
+
 /**
  * Keep the newest user turn and remove older complete turns when the prompt
  * exceeds the model's input budget. A user-message boundary is used so tool
  * calls and tool results cannot be split into an invalid provider sequence.
+ * Required messages are retained even when they precede the selected turn.
  */
 export function fitMessagesToContext(
-    input: ContextUsageInput & { maxOutputTokens?: number }
+    input: ContextFitInput
 ): FittedContext {
     const full = [...input.messages];
     const budget = inputBudget(input);
@@ -81,12 +87,20 @@ export function fitMessagesToContext(
     ));
     let start = latestUser;
     while (start >= 0) {
-        const messages = candidateMessages(full, environmentIndex, start);
+        const requiredIndices = requiredMessageIndices(
+            full,
+            input.requiredMessages ?? [],
+            start,
+            environmentIndex
+        );
+        const messages = candidateMessages(full, environmentIndex, start, requiredIndices);
         const estimatedTokens = estimate(input, messages);
-        const omittedMessages = full
-            .slice(0, start)
-            .filter((_, index) => index !== environmentIndex)
-            .length;
+        const omittedMessages = countOmittedMessages(
+            full,
+            start,
+            environmentIndex,
+            requiredIndices
+        );
         if (estimatedTokens <= budget) {
             return {
                 messages,
@@ -103,11 +117,24 @@ export function fitMessagesToContext(
         start = previous;
     }
 
-    const messages = candidateMessages(full, environmentIndex, latestUser);
-    const omittedMessages = full
-        .slice(0, latestUser)
-        .filter((_, index) => index !== environmentIndex)
-        .length;
+    const requiredIndices = requiredMessageIndices(
+        full,
+        input.requiredMessages ?? [],
+        latestUser,
+        environmentIndex
+    );
+    const messages = candidateMessages(
+        full,
+        environmentIndex,
+        latestUser,
+        requiredIndices
+    );
+    const omittedMessages = countOmittedMessages(
+        full,
+        latestUser,
+        environmentIndex,
+        requiredIndices
+    );
     return {
         messages,
         estimatedTokens: estimate(input, messages),
@@ -119,12 +146,16 @@ export function fitMessagesToContext(
 function candidateMessages(
     messages: readonly LlmMessage[],
     environmentIndex: number,
-    start: number
+    start: number,
+    requiredIndices: ReadonlySet<number>
 ): LlmMessage[] {
     const environment = environmentIndex >= 0 ? messages[environmentIndex] : undefined;
     const omitted = messages
         .slice(0, start)
-        .some((_, index) => index !== environmentIndex);
+        .some((_, index) => isOmittedPrefixIndex(index, environmentIndex, requiredIndices));
+    const required = [...requiredIndices]
+        .sort((left, right) => left - right)
+        .map((index) => messages[index]!);
     return [
         ...(environment ? [environment] : []),
         ...(omitted ? [{
@@ -133,8 +164,45 @@ function candidateMessages(
             context: "system-reminder" as const,
             timestamp: Date.now()
         }] : []),
+        ...required,
         ...messages.slice(start)
     ];
+}
+
+function requiredMessageIndices(
+    messages: readonly LlmMessage[],
+    requiredMessages: readonly LlmMessage[],
+    start: number,
+    environmentIndex: number
+): Set<number> {
+    const indices = new Set<number>();
+    for (const message of requiredMessages) {
+        const index = messages.indexOf(message);
+        if (index >= 0 && index < start && index !== environmentIndex) {
+            indices.add(index);
+        }
+    }
+    return indices;
+}
+
+function countOmittedMessages(
+    messages: readonly LlmMessage[],
+    start: number,
+    environmentIndex: number,
+    requiredIndices: ReadonlySet<number>
+): number {
+    return messages
+        .slice(0, start)
+        .filter((_, index) => isOmittedPrefixIndex(index, environmentIndex, requiredIndices))
+        .length;
+}
+
+function isOmittedPrefixIndex(
+    index: number,
+    environmentIndex: number,
+    requiredIndices: ReadonlySet<number>
+): boolean {
+    return index !== environmentIndex && !requiredIndices.has(index);
 }
 
 function findPreviousPrompt(messages: readonly LlmMessage[], before: number): number {
@@ -147,7 +215,7 @@ function findPreviousPrompt(messages: readonly LlmMessage[], before: number): nu
     return -1;
 }
 
-function inputBudget(input: ContextUsageInput & { maxOutputTokens?: number }): number {
+function inputBudget(input: ContextFitInput): number {
     const reserve = Math.max(
         0,
         Math.min(

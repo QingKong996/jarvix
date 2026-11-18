@@ -86,6 +86,12 @@ export function environmentReminderFor(
     };
 }
 
+export function isEnvironmentReminderMessage(message: LlmMessage): message is LlmUserMessage {
+    return message.role === "user"
+        && message.context === "system-reminder"
+        && /<environment_context>[\s\S]*<\/environment_context>/.test(message.content);
+}
+
 export function isEnvironmentContextMessage(message: LlmMessage): message is LlmSystemMessage {
     return message.role === "system" && message.context === "environment";
 }
