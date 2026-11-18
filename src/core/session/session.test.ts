@@ -76,6 +76,22 @@ test("uses the configured model, provider credential and reasoning for the reque
     }));
 });
 
+test("assembles the final provider context without mutating the session", () => {
+    const session = new Session(meta);
+
+    const context = session.providerContext(["C:\\workspace-a"]);
+
+    expect(context).toMatchObject({
+        systemPrompt: expect.stringContaining("Respond to the user in Chinese")
+    });
+    expect(context.messages[0]).toMatchObject({
+        role: "system",
+        context: "environment",
+        content: expect.stringContaining("- C:\\workspace-a")
+    });
+    expect(session.snapshot().messages).toEqual([]);
+});
+
 test("keeps working directories out of the system prompt and in the leading environment context", async () => {
     const stream = vi.fn((_request: LlmRequest) => (
         async function* (): AsyncIterable<LlmStreamEvent> {}
@@ -246,6 +262,8 @@ test("appends working-directory changes without rewriting the leading environmen
 
 test("estimates context from the exact message sequence sent to the model", async () => {
     let sent: LlmRequest | undefined;
+    let assembledMessages: LlmMessage[] | undefined;
+    let assembledSystemPrompt: string | undefined;
     let firstUsage: ReturnType<Session["contextUsage"]> | undefined;
     const session = new Session({ ...meta, permission: "read-only" });
 
@@ -258,6 +276,9 @@ test("estimates context from the exact message sequence sent to the model", asyn
                     messages: [...request.messages],
                     tools: request.tools ? [...request.tools] : undefined
                 };
+                const context = session.providerContext(["C:\\workspace-a"]);
+                assembledMessages = [...context.messages];
+                assembledSystemPrompt = context.systemPrompt;
                 return (async function* (): AsyncIterable<LlmStreamEvent> {
                     yield { type: "done", message: assistantMessage() };
                 })();
@@ -273,6 +294,8 @@ test("estimates context from the exact message sequence sent to the model", asyn
     });
 
     expect(sent).toBeDefined();
+    expect(assembledMessages).toEqual(sent?.messages);
+    expect(assembledSystemPrompt).toBe(sent?.systemPrompt);
     expect(firstUsage).toEqual(estimateContextUsage({
         contextWindow: firstUsage?.contextWindow ?? 1,
         systemPrompt: sent?.systemPrompt,

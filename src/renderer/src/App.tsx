@@ -4,11 +4,11 @@ import { useTranslation } from "react-i18next";
 import { useDefaultLayout } from "react-resizable-panels";
 import { Composer } from "./components/composer/Composer.tsx";
 import { CreateProjectDialog } from "./components/projects/CreateProjectDialog.tsx";
+import { RightSidebar } from "./components/right-sidebar/RightSidebar.tsx";
 import { SandboxSetupDialog } from "./components/sandbox/SandboxSetupDialog.tsx";
 import { SettingsDialog } from "./components/settings/SettingsDialog.tsx";
 import { Sidebar } from "./components/sidebar/Sidebar.tsx";
 import { Transcript } from "./components/transcript/Transcript.tsx";
-import { BackgroundTasksSidebar } from "./components/transcript/tools/BackgroundTasksSidebar.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable.tsx";
 import { useSessions } from "./use-sessions.ts";
@@ -37,6 +37,7 @@ export function App() {
         sessionContext,
         sessionPermission,
         contextUsage,
+        providerContextRevision,
         permissionRequest,
         activeSessionId,
         busy,
@@ -144,7 +145,7 @@ export function App() {
                                         aria-label={t("rightSidebar.open")}
                                         title={t("rightSidebar.open")}
                                         onClick={toggleRightSidebar}
-                                        data-testid="background-sidebar-open"
+                                        data-testid="right-sidebar-open"
                                         className="absolute top-3 right-3 z-10 rounded-lg shadow-sm"
                                     >
                                         <PanelRightOpen />
@@ -171,9 +172,10 @@ export function App() {
                         </ResizablePanel>
                     </ResizablePanelGroup>
                 </div>
-                <BackgroundTasksSidebar
+                <RightSidebar
                     open={rightSidebarOpen}
                     sessionId={activeSessionId}
+                    providerContextRevision={providerContextRevision}
                     onToggle={toggleRightSidebar}
                 />
             </div>

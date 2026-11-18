@@ -2,6 +2,7 @@ import type { JarvixConfig } from "./config.ts";
 import type { JarvixEvent } from "./event.ts";
 import type { PermissionMode } from "./permission.ts";
 import type { JarvixProject } from "./project.ts";
+import type { JarvixProviderContext } from "./provider-context.ts";
 import type { ModelCatalog, ModelDefinition, ProviderModelSyncRequest } from "./providers.ts";
 import type {
     JarvixSession,
@@ -32,6 +33,7 @@ export const IPC_CHANNELS = {
     sessionUnarchive: "jarvix:session:unarchive",
     sessionDelete: "jarvix:session:delete",
     sessionOpen: "jarvix:session:open",
+    sessionProviderContext: "jarvix:session:provider-context",
     sessionsList: "jarvix:sessions:list",
     sessionsListArchived: "jarvix:sessions:list-archived",
     sandboxStatus: "jarvix:sandbox:status",
@@ -88,6 +90,7 @@ export type JarvixBridge = {
     unarchiveSession(sessionId: string): Promise<void>;
     deleteSession(sessionId: string): Promise<void>;
     openSession(sessionId: string): Promise<JarvixSession | null>;
+    getProviderContext(sessionId: string): Promise<JarvixProviderContext>;
     listSessions(): Promise<JarvixSessionSummary[]>;
     listArchivedSessions(): Promise<JarvixSessionSummary[]>;
     getSandboxStatus(): Promise<SandboxStatus>;

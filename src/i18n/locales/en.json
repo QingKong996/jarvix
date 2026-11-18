@@ -98,11 +98,35 @@
         "message": "System message"
     },
     "rightSidebar": {
+        "title": "Right sidebar",
         "open": "Expand right sidebar",
         "close": "Collapse right sidebar",
         "empty": "No background tasks",
+        "newTab": "New tab",
+        "newSection": "New",
+        "closeTab": "Close {{name}}",
+        "search": "Search features",
+        "searchPlaceholder": "Search features",
+        "noMatches": "No matching features",
         "tabs": {
+            "context": "Context inspector",
             "background": "Background tasks"
+        },
+        "context": {
+            "emptyTitle": "No session selected",
+            "emptyDescription": "Select a session to assemble its final context from the Session.",
+            "loadingTitle": "Analyzing context",
+            "loadingDescription": "Assembling the final messages from the current Session.",
+            "failedTitle": "Could not read context",
+            "failedDescription": "Check that a model is configured, then try again.",
+            "emptyMessage": "Empty message",
+            "roles": {
+                "system": "System",
+                "user": "User",
+                "assistant": "Assistant",
+                "toolCall": "Tool call",
+                "toolResult": "Tool result"
+            }
         },
         "status": {
             "running": "Running",

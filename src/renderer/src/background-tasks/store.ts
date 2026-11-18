@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
-import type { JarvixEvent } from "../../../../../protocol/event.ts";
-import type { ToolTaskSnapshot } from "../../../../../core/tools/types.ts";
+import type { JarvixEvent } from "../../../protocol/event.ts";
+import type { ToolTaskSnapshot } from "../../../core/tools/types.ts";
 
 const EMPTY_TASKS: readonly ToolTaskSnapshot[] = [];
 const listeners = new Set<() => void>();

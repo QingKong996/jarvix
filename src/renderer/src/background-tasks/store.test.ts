@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
-import type { JarvixEvent } from "../../../../../protocol/event.ts";
-import type { ToolTaskSnapshot, ToolTaskState } from "../../../../../core/tools/types.ts";
-import { reduceBackgroundTasks } from "./background-task-store.ts";
+import type { JarvixEvent } from "../../../protocol/event.ts";
+import type { ToolTaskSnapshot, ToolTaskState } from "../../../core/tools/types.ts";
+import { reduceBackgroundTasks } from "./store.ts";
 
 test("keeps completed tasks only until their buffered output is consumed", () => {
     const task = snapshot("task-1", "first");

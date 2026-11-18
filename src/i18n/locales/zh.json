@@ -98,11 +98,35 @@
         "message": "系统消息"
     },
     "rightSidebar": {
+        "title": "右侧栏",
         "open": "展开右侧栏",
         "close": "收起右侧栏",
         "empty": "暂无后台任务",
+        "newTab": "新标签页",
+        "newSection": "新建",
+        "closeTab": "关闭 {{name}}",
+        "search": "搜索功能",
+        "searchPlaceholder": "搜索功能",
+        "noMatches": "没有匹配的功能",
         "tabs": {
+            "context": "上下文透视",
             "background": "后台任务"
+        },
+        "context": {
+            "emptyTitle": "暂无会话",
+            "emptyDescription": "选择一个会话后，这里会从 Session 构建最终上下文。",
+            "loadingTitle": "正在分析上下文",
+            "loadingDescription": "正在从当前 Session 拼装最终消息。",
+            "failedTitle": "无法读取上下文",
+            "failedDescription": "请确认已配置可用模型，或稍后重试。",
+            "emptyMessage": "空消息",
+            "roles": {
+                "system": "系统消息",
+                "user": "用户",
+                "assistant": "助手",
+                "toolCall": "工具调用",
+                "toolResult": "工具结果"
+            }
         },
         "status": {
             "running": "运行中",

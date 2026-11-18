@@ -12,7 +12,7 @@ import {
     type JarvixSessionContext,
     type JarvixSessionSummary
 } from "../../protocol/session.ts";
-import { ingestBackgroundTasks } from "./components/transcript/tools/background-task-store.ts";
+import { ingestBackgroundTasks } from "./background-tasks/store.ts";
 import { RequestEventGate } from "./request-event-gate.ts";
 import {
     beginTurn,
@@ -38,6 +38,7 @@ export function useSessions() {
         DEFAULT_PERMISSION_MODE
     );
     const [contextUsage, setContextUsage] = useState<JarvixContextUsage | null>(null);
+    const [providerContextRevision, setProviderContextRevision] = useState(0);
     const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
     const [busy, setBusy] = useState(false);
     const [running, setRunning] = useState(false);
@@ -132,12 +133,14 @@ export function useSessions() {
 
         let cancelled = false;
         const unsubscribe = bridge.onEvents((batch) => {
+            let providerContextChanged = false;
             for (const event of batch.events) {
                 if (
                     event.type === "context.usage" &&
                     batch.sessionId === activeSessionIdRef.current
                 ) {
                     setContextUsage(event.usage);
+                    providerContextChanged = true;
                 }
                 if (
                     event.type === "permission.request" &&
@@ -157,6 +160,9 @@ export function useSessions() {
                         clearPermissionRequest(batch.sessionId);
                     }
                 }
+            }
+            if (providerContextChanged) {
+                setProviderContextRevision((revision) => revision + 1);
             }
             const events = requestEventGate.filter(batch.sessionId, batch.events);
             if (events.length === 0) {
@@ -543,6 +549,7 @@ export function useSessions() {
         sessionContext,
         sessionPermission,
         contextUsage,
+        providerContextRevision,
         permissionRequest,
         activeSessionId,
         busy,
