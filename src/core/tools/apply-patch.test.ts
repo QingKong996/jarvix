@@ -332,6 +332,58 @@ test("rejects a move whose destination is its source", async () => {
     }
 });
 
+test("refuses to add over an existing path before writing earlier hunks", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-apply-patch-add-existing-"));
+    const tool = new ApplyPatchTool();
+    try {
+        writeFileSync(join(directory, "existing.txt"), "keep\n", "utf8");
+
+        const result = await tool.execute(call(directory, [
+            "*** Begin Patch",
+            "*** Add File: new.txt",
+            "+new",
+            "*** Add File: existing.txt",
+            "+replacement",
+            "*** End Patch"
+        ]), { onOutput: () => undefined });
+
+        expect(result.isError).toBe(true);
+        expect(result.content).toContain("Refusing to overwrite existing path");
+        expect(existsSync(join(directory, "new.txt"))).toBe(false);
+        expect(readFileSync(join(directory, "existing.txt"), "utf8")).toBe("keep\n");
+    } finally {
+        tool.dispose();
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
+test("refuses to move over an existing path", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-apply-patch-move-existing-"));
+    const tool = new ApplyPatchTool();
+    try {
+        writeFileSync(join(directory, "source.txt"), "source\n", "utf8");
+        writeFileSync(join(directory, "destination.txt"), "keep\n", "utf8");
+
+        const result = await tool.execute(call(directory, [
+            "*** Begin Patch",
+            "*** Update File: source.txt",
+            "*** Move to: destination.txt",
+            "@@",
+            "-source",
+            "+moved",
+            "*** End Patch"
+        ]), { onOutput: () => undefined });
+
+        expect(result.isError).toBe(true);
+        expect(result.content).toContain("Refusing to overwrite existing path");
+        expect(readFileSync(join(directory, "source.txt"), "utf8")).toBe("source\n");
+        expect(readFileSync(join(directory, "destination.txt"), "utf8")).toBe("keep\n");
+    } finally {
+        tool.dispose();
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
 function call(cwd: string, patchLines: string[]): LlmToolCallBlock {
     return {
         type: "toolCall",

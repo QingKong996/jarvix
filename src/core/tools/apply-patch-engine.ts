@@ -1,4 +1,5 @@
 import {
+    lstatSync,
     mkdirSync,
     readFileSync,
     rmSync,
@@ -79,6 +80,7 @@ export async function applyParsedPatch(
 
     const baseDirectory = resolve(cwd);
     assertUniqueTargets(patch, baseDirectory);
+    assertNewTargetsAreAvailable(patch, baseDirectory);
     const affected: AffectedPaths = {
         added: [],
         modified: [],
@@ -96,7 +98,7 @@ export async function applyParsedPatch(
         const target = resolve(baseDirectory, hunk.path);
         switch (hunk.kind) {
             case "add": {
-                writeFile(target, hunk.contents, "Failed to write file");
+                createFile(target, hunk.contents);
                 affected.added.push(hunk.path);
                 break;
             }
@@ -113,7 +115,7 @@ export async function applyParsedPatch(
                     break;
                 }
                 const destination = resolve(baseDirectory, hunk.movePath);
-                writeFile(destination, applied.newContents, "Failed to write file");
+                createFile(destination, applied.newContents);
                 deleteFile(target, "Failed to remove original");
                 affected.modified.push(hunk.movePath);
                 break;
@@ -153,6 +155,28 @@ function assertUniqueTargets(patch: ParsedApplyPatch, cwd: string): void {
             throw new Error(`multiple operations target ${target.path}`);
         }
         targets.add(key);
+    }
+}
+
+function assertNewTargetsAreAvailable(
+    patch: ParsedApplyPatch,
+    cwd: string
+): void {
+    for (const target of patchWriteTargets(patch, cwd)) {
+        if (target.operation !== "add" && target.operation !== "move destination") {
+            continue;
+        }
+        try {
+            lstatSync(target.path);
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                continue;
+            }
+            throw new Error(
+                `Failed to inspect target ${target.path}: ${errorMessage(error)}`
+            );
+        }
+        throw new Error(`Refusing to overwrite existing path ${target.path}`);
     }
 }
 
@@ -388,6 +412,18 @@ function writeFile(path: string, contents: string, context: string): void {
         writeFileSync(path, contents, "utf8");
     } catch (error) {
         throw new Error(`${context} ${path}: ${errorMessage(error)}`);
+    }
+}
+
+function createFile(path: string, contents: string): void {
+    try {
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, contents, {
+            encoding: "utf8",
+            flag: "wx"
+        });
+    } catch (error) {
+        throw new Error(`Failed to create file ${path}: ${errorMessage(error)}`);
     }
 }
 
