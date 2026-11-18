@@ -1612,7 +1612,7 @@ test("keeps background task events and exit notices after stopping the request",
     }
 });
 
-test("refuses release while tools or session permissions still hold state", () => {
+test("refuses release while tools are active or a permission request is pending", () => {
     let activeWork = true;
     const dispose = vi.fn();
     const tools: ToolExecutor = {
@@ -1633,20 +1633,46 @@ test("refuses release while tools or session permissions still hold state", () =
     expect(dispose).not.toHaveBeenCalled();
 
     activeWork = false;
+    const pending = permissions.begin({
+        domains: [{ action: "enable", domain: "api.example.com" }],
+        directories: []
+    });
+
+    expect(session.canRelease()).toBe(false);
+    expect(session.release()).toBe(false);
+    expect(dispose).not.toHaveBeenCalled();
+
+    permissions.respond(pending.request.id, "cancelled");
+
+    expect(session.release()).toBe(true);
+    expect(dispose).toHaveBeenCalledTimes(1);
+});
+
+test("releases idle grants so the manager can retain their permission state", () => {
+    const dispose = vi.fn();
+    const tools: ToolExecutor = {
+        definitions: [],
+        handles: () => false,
+        hasActiveWork: () => false,
+        execute: async () => {
+            throw new Error("No tools are available");
+        },
+        stop: async () => [],
+        dispose
+    };
+    const permissions = new SessionPermissions();
+    const session = new Session(meta, [], tools, permissions);
     const approved = permissions.begin({
         domains: [{ action: "enable", domain: "api.example.com" }],
         directories: []
     });
     permissions.respond(approved.request.id, "approved");
 
-    expect(session.canRelease()).toBe(false);
-    expect(session.release()).toBe(false);
-    expect(dispose).not.toHaveBeenCalled();
-
-    permissions.reset();
-
     expect(session.release()).toBe(true);
     expect(dispose).toHaveBeenCalledTimes(1);
+    expect(permissions.canRelease()).toBe(false);
+
+    permissions.reset();
 });
 
 test("refuses release while a message is waiting for persistence", async () => {

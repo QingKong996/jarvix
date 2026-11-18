@@ -198,6 +198,71 @@ test("clears approved access when the permission mode changes", async () => {
     }
 });
 
+test("retains approved access across idle session release and reload", async () => {
+    home.path = join(base, "permission-release-home");
+    const approvedDirectory = join(base, "permission-release-approved");
+    mkdirSync(approvedDirectory, { recursive: true });
+    let turn = 0;
+    let permissionRequests = 0;
+    const llm: LlmAdapter = {
+        getModel: () => MODEL,
+        stream: () => streamTurns(() => {
+            turn += 1;
+            if (turn === 1) {
+                return [toolMessage([
+                    toolCall("grant", "request_permission", {
+                        domains: [],
+                        directories: [{
+                            action: "enable",
+                            access: "write",
+                            path: approvedDirectory
+                        }]
+                    })
+                ])];
+            }
+            if (turn === 3) {
+                return [toolMessage([
+                    toolCall("patch", "apply_patch", {
+                        cwd: approvedDirectory,
+                        patch: [
+                            "*** Begin Patch",
+                            "*** Add File: retained.txt",
+                            "+still allowed",
+                            "*** End Patch"
+                        ].join("\n")
+                    })
+                ])];
+            }
+            return [assistantMessage("done")];
+        })
+    };
+    const jarvix = new Jarvix({ llm, config: CONFIG });
+    const session = jarvix.createSession({}, "retained permission", "read-only");
+    const unsubscribe = jarvix.subscribe((event, sessionId) => {
+        if (event.type === "permission.request") {
+            permissionRequests += 1;
+            expect(jarvix.respondPermission(sessionId, event.request.id, true)).toBe(true);
+        }
+    });
+
+    try {
+        await jarvix.request("grant access", session.meta.id);
+        expect(permissionRequests).toBe(1);
+
+        expect(jarvix.releaseSession(session.meta.id)).toBe(true);
+        expect(jarvix.loadSession(session.meta.id)).not.toBeNull();
+
+        await jarvix.request("use the retained grant", session.meta.id);
+
+        expect(permissionRequests).toBe(1);
+        expect(readFileSync(join(approvedDirectory, "retained.txt"), "utf8"))
+            .toBe("still allowed\n");
+    } finally {
+        unsubscribe();
+        await jarvix.shutdown();
+    }
+});
+
 function streamTurns(next: () => LlmAssistantMessage[]): AsyncIterable<LlmStreamEvent> {
     return (async function* () {
         for (const message of next()) {
