@@ -16,42 +16,66 @@ type PatchPreview = {
 };
 
 export function patchPreview(patch: string): PatchPreview {
-    const allLines = patch.split(/\r?\n/);
     const lines: string[] = [];
     let characters = 0;
+    let lineStart = 0;
 
-    for (let index = 0; index < allLines.length; index += 1) {
+    while (true) {
         if (lines.length >= PATCH_PREVIEW_LINE_LIMIT) {
             return {
                 lines,
-                omittedLines: allLines.length - index,
+                omittedLines: countLineSegments(patch, lineStart),
                 truncated: true
             };
         }
 
-        const line = allLines[index]!;
+        const newline = patch.indexOf("\n", lineStart);
+        const lineEnd = newline === -1 ? patch.length : newline;
+        let contentEnd = lineEnd;
+        if (contentEnd > lineStart && patch.charCodeAt(contentEnd - 1) === 0x0d) {
+            contentEnd -= 1;
+        }
+        const lineLength = contentEnd - lineStart;
         const remaining = PATCH_PREVIEW_CHAR_LIMIT - characters;
         if (remaining <= 0) {
             return {
                 lines,
-                omittedLines: allLines.length - index,
+                omittedLines: countLineSegments(patch, lineStart),
                 truncated: true
             };
         }
-        if (line.length > remaining) {
-            lines.push(`${cutAtCharacterBoundary(line, remaining - 1)}…`);
+        if (lineLength > remaining) {
+            const prefixLength = remaining - 1;
+            const prefix = patch.slice(lineStart, lineStart + prefixLength);
+            lines.push(`${cutAtCharacterBoundary(prefix, prefixLength)}…`);
             return {
                 lines,
-                omittedLines: allLines.length - index - 1,
+                omittedLines: newline === -1
+                    ? 0
+                    : countLineSegments(patch, newline + 1),
                 truncated: true
             };
         }
 
-        lines.push(line);
-        characters += line.length + 1;
+        lines.push(patch.slice(lineStart, contentEnd));
+        characters += lineLength + 1;
+        if (newline === -1) {
+            break;
+        }
+        lineStart = newline + 1;
     }
 
     return { lines, omittedLines: 0, truncated: false };
+}
+
+function countLineSegments(text: string, start: number): number {
+    let count = 1;
+    let newline = text.indexOf("\n", start);
+    while (newline !== -1) {
+        count += 1;
+        newline = text.indexOf("\n", newline + 1);
+    }
+    return count;
 }
 
 export const ApplyPatchDiff = memo(function ApplyPatchDiff({ patch }: ApplyPatchDiffProps) {

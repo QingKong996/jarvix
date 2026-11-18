@@ -1,10 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { i18n } from "../../../../../i18n/index.ts";
 import {
     ApplyPatchDiff,
-    PATCH_PREVIEW_LINE_LIMIT
+    PATCH_PREVIEW_LINE_LIMIT,
+    patchPreview
 } from "./ApplyPatchDiff.tsx";
 
 function renderPatch(patch: string): string {
@@ -56,6 +57,35 @@ test("bounds a large patch preview", () => {
     expect((html.match(/data-kind=/g) ?? []).length).toBe(PATCH_PREVIEW_LINE_LIMIT);
     expect(html).toContain('data-slot="apply-patch-preview-notice"');
     expect(html).not.toContain("+line-499");
+});
+
+test("scans a large patch without splitting it into a full line array", () => {
+    const patch = Array.from(
+        { length: 20_000 },
+        (_, index) => `+line-${index}`
+    ).join("\n");
+    const split = vi.spyOn(String.prototype, "split");
+    let preview: ReturnType<typeof patchPreview>;
+    let splitCalls: number;
+    try {
+        preview = patchPreview(patch);
+        splitCalls = split.mock.calls.length;
+    } finally {
+        split.mockRestore();
+    }
+
+    expect(splitCalls).toBe(0);
+    expect(preview.lines).toHaveLength(PATCH_PREVIEW_LINE_LIMIT);
+    expect(preview.omittedLines).toBe(20_000 - PATCH_PREVIEW_LINE_LIMIT);
+    expect(preview.truncated).toBe(true);
+});
+
+test("preserves CRLF and trailing line boundaries", () => {
+    expect(patchPreview("+first\r\n-second\r\n")).toEqual({
+        lines: ["+first", "-second", ""],
+        omittedLines: 0,
+        truncated: false
+    });
 });
 
 test("truncates an oversized patch line", () => {
