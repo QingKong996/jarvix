@@ -112,6 +112,16 @@ export class SessionPermissions {
         ));
     }
 
+    canRelease(): boolean {
+        return this.pending.size === 0
+            && this.enabledDomains.size === 0
+            && this.disabledDomains.size === 0
+            && this.enabledReadDirectories.size === 0
+            && this.disabledReadDirectories.size === 0
+            && this.enabledWriteDirectories.size === 0
+            && this.disabledWriteDirectories.size === 0;
+    }
+
     reset(): void {
         this.enabledDomains.clear();
         this.disabledDomains.clear();

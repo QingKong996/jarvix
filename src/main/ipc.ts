@@ -247,6 +247,11 @@ export function registerIpc(dependencies: IpcDependencies): void {
         return jarvix.loadSession(requireSessionId(sessionId));
     });
 
+    ipcMain.handle(IPC_CHANNELS.sessionRelease, (event, sessionId: unknown) => {
+        assertSender(event);
+        return jarvix.releaseSession(requireSessionId(sessionId));
+    });
+
     ipcMain.handle(IPC_CHANNELS.sessionProviderContext, (event, sessionId: unknown) => {
         assertSender(event);
         return jarvix.getProviderContext(requireSessionId(sessionId));

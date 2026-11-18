@@ -33,6 +33,7 @@ export const IPC_CHANNELS = {
     sessionUnarchive: "jarvix:session:unarchive",
     sessionDelete: "jarvix:session:delete",
     sessionOpen: "jarvix:session:open",
+    sessionRelease: "jarvix:session:release",
     sessionProviderContext: "jarvix:session:provider-context",
     sessionsList: "jarvix:sessions:list",
     sessionsListArchived: "jarvix:sessions:list-archived",
@@ -90,6 +91,7 @@ export type JarvixBridge = {
     unarchiveSession(sessionId: string): Promise<void>;
     deleteSession(sessionId: string): Promise<void>;
     openSession(sessionId: string): Promise<JarvixSession | null>;
+    releaseSession(sessionId: string): Promise<boolean>;
     getProviderContext(sessionId: string): Promise<JarvixProviderContext>;
     listSessions(): Promise<JarvixSessionSummary[]>;
     listArchivedSessions(): Promise<JarvixSessionSummary[]>;

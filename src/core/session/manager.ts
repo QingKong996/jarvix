@@ -67,6 +67,15 @@ export class SessionManager {
         return this.sessions.get(id);
     }
 
+    releaseIfIdle(id: string): boolean {
+        const session = this.sessions.get(id);
+        if (!session || !session.release()) {
+            return false;
+        }
+        this.sessions.delete(id);
+        return true;
+    }
+
     updateContext(id: string, context: JarvixSessionContext): JarvixSessionContext {
         const meta = updateSessionContext(id, context);
         const updated = sessionContextFrom(meta);

@@ -37,6 +37,7 @@ test("keeps streaming a timed-out task and isolates it from other managers", asy
     };
 
     try {
+        expect(first.hasActiveWork()).toBe(false);
         const started = await first.execute(call("exec_command", {
             command,
             cwd: directory,
@@ -54,6 +55,7 @@ test("keeps streaming a timed-out task and isolates it from other managers", asy
 
         expect(started.data.status).toBe("timed_out");
         expect(started.endReason).toBe("background");
+        expect(first.hasActiveWork()).toBe(true);
         const taskId = started.task?.id;
         expect(taskId).toBeTruthy();
         const polled = await first.execute(call("write_stdin", {
@@ -120,6 +122,7 @@ test("keeps streaming a timed-out task and isolates it from other managers", asy
                 unreadCharacters: 0
             })
         }));
+        expect(first.hasActiveWork()).toBe(false);
 
         const forgotten = await first.execute(call("write_stdin", {
             sessionId: taskId,

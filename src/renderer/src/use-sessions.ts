@@ -81,6 +81,13 @@ export function useSessions() {
         setPermissionRequest(null);
     }, []);
 
+    const releaseSession = useCallback((sessionId: string | null): void => {
+        if (!bridge || !sessionId) {
+            return;
+        }
+        void bridge.releaseSession(sessionId).catch(() => undefined);
+    }, []);
+
     const activateSession = useCallback((session: JarvixSession | null): void => {
         activeSessionIdRef.current = session?.meta.id ?? null;
         hasUserMessagesRef.current = session?.messages.some((message) => message.role === "user") ?? false;
@@ -219,6 +226,7 @@ export function useSessions() {
         if (!bridge || !ready || busy) {
             return;
         }
+        const previousSessionId = activeSessionIdRef.current;
         activeSessionIdRef.current = null;
         hasUserMessagesRef.current = false;
         setActiveSessionId(null);
@@ -227,7 +235,15 @@ export function useSessions() {
         updatePermissionState(DEFAULT_PERMISSION_MODE);
         setContextUsage(null);
         hydrate([]);
-    }, [busy, clearPermissionRequest, ready, updateContextState, updatePermissionState]);
+        releaseSession(previousSessionId);
+    }, [
+        busy,
+        clearPermissionRequest,
+        ready,
+        releaseSession,
+        updateContextState,
+        updatePermissionState
+    ]);
 
     const createProject = useCallback(async (
         name: string,
@@ -368,6 +384,7 @@ export function useSessions() {
             if (activeSessionIdRef.current === sessionId) {
                 activateSession(null);
             }
+            releaseSession(sessionId);
             await Promise.all([refreshSessions(), refreshArchivedSessions()]);
             return true;
         } catch {
@@ -375,7 +392,14 @@ export function useSessions() {
         } finally {
             setBusy(false);
         }
-    }, [activateSession, busy, ready, refreshArchivedSessions, refreshSessions]);
+    }, [
+        activateSession,
+        busy,
+        ready,
+        refreshArchivedSessions,
+        refreshSessions,
+        releaseSession
+    ]);
 
     const unarchiveSession = useCallback(async (sessionId: string): Promise<boolean> => {
         if (!bridge || !ready || busy) {
@@ -418,16 +442,18 @@ export function useSessions() {
         }
         setBusy(true);
         try {
+            const previousSessionId = activeSessionIdRef.current;
             const session = await bridge.openSession(sessionId);
             if (session) {
                 activateSession(session);
+                releaseSession(previousSessionId);
             }
         } catch {
             return;
         } finally {
             setBusy(false);
         }
-    }, [activateSession, busy, ready]);
+    }, [activateSession, busy, ready, releaseSession]);
 
     const runPrompt = useCallback(async (
         question: string,

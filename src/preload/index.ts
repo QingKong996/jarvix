@@ -58,6 +58,7 @@ const bridge: JarvixBridge = {
     unarchiveSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.sessionUnarchive, sessionId),
     deleteSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.sessionDelete, sessionId),
     openSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.sessionOpen, sessionId),
+    releaseSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.sessionRelease, sessionId),
     getProviderContext: (sessionId) => ipcRenderer.invoke(
         IPC_CHANNELS.sessionProviderContext,
         sessionId

@@ -42,6 +42,29 @@ test("cancellation leaves the sandbox policy unchanged", async () => {
     expect(policy?.filesystem.allowWrite).toEqual([]);
 });
 
+test("reports releasable only without pending requests or session grants", () => {
+    const permissions = new SessionPermissions();
+    expect(permissions.canRelease()).toBe(true);
+
+    const pending = permissions.begin({
+        domains: [{ action: "enable", domain: "api.example.com" }],
+        directories: []
+    });
+    expect(permissions.canRelease()).toBe(false);
+    permissions.respond(pending.request.id, "cancelled");
+    expect(permissions.canRelease()).toBe(true);
+
+    const approved = permissions.begin({
+        domains: [],
+        directories: [{ action: "enable", access: "write", path: directory }]
+    });
+    permissions.respond(approved.request.id, "approved");
+    expect(permissions.canRelease()).toBe(false);
+
+    permissions.reset();
+    expect(permissions.canRelease()).toBe(true);
+});
+
 test("aborting a task cancels its pending request", async () => {
     const permissions = new SessionPermissions();
     const controller = new AbortController();
