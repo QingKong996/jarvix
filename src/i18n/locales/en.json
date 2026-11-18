@@ -93,7 +93,8 @@
         }
     },
     "transcript": {
-        "generating": "Generating…"
+        "generating": "Generating…",
+        "showEarlier": "Show {{count}} earlier items"
     },
     "system": {
         "message": "System message"
