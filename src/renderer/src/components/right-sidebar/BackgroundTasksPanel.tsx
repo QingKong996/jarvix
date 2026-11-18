@@ -59,13 +59,24 @@ function BackgroundTaskItem({ task }: { task: ToolTaskSnapshot }) {
                 </span>
             </CollapsibleTrigger>
             <CollapsibleContent>
-                <TaskOutput text={task.output} streaming={streaming} open={open} />
+                <TaskOutput
+                    text={task.output}
+                    truncatedCharacters={task.truncatedCharacters}
+                    streaming={streaming}
+                    open={open}
+                />
             </CollapsibleContent>
         </Collapsible>
     );
 }
 
-function TaskOutput({ text, streaming, open }: { text: string; streaming: boolean; open: boolean }) {
+function TaskOutput({ text, truncatedCharacters, streaming, open }: {
+    text: string;
+    truncatedCharacters: number;
+    streaming: boolean;
+    open: boolean;
+}) {
+    const { t } = useTranslation();
     const ref = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -80,6 +91,13 @@ function TaskOutput({ text, streaming, open }: { text: string; streaming: boolea
             className="max-h-64 border-t border-border"
             viewportClassName="h-auto max-h-[inherit]"
         >
+            {truncatedCharacters > 0 ? (
+                <p className="sticky top-0 border-b border-border bg-background/95 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+                    {t("rightSidebar.outputTruncated", {
+                        characters: truncatedCharacters.toLocaleString()
+                    })}
+                </p>
+            ) : null}
             <pre className="px-2.5 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words text-muted-foreground">
                 {text}
             </pre>

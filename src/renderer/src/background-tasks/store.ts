@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import type { JarvixEvent } from "../../../protocol/event.ts";
 import type { ToolTaskSnapshot } from "../../../core/tools/types.ts";
+import { appendBoundedOutput } from "../../../core/tools/output.ts";
 
 const EMPTY_TASKS: readonly ToolTaskSnapshot[] = [];
 const listeners = new Set<() => void>();
@@ -24,7 +25,14 @@ export function reduceBackgroundTasks(
             case "backgroundTask.output":
                 next = next.map((task) => (
                     task.id === event.taskId && task.status === "running"
-                        ? { ...task, output: task.output + event.output }
+                        ? {
+                            ...task,
+                            output: appendBoundedOutput(task.output, event.output),
+                            truncatedCharacters: Math.max(
+                                task.truncatedCharacters,
+                                event.truncatedCharacters
+                            )
+                        }
                         : task
                 ));
                 break;

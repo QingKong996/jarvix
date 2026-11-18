@@ -102,6 +102,7 @@
         "open": "Expand right sidebar",
         "close": "Collapse right sidebar",
         "empty": "No background tasks",
+        "outputTruncated": "Earlier output was truncated ({{characters}} characters discarded).",
         "newTab": "New tab",
         "newSection": "New",
         "closeTab": "Close {{name}}",

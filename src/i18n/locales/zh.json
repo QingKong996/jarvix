@@ -102,6 +102,7 @@
         "open": "展开右侧栏",
         "close": "收起右侧栏",
         "empty": "暂无后台任务",
+        "outputTruncated": "较早的输出已截断（已丢弃 {{characters}} 个字符）。",
         "newTab": "新标签页",
         "newSection": "新建",
         "closeTab": "关闭 {{name}}",

@@ -1,5 +1,9 @@
 import { expect, test } from "vitest";
 import type { LlmAssistantMessage } from "../../../../llm/types.ts";
+import {
+    MAX_TOOL_OUTPUT_CHARS,
+    OUTPUT_TRUNCATION_NOTICE
+} from "../../../../core/tools/output.ts";
 import { initialTranscriptState, transcriptReducer } from "./transcript.ts";
 
 const message: LlmAssistantMessage = {
@@ -237,6 +241,59 @@ test("hydrates and updates shell tool output", () => {
         data: { output: "hi\n", status: "timed_out" },
         endReason: "background"
     });
+});
+
+test("bounds streamed shell output retained by the transcript", () => {
+    const toolCall = {
+        type: "toolCall" as const,
+        id: "call-large",
+        name: "exec_command",
+        arguments: { command: "generate output", cwd: "/tmp", timeoutMs: 1_000 }
+    };
+    const state = transcriptReducer(initialTranscriptState, {
+        type: "events.batch",
+        events: [
+            { type: "start" },
+            {
+                type: "done",
+                message: { ...message, content: [toolCall], stopReason: "toolUse" }
+            },
+            {
+                type: "tool.start",
+                toolCallId: "call-large",
+                toolName: "exec_command",
+                data: {
+                    kind: "shell.exec_command",
+                    command: "generate output",
+                    output: "",
+                    status: "running"
+                }
+            },
+            {
+                type: "tool.output",
+                toolCallId: "call-large",
+                toolName: "exec_command",
+                data: {
+                    kind: "shell.exec_command",
+                    output: `${"x".repeat(MAX_TOOL_OUTPUT_CHARS)}tail`
+                }
+            }
+        ]
+    });
+    const block = state.committed[0]?.blocks[0];
+
+    if (block?.type !== "tool") {
+        throw new Error("Expected a shell tool block.");
+    }
+    expect(block).toMatchObject({
+        type: "tool",
+        data: {
+            kind: "shell.exec_command",
+            output: expect.stringContaining("tail")
+        }
+    });
+    expect(block.data.output.length).toBeLessThanOrEqual(MAX_TOOL_OUTPUT_CHARS);
+    expect(block.data.output).toContain(OUTPUT_TRUNCATION_NOTICE);
 });
 
 test("marks an unfinished shell result as ended after resume", () => {

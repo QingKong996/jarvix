@@ -71,11 +71,12 @@ test("keeps streaming a timed-out task and isolates it from other managers", asy
         expect(polled.task?.id).toBe(taskId);
 
         await vi.waitFor(() => {
-            expect(taskEvents).toContainEqual({
+            expect(taskEvents).toContainEqual(expect.objectContaining({
                 type: "backgroundTask.output",
                 taskId,
-                output: expect.stringContaining("later")
-            });
+                output: expect.stringContaining("later"),
+                truncatedCharacters: expect.any(Number)
+            }));
             expect(taskEvents).toContainEqual(expect.objectContaining({
                 type: "backgroundTask.end",
                 task: expect.objectContaining({

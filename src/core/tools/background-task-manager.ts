@@ -98,7 +98,8 @@ export class BackgroundTaskManager implements ToolExecutor {
                 status: error || exitCode !== 0 || intercepted ? "failed" : "completed",
                 exitCode,
                 error,
-                unreadCharacters: unreadOutput.length
+                unreadCharacters: unreadOutput.length,
+                truncatedCharacters: exit?.truncatedCharacters ?? task.state.truncatedCharacters
             };
             task.state = state;
             events.push({ type: "backgroundTask.end", task: state });
@@ -155,8 +156,14 @@ export class BackgroundTaskManager implements ToolExecutor {
         this.tasks.set(snapshot.id, task);
         observer.onTaskEvent?.({ type: "backgroundTask.start", task: snapshot });
 
-        const unwatch = this.shell.watchSession(snapshot.id, (chunk) => {
-            task.onTaskEvent?.({ type: "backgroundTask.output", taskId: task.state.id, output: chunk });
+        const unwatch = this.shell.watchSession(snapshot.id, (chunk, truncatedCharacters) => {
+            task.state = { ...task.state, truncatedCharacters };
+            task.onTaskEvent?.({
+                type: "backgroundTask.output",
+                taskId: task.state.id,
+                output: chunk,
+                truncatedCharacters
+            });
         }, (exit) => {
             this.finish(task, exit);
         });
@@ -192,7 +199,8 @@ export class BackgroundTaskManager implements ToolExecutor {
             status: exit.error || exit.exitCode !== 0 || exit.intercepted ? "failed" : "completed",
             exitCode: exit.exitCode,
             error: exit.error,
-            unreadCharacters: unreadOutput.length
+            unreadCharacters: unreadOutput.length,
+            truncatedCharacters: exit.truncatedCharacters
         };
         task.onTaskEvent?.({ type: "backgroundTask.end", task: task.state });
 

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import type { SandboxPreflight } from "../permissions/sandbox-launch.ts";
 import { createSandboxPolicy } from "../permissions/sandbox.ts";
+import { MAX_TOOL_OUTPUT_CHARS } from "./output.ts";
 import { ShellTool, type ShellSessionExit } from "./shell.ts";
 import type { LlmToolCallBlock } from "../../llm/types.ts";
 
@@ -44,6 +45,37 @@ test("executes a command and returns its output", async () => {
         status: "completed"
     });
     expect(result.data.output).toContain("hello");
+});
+
+test("retains only the tail of oversized command output", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-shell-output-"));
+    const script = join(directory, "large-output.mjs");
+    writeFileSync(script, [
+        `process.stdout.write('BEGIN\\n' + 'x'.repeat(${MAX_TOOL_OUTPUT_CHARS}) + 'END\\n');`
+    ].join("\n"), "utf8");
+    const tool = new ShellTool();
+    tools.push(tool);
+    const command = process.platform === "win32"
+        ? `& ${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`
+        : `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`;
+
+    try {
+        const result = await tool.execute(call("exec_command", {
+            command,
+            cwd: directory,
+            timeoutMs: 10_000
+        }), { onOutput: () => undefined });
+
+        expect(result.isError).toBe(false);
+        expect(result.data.output.length).toBeLessThanOrEqual(MAX_TOOL_OUTPUT_CHARS + 256);
+        expect(result.data.output).not.toContain("BEGIN");
+        expect(result.data.output).toContain("END");
+        expect(result.content).toContain("earlier characters were discarded");
+        expect(result.content).toContain("END");
+    } finally {
+        tool.dispose();
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
 });
 
 test("starts Windows PowerShell without relying on PATH", async () => {
