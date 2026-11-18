@@ -93,7 +93,11 @@ export function App() {
 
     return (
         <>
-            <div className="relative flex h-full overflow-hidden">
+            <div
+                data-testid="app-shell"
+                data-busy={busy || !ready ? "true" : "false"}
+                className="relative flex h-full overflow-hidden"
+            >
                 <div className="min-w-0 flex-1">
                     <ResizablePanelGroup
                         id={LAYOUT_ID}
@@ -139,6 +143,7 @@ export function App() {
                                         aria-label={t("rightSidebar.open")}
                                         title={t("rightSidebar.open")}
                                         onClick={toggleRightSidebar}
+                                        data-testid="background-sidebar-open"
                                         className="absolute top-3 right-3 z-10 rounded-lg shadow-sm"
                                     >
                                         <PanelRightOpen />

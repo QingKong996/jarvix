@@ -72,7 +72,7 @@ export function SessionContextDialog({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-lg">
+            <DialogContent data-testid="session-context-dialog" className="sm:max-w-lg">
                 <DialogHeader>
                     <DialogTitle>{t("composer.contextDialog.title")}</DialogTitle>
                     <DialogDescription>{t("composer.contextDialog.description")}</DialogDescription>
@@ -84,6 +84,7 @@ export function SessionContextDialog({
                         disabled={saving}
                         active={!context.projectId && !context.workingDirectory}
                         aria-pressed={!context.projectId && !context.workingDirectory}
+                        data-testid="context-temporary"
                         className="gap-3"
                         icon={<Inbox />}
                     >
@@ -101,6 +102,8 @@ export function SessionContextDialog({
                                 disabled={saving}
                                 active={context.projectId === project.id}
                                 aria-pressed={context.projectId === project.id}
+                                data-testid="context-project"
+                                data-project-id={project.id}
                                 className="gap-3"
                                 icon={<Folder />}
                                 title={project.workingDirectories.join("\n")}
@@ -132,6 +135,7 @@ export function SessionContextDialog({
                         size="sm"
                         onClick={() => void chooseDirectory()}
                         disabled={saving}
+                        data-testid="session-context-choose-directory"
                     >
                         <FolderOpen />
                         {t("composer.contextDialog.chooseDirectory")}

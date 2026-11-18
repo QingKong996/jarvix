@@ -44,6 +44,10 @@ export function SidebarSessionItem({
             <ContextMenuTrigger asChild disabled={busy}>
                 <div
                     ref={setNodeRef}
+                    data-session-id={session.id}
+                    data-session-status={session.status}
+                    data-session-project={session.projectId ?? "temporary"}
+                    data-session-working-directory={session.workingDirectory}
                     style={{ opacity: isDragging ? 0.35 : undefined }}
                     className={cn(
                         "group flex w-full items-center rounded-md text-sm transition-colors",

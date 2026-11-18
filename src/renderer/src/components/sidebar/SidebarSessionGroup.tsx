@@ -46,6 +46,7 @@ export function SidebarSessionGroup({
         <Collapsible open={open} onOpenChange={setOpen} asChild>
             <section
                 ref={setNodeRef}
+                data-project-group={projectId ?? "temporary"}
                 className={cn(
                     "relative rounded-lg transition-shadow",
                     isOver && "z-10 ring-2 ring-primary/60 ring-offset-2 ring-offset-sidebar"

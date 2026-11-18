@@ -75,7 +75,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreate }: CreateProj
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-lg">
+            <DialogContent data-testid="create-project-dialog" className="sm:max-w-lg">
                 <DialogHeader>
                     <DialogTitle>{t("projects.createTitle")}</DialogTitle>
                     <DialogDescription>{t("projects.workingDirectoriesDescription")}</DialogDescription>
@@ -89,6 +89,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreate }: CreateProj
                             onChange={(event) => setName(event.target.value)}
                             placeholder={t("projects.namePlaceholder")}
                             disabled={saving}
+                            data-testid="project-name"
                         />
                     </FormField>
 
@@ -101,6 +102,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreate }: CreateProj
                                 size="sm"
                                 onClick={() => void chooseDirectories()}
                                 disabled={saving}
+                                data-testid="project-add-directories"
                             >
                                 <FolderOpen />
                                 {t("projects.addDirectories")}
@@ -149,6 +151,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreate }: CreateProj
                         <Button
                             type="submit"
                             disabled={saving || name.trim().length === 0 || workingDirectories.length === 0}
+                            data-testid="project-create"
                         >
                             <Plus />
                             {t("projects.create")}

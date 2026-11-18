@@ -62,7 +62,7 @@ export function RenameSessionDialog({
 
     return (
         <Dialog open={session !== null} onOpenChange={onOpenChange}>
-            <DialogContent>
+            <DialogContent data-testid="rename-session-dialog">
                 <DialogHeader>
                     <DialogTitle>{t("sessions.renameTitle")}</DialogTitle>
                 </DialogHeader>
@@ -76,6 +76,7 @@ export function RenameSessionDialog({
                             placeholder={t("sessions.namePlaceholder")}
                             maxLength={SESSION_NAME_MAX_LENGTH}
                             disabled={saving}
+                            data-testid="rename-session-name"
                         />
                     </FormField>
 
@@ -85,7 +86,11 @@ export function RenameSessionDialog({
                                 {t("sessions.cancel")}
                             </Button>
                         </DialogClose>
-                        <Button type="submit" disabled={saving || name.trim().length === 0}>
+                        <Button
+                            type="submit"
+                            disabled={saving || name.trim().length === 0}
+                            data-testid="rename-session-submit"
+                        >
                             <Save />
                             {t("sessions.save")}
                         </Button>
