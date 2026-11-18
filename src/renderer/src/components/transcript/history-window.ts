@@ -1,6 +1,7 @@
 import type { CommittedTurn } from "./types.ts";
 
 export const TRANSCRIPT_TURN_PAGE_SIZE = 80;
+const MAX_PROMPT_LOOKBACK_TURNS = 32;
 
 export type TranscriptWindow = {
     turns: CommittedTurn[];
@@ -26,7 +27,11 @@ export function visibleTranscriptWindow(
     const requestedStart = anchored >= 0
         ? Math.min(anchored, latestStart)
         : latestStart;
-    const start = promptBoundary(turns, requestedStart);
+    const start = promptBoundary(
+        turns,
+        requestedStart,
+        Math.min(Math.max(1, pageSize), MAX_PROMPT_LOOKBACK_TURNS)
+    );
     return {
         turns: turns.slice(start),
         start,
@@ -35,8 +40,13 @@ export function visibleTranscriptWindow(
     };
 }
 
-function promptBoundary(turns: readonly CommittedTurn[], start: number): number {
-    for (let index = start; index >= 0; index -= 1) {
+function promptBoundary(
+    turns: readonly CommittedTurn[],
+    start: number,
+    maxLookback: number
+): number {
+    const lowerBound = Math.max(0, start - maxLookback);
+    for (let index = start; index >= lowerBound; index -= 1) {
         if (turns[index]?.role === "user") {
             return index;
         }
