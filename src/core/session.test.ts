@@ -186,6 +186,40 @@ test("refreshes context usage when the selected model changes", () => {
     expect(windows).toEqual([64_000]);
 });
 
+test("returns the assembled final provider context for static inspection", async () => {
+    home.path = join(base, "provider-context-home");
+    const jarvix = new Jarvix({ llm: fakeLlm("ok", []), config: TEST_CONFIG });
+    const project = createProject(jarvix);
+    const session = jarvix.createSession({ projectId: project.id }, SESSION_NAME);
+
+    await jarvix.request("hello", session.meta.id);
+
+    const context = jarvix.getProviderContext(session.meta.id);
+    expect(context).toMatchObject({
+        systemPrompt: expect.any(String)
+    });
+    expect(context.messages.map((message) => message.role)).toEqual([
+        "system",
+        "user",
+        "assistant"
+    ]);
+    expect(context.messages[0]).toMatchObject({
+        role: "system",
+        context: "environment",
+        content: expect.stringContaining(join(home.path, "workspace"))
+    });
+
+    jarvix.setPermission(session.meta.id, "full-access");
+    const updated = jarvix.getProviderContext(session.meta.id);
+    expect(updated.messages.at(-1)).toMatchObject({
+        role: "user",
+        context: "system-reminder",
+        content: expect.stringContaining("permission: full-access")
+    });
+    expect(jarvix.loadSession(session.meta.id)?.messages.map((message) => message.role))
+        .toEqual(["user", "assistant"]);
+});
+
 test("runs separate sessions in parallel with isolated histories", async () => {
     home.path = join(base, "parallel-home");
     const directory = join(home.path, ".jarvix", "sessions");

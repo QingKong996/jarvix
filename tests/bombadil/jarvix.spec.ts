@@ -356,11 +356,11 @@ const openSettings = actions(() => (
     hasVisibleModalSafe() ? [] : [clickTestId("open-settings", false, false)]
 ));
 
-const toggleBackgroundSidebar = actions(() => {
+const toggleRightSidebar = actions(() => {
     if (hasVisibleModalSafe()) return [];
-    return documentState.current.backgroundSidebarOpen
-        ? [clickTestId("background-sidebar-close", false, false)]
-        : [clickTestId("background-sidebar-open", false, false)];
+    return documentState.current.rightSidebarOpen
+        ? [clickTestId("right-sidebar-close", false, false)]
+        : [clickTestId("right-sidebar-open", false, false)];
 });
 
 const openPermissionMenu = actions(() => {
@@ -537,11 +537,11 @@ const documentState = extract((state) => {
     const composerFitsMain = composerForm === null || mainRect === null ||
         inside(composerForm.getBoundingClientRect(), mainRect);
 
-    const backgroundSidebar = document.querySelector(
-        "[data-testid='background-sidebar']"
+    const rightSidebar = document.querySelector(
+        "[data-testid='right-sidebar']"
     );
-    const backgroundSidebarFitsViewport = backgroundSidebar === null ||
-        insideViewport(window, backgroundSidebar.getBoundingClientRect());
+    const rightSidebarFitsViewport = rightSidebar === null ||
+        insideViewport(window, rightSidebar.getBoundingClientRect());
     const overlayVisible = [...document.querySelectorAll("div[aria-hidden='true']")]
         .some((element) => {
             if (element.getAttribute("data-slot") === "dialog-overlay") return false;
@@ -593,9 +593,9 @@ const documentState = extract((state) => {
         permissionOptionCount: permissionOptions.length,
         checkedPermissionOptions,
         permissionSelectionMatchesTrigger,
-        backgroundSidebarOpen: backgroundSidebar !== null &&
-            visible(window, backgroundSidebar),
-        backgroundSidebarFitsViewport,
+        rightSidebarOpen: rightSidebar !== null &&
+            visible(window, rightSidebar),
+        rightSidebarFitsViewport,
         overlayVisible,
         settingsOpen: settingsDialog !== null && visible(window, settingsDialog),
         viewportWidth: window.innerWidth,
@@ -607,7 +607,7 @@ export const exploration = weighted([
     [8, uiClicks],
     [14, closeDialogs],
     [6, openSettings],
-    [5, toggleBackgroundSidebar],
+    [5, toggleRightSidebar],
     [4, openPermissionMenu],
     [4, openModelMenu],
     [4, openSessionContext],
@@ -695,11 +695,11 @@ export const menusAreBoundedAndDescribed = always(() =>
     )
 );
 
-export const backgroundSidebarMatchesViewport = always(() => {
-    if (!documentState.current.backgroundSidebarFitsViewport) {
+export const rightSidebarMatchesViewport = always(() => {
+    if (!documentState.current.rightSidebarFitsViewport) {
         return false;
     }
-    if (!documentState.current.backgroundSidebarOpen) {
+    if (!documentState.current.rightSidebarOpen) {
         return !documentState.current.overlayVisible;
     }
     return documentState.current.viewportWidth < 1280

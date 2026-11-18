@@ -12,6 +12,7 @@ import type {
 import type { JarvixConfig } from "../../protocol/config.ts";
 import type { JarvixContextUsage } from "../../protocol/context-usage.ts";
 import type { JarvixEvent } from "../../protocol/event.ts";
+import type { JarvixProviderContext } from "../../protocol/provider-context.ts";
 import type {
     PermissionDecision,
     PermissionGrantInput,
@@ -257,7 +258,7 @@ export class Session {
             for await (const event of runtime.llm.stream({
                 ...turn.request,
                 tools: this.registeredTools(),
-                messages: this.history,
+                messages: this.messagesForRequest(runtime.workingDirectories ?? []),
                 signal
             })) {
                 if (signal.aborted) {
@@ -319,20 +320,21 @@ export class Session {
         };
     }
 
+    providerContext(workingDirectories: readonly string[] = []): JarvixProviderContext {
+        return {
+            systemPrompt: SYSTEM_PROMPT,
+            messages: this.messagesForRequest(workingDirectories)
+        };
+    }
+
     contextUsage(
         contextWindow: number,
         workingDirectories: readonly string[] = []
     ): JarvixContextUsage {
-        const messages = this.environmentContextMessage
-            ? this.history
-            : [
-                environmentContextFor(this.meta.permission, workingDirectories),
-                ...this.history
-            ];
         return estimateContextUsage({
             contextWindow,
             systemPrompt: SYSTEM_PROMPT,
-            messages,
+            messages: this.messagesForRequest(workingDirectories),
             tools: this.registeredTools()
         });
     }
@@ -466,18 +468,43 @@ export class Session {
         if (this.environmentContextMessage) {
             return;
         }
-        const message = environmentContextFor(
+        const key = environmentKeyFor(
             this.meta.permission,
             runtime.workingDirectories
         );
-        message.context = "environment";
-        message.environmentKey = environmentKeyFor(
-            this.meta.permission,
-            runtime.workingDirectories
-        );
+        const message = this.createEnvironmentContext(runtime.workingDirectories ?? [], key);
         this.history.unshift(message);
         this.environmentContextMessage = message;
-        this.environmentKey = message.environmentKey;
+        this.environmentKey = key;
+    }
+
+    private messagesForRequest(workingDirectories: readonly string[]): LlmMessage[] {
+        const key = environmentKeyFor(this.meta.permission, workingDirectories);
+        if (!this.environmentContextMessage) {
+            return [
+                this.createEnvironmentContext(workingDirectories, key),
+                ...this.history
+            ];
+        }
+
+        const messages = [...this.history];
+        if (this.environmentKey !== key) {
+            messages.push(
+                environmentReminderFor(this.meta.permission, workingDirectories).persisted
+            );
+        }
+        return messages;
+    }
+
+    private createEnvironmentContext(
+        workingDirectories: readonly string[],
+        key: string
+    ): LlmSystemMessage {
+        return {
+            ...environmentContextFor(this.meta.permission, workingDirectories),
+            context: "environment",
+            environmentKey: key
+        };
     }
 
     private appendEnvironmentReminderIfChanged(

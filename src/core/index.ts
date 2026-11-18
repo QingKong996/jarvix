@@ -5,6 +5,7 @@ import type { JarvixConfig } from "../protocol/config.ts";
 import type { JarvixContextUsage } from "../protocol/context-usage.ts";
 import type { JarvixEvent, JarvixListener } from "../protocol/event.ts";
 import type { JarvixProject } from "../protocol/project.ts";
+import type { JarvixProviderContext } from "../protocol/provider-context.ts";
 import type {
     JarvixSession,
     JarvixSessionContext,
@@ -115,6 +116,11 @@ export class Jarvix {
 
     getPermission(sessionId: string): PermissionMode {
         return this.sessions.require(sessionId).meta.permission;
+    }
+
+    getProviderContext(sessionId: string): JarvixProviderContext {
+        const session = this.sessions.require(sessionId);
+        return session.providerContext(workingDirectoriesFor(session.meta));
     }
 
     setPermission(sessionId: string, permission: PermissionMode): PermissionMode {
