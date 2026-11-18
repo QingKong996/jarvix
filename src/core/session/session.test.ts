@@ -88,7 +88,9 @@ test("uses the configured model, provider credential and reasoning for the reque
         apiKey: "provider-key", models: [{ id: "local-chat", name: "Local Chat", reasoning: true }]
     });
     const getModel = vi.fn(() => ({ ...MODEL, provider: provider.id, id: "local-chat" }));
-    const stream = vi.fn(() => (async function* (): AsyncIterable<LlmStreamEvent> {})());
+    const stream = vi.fn(() => (async function* (): AsyncIterable<LlmStreamEvent> {
+        yield { type: "done", message: assistantMessage() };
+    })());
     await new Session(meta).request("hello", {
         llm: { getModel, stream },
         config: { providers: [provider], selectedModel: { provider: provider.id, id: "local-chat" }, reasoning: "high" },
@@ -119,7 +121,9 @@ test("assembles the final provider context without mutating the session", () => 
 
 test("keeps working directories out of the system prompt and in the leading environment context", async () => {
     const stream = vi.fn((_request: LlmRequest) => (
-        async function* (): AsyncIterable<LlmStreamEvent> {}
+        async function* (): AsyncIterable<LlmStreamEvent> {
+            yield { type: "done", message: assistantMessage() };
+        }
     )());
     await new Session(meta).request("hello", {
         llm: { getModel: () => MODEL, stream },
@@ -135,6 +139,30 @@ test("keeps working directories out of the system prompt and in the leading envi
         context: "environment",
         content: expect.stringContaining("- C:\\workspace-a\n- C:\\workspace-b")
     });
+});
+
+test("reports a model stream that ends without a completion event", async () => {
+    const session = new Session(meta);
+    const events: JarvixEvent[] = [];
+    const stream = vi.fn(() => (async function* (): AsyncIterable<LlmStreamEvent> {
+        yield { type: "start" };
+        yield { type: "text.delta", index: 0, delta: "partial" };
+    })());
+
+    await expect(session.request("hello", {
+        llm: { getModel: () => MODEL, stream },
+        config: TEST_CONFIG,
+        emit: (event) => events.push(event)
+    })).rejects.toThrow("Model response ended without a completion event");
+
+    expect(events).toContainEqual({
+        type: "request.error",
+        error: "Model response ended without a completion event"
+    });
+    expect(session.snapshot().messages).toEqual([expect.objectContaining({
+        role: "user",
+        content: "hello"
+    })]);
 });
 
 test("registers request_permission unless the session has full access", async () => {
