@@ -437,7 +437,6 @@ export function useSessions() {
             return;
         }
         setBusy(true);
-        let naming: Promise<unknown> | undefined;
         let sessionId = initialSessionId;
 
         try {
@@ -457,7 +456,7 @@ export function useSessions() {
             beginTurn(question);
             hasUserMessagesRef.current = true;
             if (shouldAutoName) {
-                naming = bridge.autoNameSession(sessionId, question).catch(() => undefined);
+                void bridge.autoNameSession(sessionId, question).catch(() => undefined);
             }
             try {
                 await bridge.request(question, sessionId);
@@ -470,7 +469,6 @@ export function useSessions() {
             finishRequest();
             requestSessionIdRef.current = null;
             setRunning(false);
-            await naming;
             requestInFlightRef.current = false;
             setBusy(false);
             await refreshSessions();
