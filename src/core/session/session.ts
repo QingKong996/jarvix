@@ -377,7 +377,7 @@ export class Session {
             && this.requestController === null
             && this.pendingTurnMessages.length === 0
             && this.pendingPersistence.length === 0
-            && this.permissions.canRelease()
+            && !this.permissions.hasPending()
             && this.tools.hasActiveWork?.() !== true;
     }
 
@@ -385,7 +385,6 @@ export class Session {
         if (!this.canRelease()) {
             return false;
         }
-        this.permissions.dispose();
         this.tools.dispose();
         this.lastRuntime = null;
         return true;

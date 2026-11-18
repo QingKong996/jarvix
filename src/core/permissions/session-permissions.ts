@@ -112,6 +112,10 @@ export class SessionPermissions {
         ));
     }
 
+    hasPending(): boolean {
+        return this.pending.size > 0;
+    }
+
     canRelease(): boolean {
         return this.pending.size === 0
             && this.enabledDomains.size === 0

@@ -29,6 +29,7 @@ import {
 /** Owns the session instances currently loaded by the app. */
 export class SessionManager {
     private readonly sessions = new Map<string, Session>();
+    private readonly permissions = new Map<string, SessionPermissions>();
     private readonly sandboxPreflight?: SandboxPreflight;
     private readonly shellSessionBudget = new ShellSessionBudget();
 
@@ -95,7 +96,11 @@ export class SessionManager {
             return permission;
         }
         const meta = updateStoredSessionPermission(id, permission);
-        session?.applyPermission(meta.permission);
+        if (session) {
+            session.applyPermission(meta.permission);
+        } else {
+            this.permissions.get(id)?.reset();
+        }
         return meta.permission;
     }
 
@@ -145,8 +150,11 @@ export class SessionManager {
 
     delete(id: string): void {
         const session = this.sessions.get(id);
+        const permissions = this.permissions.get(id);
         deleteSession(id);
         session?.dispose();
+        permissions?.dispose();
+        this.permissions.delete(id);
         this.sessions.delete(id);
     }
 
@@ -164,6 +172,7 @@ export class SessionManager {
             sessions.map((session) => session.shutdown())
         );
         this.sessions.clear();
+        this.disposePermissions();
         const failed = results.find(
             (result): result is PromiseRejectedResult => result.status === "rejected"
         );
@@ -177,10 +186,13 @@ export class SessionManager {
             session.dispose();
         }
         this.sessions.clear();
+        this.disposePermissions();
     }
 
     private track(session: JarvixSession): Session {
-        const permissions = new SessionPermissions();
+        const permissions = this.permissions.get(session.meta.id)
+            ?? new SessionPermissions();
+        this.permissions.set(session.meta.id, permissions);
         const sandboxPolicy = () => permissions.apply(createSandboxPolicy(
             session.meta.permission,
             workingDirectoriesFor(session.meta)
@@ -207,6 +219,13 @@ export class SessionManager {
         );
         this.sessions.set(instance.meta.id, instance);
         return instance;
+    }
+
+    private disposePermissions(): void {
+        for (const permissions of this.permissions.values()) {
+            permissions.dispose();
+        }
+        this.permissions.clear();
     }
 
     private applyContext(session: Session, context: JarvixSessionContext): void {
