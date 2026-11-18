@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterAll, expect, test } from "vitest";
+import { afterAll, expect, test, vi } from "vitest";
 import type { LlmAssistantMessage, LlmUserMessage } from "../../llm/types.ts";
 import { DEFAULT_PERMISSION_MODE } from "../../protocol/permission.ts";
 import type { JarvixSessionMeta } from "../../protocol/session.ts";
@@ -440,6 +440,25 @@ test("listSessionSummaries finds a last message larger than the tail chunk", () 
     }, directory);
 
     expect(listSessionSummaries(directory)[0]?.updatedAt).toBe(timestamp);
+});
+
+test("listSessionSummaries reads a huge final record without repeated buffer concatenation", () => {
+    const directory = join(base, "huge-tail");
+    const session = createSession({ projectId: PROJECT_ID }, "Huge message", directory);
+    const timestamp = 1_700_000_400_000;
+    appendSessionMessage(session.meta.id, {
+        ...userMessage,
+        content: "x".repeat(4 * 1024 * 1024),
+        timestamp
+    }, directory);
+    const concatenate = vi.spyOn(Buffer, "concat");
+
+    try {
+        expect(listSessionSummaries(directory)[0]?.updatedAt).toBe(timestamp);
+        expect(concatenate).not.toHaveBeenCalled();
+    } finally {
+        concatenate.mockRestore();
+    }
 });
 
 test("loadSession rejects headers without a non-empty name", () => {
