@@ -30,6 +30,7 @@ export const REQUEST_PERMISSION_TOOL_DEFINITIONS: readonly LlmToolDefinition[] =
         "Each domain change enables or disables a network host.",
         "Each directory change enables or disables read or write access for an absolute path.",
         "Call this only when the sandbox blocks an operation the user asked for.",
+        "Provide at least one domain or directory change.",
         "The user approves or cancels the request in the app.",
         "Approval applies only to this session and is not saved to disk."
     ].join(" "),
@@ -39,7 +40,7 @@ export const REQUEST_PERMISSION_TOOL_DEFINITIONS: readonly LlmToolDefinition[] =
             domains: {
                 type: "array",
                 maxItems: 64,
-                description: "Network domain changes.",
+                description: "Network domain changes. Omit when only directory access changes are needed.",
                 items: {
                     type: "object",
                     properties: {
@@ -60,7 +61,7 @@ export const REQUEST_PERMISSION_TOOL_DEFINITIONS: readonly LlmToolDefinition[] =
             directories: {
                 type: "array",
                 maxItems: 64,
-                description: "Filesystem directory changes.",
+                description: "Filesystem directory changes. Omit when only domain access changes are needed.",
                 items: {
                     type: "object",
                     properties: {
@@ -84,7 +85,6 @@ export const REQUEST_PERMISSION_TOOL_DEFINITIONS: readonly LlmToolDefinition[] =
                 }
             }
         },
-        required: ["domains", "directories"],
         additionalProperties: false
     }
 }];

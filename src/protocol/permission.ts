@@ -57,8 +57,8 @@ export type PermissionDirectoryChange = z.infer<typeof permissionDirectoryChange
 
 export const permissionGrantInputSchema = z
     .object({
-        domains: z.array(permissionDomainChangeSchema).max(64),
-        directories: z.array(permissionDirectoryChangeSchema).max(64)
+        domains: z.array(permissionDomainChangeSchema).max(64).default([]),
+        directories: z.array(permissionDirectoryChangeSchema).max(64).default([])
     })
     .strict()
     .refine(
