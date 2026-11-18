@@ -20,6 +20,7 @@ import {
     REQUEST_PERMISSION_TOOL,
     type ToolExecutor
 } from "../tools/index.ts";
+import { SessionPermissions } from "../permissions/session-permissions.ts";
 import { estimateContextUsage } from "./context-usage.ts";
 
 vi.mock("./store.ts", () => ({
@@ -1609,6 +1610,59 @@ test("keeps background task events and exit notices after stopping the request",
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
         rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
+});
+
+test("refuses release while tools or session permissions still hold state", () => {
+    let activeWork = true;
+    const dispose = vi.fn();
+    const tools: ToolExecutor = {
+        definitions: [],
+        handles: () => false,
+        hasActiveWork: () => activeWork,
+        execute: async () => {
+            throw new Error("No tools are available");
+        },
+        stop: async () => [],
+        dispose
+    };
+    const permissions = new SessionPermissions();
+    const session = new Session(meta, [], tools, permissions);
+
+    expect(session.canRelease()).toBe(false);
+    expect(session.release()).toBe(false);
+    expect(dispose).not.toHaveBeenCalled();
+
+    activeWork = false;
+    const approved = permissions.begin({
+        domains: [{ action: "enable", domain: "api.example.com" }],
+        directories: []
+    });
+    permissions.respond(approved.request.id, "approved");
+
+    expect(session.canRelease()).toBe(false);
+    expect(session.release()).toBe(false);
+    expect(dispose).not.toHaveBeenCalled();
+
+    permissions.reset();
+
+    expect(session.release()).toBe(true);
+    expect(dispose).toHaveBeenCalledTimes(1);
+});
+
+test("refuses release while a message is waiting for persistence", async () => {
+    persist.mockImplementation(() => {
+        throw new Error("disk full");
+    });
+    const session = new Session(meta);
+
+    await expect(session.request("keep this queued", {
+        llm: fakeLlm(assistantMessage()),
+        config: TEST_CONFIG,
+        emit: () => undefined
+    })).rejects.toThrow("after 2 attempts");
+
+    expect(session.canRelease()).toBe(false);
+    expect(session.release()).toBe(false);
 });
 
 function fakeLlm(message: LlmAssistantMessage): LlmAdapter {

@@ -46,6 +46,10 @@ export class BackgroundTaskManager implements ToolExecutor {
         return this.shell.handles(name);
     }
 
+    hasActiveWork(): boolean {
+        return this.tasks.size > 0;
+    }
+
     async execute(
         call: LlmToolCallBlock,
         observer: ToolExecutionObserver,

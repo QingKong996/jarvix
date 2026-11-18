@@ -81,6 +81,10 @@ export class Jarvix {
         return session ? this.snapshotSession(session) : null;
     }
 
+    releaseSession(sessionId: string): boolean {
+        return this.sessions.releaseIfIdle(sessionId);
+    }
+
     listSessions(): JarvixSessionSummary[] {
         return this.sessions.listSummaries().filter((session) => session.status === "active");
     }

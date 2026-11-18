@@ -88,6 +88,67 @@ test("persists session messages and caches loaded sessions", async () => {
     expect(reloaded.load(session.meta.id)).toBe(loaded);
 });
 
+test("releases idle loaded sessions without deleting their persisted history", async () => {
+    home.path = join(base, "release-home");
+    const manager = new SessionManager();
+    const session = manager.create({}, "Releasable session");
+    const directory = join(home.path, ".jarvix", "sessions");
+    const file = join(directory, `${session.meta.id}.jsonl`);
+
+    await session.request("keep this history", {
+        llm: fakeLlm(),
+        config: TEST_CONFIG,
+        emit: () => undefined
+    });
+
+    expect(existsSync(file)).toBe(true);
+    expect(manager.releaseIfIdle(session.meta.id)).toBe(true);
+    expect(manager.getLoaded(session.meta.id)).toBeUndefined();
+    expect(manager.listLoaded()).toHaveLength(0);
+    expect(existsSync(file)).toBe(true);
+    expect(readFileSync(file, "utf8")).toContain("keep this history");
+
+    const reloaded = manager.load(session.meta.id);
+    expect(reloaded).not.toBe(session);
+    expect(reloaded?.snapshot().messages.map((message) => message.role)).toEqual([
+        "user",
+        "assistant"
+    ]);
+});
+
+test("refuses to release a session while a request is in flight", async () => {
+    home.path = join(base, "release-busy-home");
+    const manager = new SessionManager();
+    const session = manager.create({}, "Busy session");
+    let releaseRequest!: () => void;
+    const gate = new Promise<void>((resolve) => {
+        releaseRequest = resolve;
+    });
+    const stream = vi.fn(() => (async function* (): AsyncIterable<LlmStreamEvent> {
+        yield { type: "start" };
+        await gate;
+        yield { type: "done", message: assistantMessage() };
+    })());
+
+    const request = session.request("stay loaded", {
+        llm: { getModel: () => MODEL, stream },
+        config: TEST_CONFIG,
+        emit: () => undefined
+    });
+    await vi.waitFor(() => {
+        expect(stream).toHaveBeenCalledTimes(1);
+    });
+
+    expect(manager.releaseIfIdle(session.meta.id)).toBe(false);
+    expect(manager.getLoaded(session.meta.id)).toBe(session);
+
+    releaseRequest();
+    await request;
+
+    expect(manager.releaseIfIdle(session.meta.id)).toBe(true);
+    expect(manager.getLoaded(session.meta.id)).toBeUndefined();
+});
+
 test("moves a session between projects and clears the association for temporary sessions", () => {
     home.path = join(base, "move-home");
     const manager = new SessionManager();

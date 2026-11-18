@@ -30,6 +30,12 @@ export class ToolRegistry implements ToolExecutor {
         return this.executors.has(name);
     }
 
+    hasActiveWork(): boolean {
+        return [...new Set(this.executors.values())].some(
+            (executor) => executor.hasActiveWork?.() === true
+        );
+    }
+
     getRegisteredTools(permission: PermissionMode): readonly LlmToolDefinition[] {
         return [...new Set(this.executors.values())].flatMap(
             (executor) => executor.getRegisteredTools?.(permission) ?? executor.definitions

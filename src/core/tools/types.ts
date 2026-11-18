@@ -79,6 +79,7 @@ export type ToolExecutionObserver = {
 export type ToolExecutor = {
     readonly definitions: readonly LlmToolDefinition[];
     getRegisteredTools?(permission: PermissionMode): readonly LlmToolDefinition[];
+    hasActiveWork?(): boolean;
     handles(name: string): boolean;
     execute(
         call: LlmToolCallBlock,

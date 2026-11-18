@@ -370,6 +370,27 @@ export class Session {
         };
     }
 
+    canRelease(): boolean {
+        return !this.running
+            && !this.streamOpen
+            && !this.toolUseOpen
+            && this.requestController === null
+            && this.pendingTurnMessages.length === 0
+            && this.pendingPersistence.length === 0
+            && this.permissions.canRelease()
+            && this.tools.hasActiveWork?.() !== true;
+    }
+
+    release(): boolean {
+        if (!this.canRelease()) {
+            return false;
+        }
+        this.permissions.dispose();
+        this.tools.dispose();
+        this.lastRuntime = null;
+        return true;
+    }
+
     shutdown(): Promise<void> {
         this.shutdownPromise ??= this.shutdownInternal();
         return this.shutdownPromise;
