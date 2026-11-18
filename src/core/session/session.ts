@@ -259,6 +259,7 @@ export class Session {
         }
 
         let completed: LlmAssistantMessage | undefined;
+        let streamErrorReported = false;
         this.streamOpen = true;
         try {
             for await (const event of runtime.llm.stream({
@@ -285,13 +286,20 @@ export class Session {
                     this.toolUseOpen = event.message.stopReason === "toolUse";
                 } else if (event.type === "error") {
                     completed = undefined;
+                    streamErrorReported = true;
                 }
             }
         } finally {
             this.streamOpen = false;
         }
 
-        if (signal.aborted || !completed) {
+        if (signal.aborted) {
+            return "failed";
+        }
+        if (!completed && !streamErrorReported) {
+            throw new Error("Model response ended without a completion event");
+        }
+        if (!completed) {
             return "failed";
         }
 
