@@ -46,6 +46,9 @@
         "placeholder": "Ask a question...",
         "send": "Send",
         "stop": "Stop",
+        "contextUsage": {
+            "label": "About {{used}} of {{limit}} context tokens used ({{percent}}%)"
+        },
         "model": "Model",
         "reasoning": "Reasoning",
         "reasoningLevels": {

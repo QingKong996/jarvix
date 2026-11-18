@@ -122,6 +122,29 @@ test("appendSessionMessage then loadSession round-trips messages and meta", () =
     expect(JSON.parse(lines[2] ?? "")).toEqual({ type: "message", message: assistantMessage });
 });
 
+test("round-trips context reminder and environment markers", () => {
+    const directory = join(base, "context-markers");
+    const created = createSession({ projectId: PROJECT_ID }, SESSION_NAME, directory);
+    const environment = {
+        role: "system" as const,
+        content: "<environment_context>\n- permission: read-only\n</environment_context>",
+        context: "environment" as const,
+        environmentKey: "[\"read-only\",[]]",
+        timestamp: 2
+    };
+    const reminder: LlmUserMessage = {
+        role: "user",
+        content: "<system-reminder>\nThe session environment changed.\n</system-reminder>",
+        context: "system-reminder",
+        timestamp: 3
+    };
+
+    appendSessionMessage(created.meta.id, environment, directory);
+    appendSessionMessage(created.meta.id, reminder, directory);
+
+    expect(loadSession(created.meta.id, directory)?.messages).toEqual([environment, reminder]);
+});
+
 test("loadSession ignores corrupt and blank lines between valid records", () => {
     const directory = join(base, "corrupt");
     const created = createSession({ projectId: PROJECT_ID }, SESSION_NAME, directory);

@@ -6,11 +6,11 @@ import type {
 } from "../../protocol/session.ts";
 import { sessionContextFrom } from "../../protocol/session.ts";
 import type { PermissionMode } from "../../protocol/permission.ts";
-import { loadProject } from "../../project/store.ts";
 import type { SandboxPreflight } from "../permissions/sandbox-launch.ts";
 import { SessionPermissions } from "../permissions/session-permissions.ts";
 import { createSandboxPolicy } from "../permissions/sandbox.ts";
 import { createDefaultTools } from "../tools/index.ts";
+import { workingDirectoriesFor } from "./directories.ts";
 import { Session } from "./session.ts";
 import {
     createSession,
@@ -57,6 +57,10 @@ export class SessionManager {
 
     listArchivedSummaries(): JarvixSessionSummary[] {
         return listArchivedSessionSummaries();
+    }
+
+    listLoaded(): readonly Session[] {
+        return [...this.sessions.values()];
     }
 
     updateContext(id: string, context: JarvixSessionContext): JarvixSessionContext {
@@ -139,11 +143,11 @@ export class SessionManager {
     }
 
     private track(session: JarvixSession): Session {
-        const directories = workingDirectories(session.meta);
+        const directories = workingDirectoriesFor(session.meta);
         const permissions = new SessionPermissions();
         const sandboxPolicy = () => permissions.apply(createSandboxPolicy(
             session.meta.permission,
-            workingDirectories(session.meta)
+            workingDirectoriesFor(session.meta)
         ));
         const instance = new Session(
             session.meta,
@@ -172,11 +176,4 @@ export class SessionManager {
         delete session.meta.workingDirectory;
         Object.assign(session.meta, context);
     }
-}
-
-function workingDirectories(meta: JarvixSession["meta"]): readonly string[] {
-    if (meta.projectId) {
-        return loadProject(meta.projectId)?.workingDirectories ?? [];
-    }
-    return meta.workingDirectory ? [meta.workingDirectory] : [];
 }

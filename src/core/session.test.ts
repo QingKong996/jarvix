@@ -85,7 +85,10 @@ function gatedLlm(seen: LlmMessage[][], gate: Promise<void>): LlmAdapter {
         getModel: () => MODEL,
         stream(request) {
             seen.push([...request.messages]);
-            const question = request.messages[0];
+            const question = request.messages.find((message) => (
+                message.role === "user" &&
+                message.context !== "system-reminder"
+            ));
             const reply = question?.role === "user" ? `reply:${question.content}` : "reply";
             const message = assistantMessage(reply);
             return (async function* (): AsyncIterable<LlmStreamEvent> {
@@ -122,7 +125,7 @@ test("persists each turn and resumes the stored history for the next request", a
     await second.request("second question", stored.meta.id);
 
     expect(requests[1]?.map((message) => message.role))
-        .toEqual(["user", "assistant", "user", "system"]);
+        .toEqual(["system", "user", "assistant", "user"]);
 
     const reloaded = loadSession(stored.meta.id, directory);
     expect(reloaded?.messages.map((message) => message.role)).toEqual(["user", "assistant", "user", "assistant"]);
@@ -161,6 +164,28 @@ test("uses the current configured language when creating a session with a blank 
     expect(jarvix.createSession({ projectId: project.id }, "").meta.name).toBe("Untitled session");
 });
 
+test("refreshes context usage when the selected model changes", () => {
+    home.path = join(base, "context-usage-config-home");
+    const jarvix = new Jarvix({ llm: fakeLlm("ok", []), config: TEST_CONFIG });
+    jarvix.createSession();
+    const windows: number[] = [];
+    jarvix.subscribe((event) => {
+        if (event.type === "context.usage") {
+            windows.push(event.usage.contextWindow);
+        }
+    });
+
+    jarvix.setConfig({
+        ...TEST_CONFIG,
+        providers: [providerConfigSchema.parse({
+            ...TEST_PROVIDER,
+            models: [{ id: MODEL.id, name: MODEL.name, contextWindow: 64_000 }]
+        })]
+    });
+
+    expect(windows).toEqual([64_000]);
+});
+
 test("runs separate sessions in parallel with isolated histories", async () => {
     home.path = join(base, "parallel-home");
     const directory = join(home.path, ".jarvix", "sessions");
@@ -183,7 +208,9 @@ test("runs separate sessions in parallel with isolated histories", async () => {
     const secondRequest = jarvix.request("second", second.meta.id);
 
     await vi.waitFor(() => expect(requests).toHaveLength(2));
-    expect(requests.map((messages) => messages[0]?.content).sort()).toEqual(["first", "second"]);
+    expect(requests.map((messages) => messages.find((message) => (
+        message.role === "user" && message.context !== "system-reminder"
+    ))?.content).sort()).toEqual(["first", "second"]);
     expect(jarvix.loadSession(first.meta.id)?.messages).toHaveLength(1);
     expect(jarvix.loadSession(second.meta.id)?.messages).toHaveLength(1);
 

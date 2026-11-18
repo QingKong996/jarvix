@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { LlmMessage } from "../llm/types.ts";
+import type { JarvixContextUsage } from "./context-usage.ts";
 import type { PermissionMode } from "./permission.ts";
 
 export const SESSION_NAME_MAX_LENGTH = 80;
@@ -47,6 +48,7 @@ export type JarvixSessionMeta = JarvixSessionContext & {
 export type JarvixSession = {
     meta: JarvixSessionMeta;
     messages: LlmMessage[];
+    contextUsage?: JarvixContextUsage;
 };
 
 /** Lightweight session data for the sidebar; messages stay on disk. */

@@ -104,7 +104,21 @@ function hydrateSession(messages: LlmMessage[]): CommittedTurn[] {
     const turns: CommittedTurn[] = [];
     for (const [index, message] of messages.entries()) {
         const id = `history-${index}`;
+        if (message.role === "system" && message.context === "environment") {
+            continue;
+        }
         if (message.role === "user") {
+            if (message.context === "system-reminder") {
+                turns.push({
+                    id,
+                    role: "system",
+                    text: systemReminderText(message.content),
+                    blocks: [],
+                    error: null,
+                    reason: null
+                });
+                continue;
+            }
             turns.push({
                 id,
                 role: "user",
@@ -133,6 +147,11 @@ function hydrateSession(messages: LlmMessage[]): CommittedTurn[] {
         applyHistoryToolResult(turns, message.toolCallId, message.content, message.details, message.isError);
     }
     return turns;
+}
+
+function systemReminderText(content: string): string {
+    const match = /^<system-reminder>\n?([\s\S]*?)\n?<\/system-reminder>$/.exec(content);
+    return match?.[1] ?? content;
 }
 
 function toHistoryBlock(block: LlmContentBlock): CommittedBlock[] {
@@ -225,6 +244,7 @@ function applyEvent(state: TranscriptState, event: JarvixEvent): TranscriptState
         case "backgroundTask.consume":
         case "log":
         case "session.renamed":
+        case "context.usage":
         case "permission.request":
         case "permission.resolved":
             return state;

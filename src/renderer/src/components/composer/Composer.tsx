@@ -5,6 +5,7 @@ import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type { JarvixConfig } from "../../../../protocol/config.ts";
+import type { JarvixContextUsage } from "../../../../protocol/context-usage.ts";
 import type {
     PermissionMode,
     PermissionRequest
@@ -12,6 +13,7 @@ import type {
 import type { JarvixProject } from "../../../../protocol/project.ts";
 import type { JarvixSessionContext } from "../../../../protocol/session.ts";
 import { CHAT_COLUMN, CONTENT_GUTTER } from "../../layout.ts";
+import { ContextUsageRing } from "./ContextUsageRing.tsx";
 import { ComposerModelMenu } from "./ComposerModelMenu.tsx";
 import { ComposerPermissionMenu } from "./ComposerPermissionMenu.tsx";
 import { PermissionRequestDialog } from "./PermissionRequestDialog.tsx";
@@ -23,6 +25,7 @@ type ComposerProps = {
     projects: JarvixProject[];
     sessionContext: JarvixSessionContext;
     sessionPermission: PermissionMode;
+    contextUsage: JarvixContextUsage | null;
     permissionRequest: PermissionRequest | null;
     onSubmit: (question: string) => void;
     onStop: () => void;
@@ -39,6 +42,7 @@ export function Composer({
     projects,
     sessionContext,
     sessionPermission,
+    contextUsage,
     permissionRequest,
     onSubmit,
     onStop,
@@ -168,6 +172,7 @@ export function Composer({
                             />
 
                             <div className="ml-auto flex min-w-0 items-center justify-end gap-1">
+                                <ContextUsageRing usage={contextUsage} />
                                 <ComposerModelMenu
                                     config={config}
                                     disabled={disabled || running || permissionPending}
