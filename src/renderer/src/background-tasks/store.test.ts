@@ -5,7 +5,12 @@ import {
     MAX_TOOL_OUTPUT_CHARS,
     OUTPUT_TRUNCATION_NOTICE
 } from "../../../core/tools/output.ts";
-import { reduceBackgroundTasks } from "./store.ts";
+import {
+    backgroundTasksFor,
+    clearBackgroundTasks,
+    ingestBackgroundTasks,
+    reduceBackgroundTasks
+} from "./store.ts";
 
 test("keeps completed tasks only until their buffered output is consumed", () => {
     const task = snapshot("task-1", "first");
@@ -64,6 +69,26 @@ test("bounds retained task output and tracks discarded characters", () => {
     expect(next[0]?.output).toContain(OUTPUT_TRUNCATION_NOTICE);
     expect(next[0]?.output).toContain("tail\n");
     expect(next[0]?.truncatedCharacters).toBeGreaterThan(0);
+});
+
+test("clears deleted session tasks without affecting other sessions", () => {
+    const deletedTask = snapshot("task-delete", "deleted");
+    const retainedTask = snapshot("task-retain", "retained");
+    ingestBackgroundTasks("session-delete", [{
+        type: "backgroundTask.start",
+        task: deletedTask
+    }]);
+    ingestBackgroundTasks("session-retain", [{
+        type: "backgroundTask.start",
+        task: retainedTask
+    }]);
+
+    clearBackgroundTasks("session-delete");
+
+    expect(backgroundTasksFor("session-delete")).toEqual([]);
+    expect(backgroundTasksFor("session-retain").map((task) => task.id))
+        .toEqual(["task-retain"]);
+    clearBackgroundTasks("session-retain");
 });
 
 function snapshot(id: string, command: string): ToolTaskSnapshot {
