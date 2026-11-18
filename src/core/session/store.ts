@@ -246,7 +246,7 @@ export function loadSession(id: string, directory = defaultSessionDirectory()): 
         }
     }
 
-    return meta ? { meta, messages } : null;
+    return meta?.id === id ? { meta, messages } : null;
 }
 
 /** List session summaries newest first by their last message timestamp. */

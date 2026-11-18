@@ -200,6 +200,27 @@ test("loadSession returns null when the file has no valid session header", () =>
     expect(loadSession("broken", directory)).toBeNull();
 });
 
+test("loadSession returns null when the header id does not match the file id", () => {
+    const directory = join(base, "mismatched-header");
+    mkdirSync(directory, { recursive: true });
+    const meta: JarvixSessionMeta = {
+        type: "session",
+        version: SESSION_FORMAT_VERSION,
+        id: "different-session",
+        name: "Mismatched session",
+        createdAt: 1_700_000_000_000,
+        status: "active",
+        permission: DEFAULT_PERMISSION_MODE
+    };
+    writeFileSync(
+        join(directory, "requested-session.jsonl"),
+        `${JSON.stringify(meta)}\n`,
+        "utf8"
+    );
+
+    expect(loadSession("requested-session", directory)).toBeNull();
+});
+
 test("loadSession returns null for an unknown id", () => {
     const directory = join(base, "unknown");
     mkdirSync(directory, { recursive: true });
