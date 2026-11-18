@@ -211,3 +211,43 @@ test("passes background task notices through system messages", async () => {
 
     expect(JSON.stringify(context?.messages)).toContain("Background task shell-1 exited with code 0.");
 });
+
+test("passes the leading environment snapshot to the provider", async () => {
+    const { faux, adapter, model } = createFixture();
+    let context: Context | undefined;
+    faux.setResponses([
+        (next) => {
+            context = next;
+            return fauxAssistantMessage("done");
+        }
+    ]);
+
+    for await (const _event of adapter.stream({
+        model,
+        systemPrompt: "Base instructions.",
+        messages: [{
+            role: "system",
+            content: "<environment_context>\n- permission: read-only\n</environment_context>",
+            context: "environment",
+            environmentKey: "[\"read-only\",[]]",
+            timestamp: 1
+        }, userMessage("hi")]
+    })) {
+        // Drain the stream; the provider context is captured above.
+    }
+
+    expect(context?.messages.map((message) => message.role)).toEqual([
+        "system",
+        "system",
+        "user"
+    ]);
+    expect(context?.messages[0]).toMatchObject({
+        role: "system",
+        content: "Base instructions."
+    });
+    expect(context?.messages[1]).toMatchObject({
+        role: "system",
+        content: expect.stringContaining("<environment_context>")
+    });
+    expect(context?.messages[2]).toMatchObject({ role: "user", content: "hi" });
+});

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, expect, test, vi } from "vitest";
-import type { LlmAdapter } from "../../llm/index.ts";
+import type { LlmAdapter, LlmRequest } from "../../llm/index.ts";
 import type {
     LlmAssistantMessage,
     LlmMessage,
@@ -20,6 +20,7 @@ import {
     REQUEST_PERMISSION_TOOL,
     type ToolExecutor
 } from "../tools/index.ts";
+import { estimateContextUsage } from "./context-usage.ts";
 
 vi.mock("./store.ts", () => ({
     appendSessionMessage: vi.fn()
@@ -75,8 +76,10 @@ test("uses the configured model, provider credential and reasoning for the reque
     }));
 });
 
-test("adds the session working directories to the system prompt", async () => {
-    const stream = vi.fn(() => (async function* (): AsyncIterable<LlmStreamEvent> {})());
+test("keeps working directories out of the system prompt and in the leading environment context", async () => {
+    const stream = vi.fn((_request: LlmRequest) => (
+        async function* (): AsyncIterable<LlmStreamEvent> {}
+    )());
     await new Session(meta).request("hello", {
         llm: { getModel: () => MODEL, stream },
         config: TEST_CONFIG,
@@ -84,9 +87,13 @@ test("adds the session working directories to the system prompt", async () => {
         emit: () => undefined
     });
 
-    expect(stream).toHaveBeenCalledWith(expect.objectContaining({
-        systemPrompt: expect.stringContaining("C:\\workspace-a\n- C:\\workspace-b")
-    }));
+    const request = stream.mock.calls[0]?.[0];
+    expect(request?.systemPrompt).not.toContain("C:\\workspace-a");
+    expect(request?.messages[0]).toMatchObject({
+        role: "system",
+        context: "environment",
+        content: expect.stringContaining("- C:\\workspace-a\n- C:\\workspace-b")
+    });
 });
 
 test("registers request_permission unless the session has full access", async () => {
@@ -118,7 +125,7 @@ test("registers request_permission unless the session has full access", async ()
     expect(toolNames[2]).not.toContain(REQUEST_PERMISSION_TOOL);
 });
 
-test("appends refreshed access-control context to each request without persisting it", async () => {
+test("keeps one leading environment snapshot and appends changes as persisted user reminders", async () => {
     const requests: LlmMessage[][] = [];
     const llm: LlmAdapter = {
         getModel: () => MODEL,
@@ -143,37 +150,135 @@ test("appends refreshed access-control context to each request without persistin
     session.applyPermission("full-access");
     await session.request("third", runtime);
 
-    const firstContext = requests[0]?.at(-1);
-    const secondContext = requests[1]?.at(-1);
-    const thirdContext = requests[2]?.at(-1);
-    expect(firstContext).toMatchObject({
+    const firstSnapshot = requests[0]?.[0];
+    const secondSnapshot = requests[1]?.[0];
+    const thirdSnapshot = requests[2]?.[0];
+    expect(firstSnapshot).toMatchObject({
         role: "system",
+        context: "environment",
         content: expect.stringContaining("permission: read-only")
     });
-    expect(firstContext).toMatchObject({
+    expect(firstSnapshot).toMatchObject({
         content: expect.stringContaining("writable roots: none")
     });
-    expect(secondContext).toMatchObject({
-        role: "system",
+    expect(secondSnapshot).toBe(firstSnapshot);
+    expect(thirdSnapshot).toBe(firstSnapshot);
+    expect(requests[1]?.at(-1)).toMatchObject({
+        role: "user",
+        context: "system-reminder",
         content: expect.stringContaining("permission: project-read-write")
     });
-    expect(secondContext).toMatchObject({
+    expect(requests[1]?.at(-1)).toMatchObject({
         content: expect.stringContaining("  - C:\\workspace-a\n  - C:\\workspace-b")
     });
-    expect(secondContext).toMatchObject({
+    expect(requests[1]?.at(-1)).toMatchObject({
         content: expect.stringContaining("reads: not restricted by Jarvix")
     });
-    expect(thirdContext).toMatchObject({
-        role: "system",
+    expect(requests[2]?.at(-1)).toMatchObject({
+        role: "user",
+        context: "system-reminder",
         content: expect.stringContaining("sandbox: off")
     });
-    expect(thirdContext).toMatchObject({
+    expect(requests[2]?.at(-1)).toMatchObject({
         content: expect.stringContaining("access: OS permissions only")
     });
-    expect(session.snapshot().messages.some((message) =>
-        message.role === "system"
-        && message.content.startsWith("<environment_context>")
-    )).toBe(false);
+    expect(requests[0]?.at(-1)).toMatchObject({ role: "user", content: "first" });
+    expect(session.snapshot().messages.some((message) => (
+        message.role === "system" && message.context === "environment"
+    )))
+        .toBe(false);
+    expect(persist.mock.calls.some(([, message]) => (
+        message.role === "system" && message.context === "environment"
+    ))).toBe(false);
+});
+
+test("appends working-directory changes without rewriting the leading environment snapshot", async () => {
+    const requests: LlmMessage[][] = [];
+    const llm: LlmAdapter = {
+        getModel: () => MODEL,
+        stream(request) {
+            requests.push([...request.messages]);
+            return (async function* (): AsyncIterable<LlmStreamEvent> {
+                yield { type: "done", message: assistantMessage() };
+            })();
+        }
+    };
+    const session = new Session({ ...meta, permission: "read-only" });
+
+    await session.request("first", {
+        llm,
+        config: TEST_CONFIG,
+        workingDirectories: ["C:\\workspace-a"],
+        emit: () => undefined
+    });
+    await session.request("second", {
+        llm,
+        config: TEST_CONFIG,
+        workingDirectories: ["C:\\workspace-b"],
+        emit: () => undefined
+    });
+
+    const leadingSnapshot = requests[0]?.[0];
+    expect(requests[1]?.[0]).toBe(leadingSnapshot);
+    expect(leadingSnapshot).toMatchObject({
+        role: "system",
+        content: expect.stringContaining("- C:\\workspace-a")
+    });
+    expect(leadingSnapshot).not.toMatchObject({
+        content: expect.stringContaining("- C:\\workspace-b")
+    });
+    expect(requests[1]?.at(-1)).toMatchObject({
+        role: "user",
+        context: "system-reminder",
+        content: expect.stringContaining("- C:\\workspace-b")
+    });
+    expect(requests[1]?.at(-1)).toMatchObject({
+        content: expect.stringMatching(/^<system-reminder>\n/)
+    });
+    expect(persist).toHaveBeenCalledWith(
+        meta.id,
+        expect.objectContaining({
+            role: "user",
+            context: "system-reminder"
+        })
+    );
+});
+
+test("estimates context from the exact message sequence sent to the model", async () => {
+    let sent: LlmRequest | undefined;
+    let firstUsage: ReturnType<Session["contextUsage"]> | undefined;
+    const session = new Session({ ...meta, permission: "read-only" });
+
+    await session.request("hello", {
+        llm: {
+            getModel: () => MODEL,
+            stream(request) {
+                sent = {
+                    ...request,
+                    messages: [...request.messages],
+                    tools: request.tools ? [...request.tools] : undefined
+                };
+                return (async function* (): AsyncIterable<LlmStreamEvent> {
+                    yield { type: "done", message: assistantMessage() };
+                })();
+            }
+        },
+        config: TEST_CONFIG,
+        workingDirectories: ["C:\\workspace-a"],
+        emit: (event) => {
+            if (event.type === "context.usage") {
+                firstUsage ??= event.usage;
+            }
+        }
+    });
+
+    expect(sent).toBeDefined();
+    expect(firstUsage).toEqual(estimateContextUsage({
+        contextWindow: firstUsage?.contextWindow ?? 1,
+        systemPrompt: sent?.systemPrompt,
+        messages: sent?.messages ?? [],
+        tools: sent?.tools
+    }));
 });
 
 test("retries persistence once and dequeues the message on success", async () => {
@@ -248,13 +353,16 @@ test("forwards done before persisting its complete assistant message", async () 
         llm: fakeLlm(assistantMessage()),
         config: TEST_CONFIG,
         emit: (event) => {
+            if (event.type === "context.usage") {
+                return;
+            }
             timeline.push(`event:${event.type}`);
             events.push(event);
         }
     });
 
     expect(timeline).toEqual(["persist:user", "event:done", "persist:assistant"]);
-    expect(events.map((event) => event.type)).toEqual(["done"]);
+    expect(withoutContextUsage(events).map((event) => event.type)).toEqual(["done"]);
 });
 
 test("retains the forwarded done and in-memory message when persistence fails", async () => {
@@ -275,7 +383,7 @@ test("retains the forwarded done and in-memory message when persistence fails", 
     })).rejects.toThrow(/after 2 attempts/);
 
     expect(session.snapshot().messages.map((message) => message.role)).toEqual(["user", "assistant"]);
-    expect(events.map((event) => event.type)).toEqual(["done", "request.error"]);
+    expect(withoutContextUsage(events).map((event) => event.type)).toEqual(["done", "request.error"]);
     expect(persist.mock.calls.filter(([, message]) => message.role === "assistant")).toHaveLength(2);
     expect(events.at(-1)?.type).toBe("request.error");
 });
@@ -298,11 +406,11 @@ test("forwards all events and persists only complete done messages in order", as
         llm: streamLlm((async function* (): AsyncIterable<LlmStreamEvent> {
             yield toolCall;
             yield completed;
-            expect(events).toEqual([toolCall, completed]);
+            expect(withoutContextUsage(events)).toEqual([toolCall, completed]);
             expect(persist.mock.calls.map(([, message]) => message.role)).toEqual(["user", "assistant"]);
             yield nextCompleted;
             yield failed;
-            expect(events).toEqual([toolCall, completed, nextCompleted, failed]);
+            expect(withoutContextUsage(events)).toEqual([toolCall, completed, nextCompleted, failed]);
             expect(session.snapshot().messages).toEqual([
                 expect.objectContaining({ role: "user" }), completed.message, nextCompleted.message
             ]);
@@ -329,7 +437,7 @@ test("retains a completed message when the iterator subsequently throws", async 
 
     expect(session.snapshot().messages.at(-1)).toBe(message);
     expect(persist).toHaveBeenLastCalledWith(meta.id, message);
-    expect(events).toEqual([
+    expect(withoutContextUsage(events)).toEqual([
         { type: "done", message },
         { type: "request.error", error: "stream failed" }
     ]);
@@ -395,7 +503,7 @@ test("executes tool calls, streams tool data, and resumes with the tool result",
         emit: (event) => { events.push(event); }
     });
 
-    expect(events.map((event) => event.type)).toEqual([
+    expect(withoutContextUsage(events).map((event) => event.type)).toEqual([
         "start",
         "done",
         "tool.start",
@@ -404,19 +512,19 @@ test("executes tool calls, streams tool data, and resumes with the tool result",
         "start",
         "done"
     ]);
-    expect(events[3]).toEqual({
+    expect(withoutContextUsage(events)[3]).toEqual({
         type: "tool.output",
         toolCallId: "call-1",
         toolName: "exec_command",
         data: { kind: "shell.exec_command", output: "hi\n" }
     });
     expect(requests[1]?.map((message) => message.role)).toEqual([
+        "system",
         "user",
         "assistant",
-        "toolResult",
-        "system"
+        "toolResult"
     ]);
-    expect(requests[1]?.at(-2)).toMatchObject({
+    expect(requests[1]?.at(-1)).toMatchObject({
         role: "toolResult",
         toolCallId: "call-1",
         toolName: "exec_command",
@@ -481,13 +589,13 @@ test("injects prompts after the active LLM request and before the next round", a
 
     expect(requests).toHaveLength(2);
     expect(requests[1]?.map((message) => message.role)).toEqual([
+        "system",
         "user",
         "assistant",
         "user",
-        "user",
-        "system"
+        "user"
     ]);
-    expect(requests[1]?.slice(-3, -1).map((message) => (
+    expect(requests[1]?.slice(-2).map((message) => (
         message.role === "user" ? message.content : ""
     ))).toEqual(["follow up one", "follow up two"]);
     expect(session.snapshot().messages.map((message) => message.role)).toEqual([
@@ -580,13 +688,13 @@ test("injects prompts after tool execution before the next LLM request", async (
     await request;
 
     expect(requests[1]?.map((message) => message.role)).toEqual([
+        "system",
         "user",
         "assistant",
         "toolResult",
-        "user",
-        "system"
+        "user"
     ]);
-    expect(requests[1]?.at(-2)).toMatchObject({
+    expect(requests[1]?.at(-1)).toMatchObject({
         role: "user",
         content: "after tools"
     });
@@ -674,18 +782,19 @@ test("injects permission notices after tool results before the next LLM request"
     await request;
 
     expect(requests[1]?.map((message) => message.role)).toEqual([
+        "system",
         "user",
         "assistant",
         "toolResult",
-        "system",
         "user",
-        "system"
+        "user"
     ]);
-    expect(requests[1]?.[3]).toMatchObject({
-        role: "system",
-        content: expect.stringContaining('changed from "read-only" to "full-access"')
-    });
     expect(requests[1]?.[4]).toMatchObject({
+        role: "user",
+        context: "system-reminder",
+        content: expect.stringContaining("permission: full-access")
+    });
+    expect(requests[1]?.[5]).toMatchObject({
         role: "user",
         content: "after permission"
     });
@@ -729,14 +838,14 @@ test("records a permission change during the final round without another LLM req
     expect(session.snapshot().messages.map((message) => message.role)).toEqual([
         "user",
         "assistant",
-        "system"
+        "user"
     ]);
     expect(events.filter((event) => event.type === "system.message")).toEqual([
         {
             type: "system.message",
             message: expect.objectContaining({
                 role: "system",
-                content: expect.stringContaining('changed from "read-only" to "full-access"')
+                content: expect.stringContaining("permission: full-access")
             })
         }
     ]);
@@ -848,7 +957,7 @@ test("stops accepting stream events after an abort", async () => {
     });
 
     await vi.waitFor(() => {
-        expect(events).toHaveLength(5);
+        expect(withoutContextUsage(events)).toHaveLength(5);
     });
     expect(session.injectPrompt("should not run", "prompt-aborted")).toBe(true);
     session.abort();
@@ -856,7 +965,7 @@ test("stops accepting stream events after an abort", async () => {
     await request;
 
     expect(requestSignal?.aborted).toBe(true);
-    expect(events.map((event) => event.type)).toEqual([
+    expect(withoutContextUsage(events).map((event) => event.type)).toEqual([
         "start",
         "thinking.start",
         "thinking.delta",
@@ -930,7 +1039,7 @@ test("accepts an in-flight tool result but does not start another round after ab
     await request;
 
     expect(stream).toHaveBeenCalledTimes(1);
-    expect(events.map((event) => event.type)).toEqual([
+    expect(withoutContextUsage(events).map((event) => event.type)).toEqual([
         "done",
         "tool.start",
         "tool.output",
@@ -1167,6 +1276,10 @@ function fakeLlm(message: LlmAssistantMessage): LlmAdapter {
     return streamLlm((async function* (): AsyncIterable<LlmStreamEvent> {
         yield { type: "done", message };
     })());
+}
+
+function withoutContextUsage(events: readonly JarvixEvent[]): JarvixEvent[] {
+    return events.filter((event) => event.type !== "context.usage");
 }
 
 function streamLlm(events: AsyncIterable<LlmStreamEvent>): LlmAdapter {

@@ -46,6 +46,9 @@
         "placeholder": "输入问题...",
         "send": "发送",
         "stop": "终止",
+        "contextUsage": {
+            "label": "上下文已使用约 {{used}} / {{limit}} tokens（{{percent}}%）"
+        },
         "model": "模型",
         "reasoning": "推理等级",
         "reasoningLevels": {

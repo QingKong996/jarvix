@@ -10,6 +10,7 @@ import type {
     LlmUserMessage
 } from "../../llm/index.ts";
 import type { JarvixConfig } from "../../protocol/config.ts";
+import type { JarvixContextUsage } from "../../protocol/context-usage.ts";
 import type { JarvixEvent } from "../../protocol/event.ts";
 import type {
     PermissionDecision,
@@ -28,9 +29,16 @@ import {
 } from "../tools/index.ts";
 import { createToolCallViewData, toToolResultDetails, type ToolCallViewData } from "../tools/view.ts";
 import { SessionPermissions } from "../permissions/session-permissions.ts";
+import { estimateContextUsage } from "./context-usage.ts";
+import {
+    SYSTEM_PROMPT,
+    environmentContextFor,
+    environmentKeyFor,
+    environmentReminderFor,
+    isEnvironmentContextMessage
+} from "./environment.ts";
 import { appendSessionMessage } from "./store.ts";
 
-const SYSTEM_PROMPT = `Respond to the user in Chinese. Current operating system: ${process.platform}.`;
 const PERSIST_ATTEMPTS = 2;
 export const MAX_TOOL_ROUNDS = 32;
 
@@ -45,13 +53,18 @@ type PendingSystemMessage = {
     message: LlmSystemMessage;
 };
 
-type PendingTurnMessage = PendingPrompt | PendingSystemMessage;
+type PendingEnvironmentReminder = {
+    type: "environment";
+};
+
+type PendingTurnMessage = PendingPrompt | PendingSystemMessage | PendingEnvironmentReminder;
 
 type TurnDecision = "continue" | "complete" | "failed";
 
 type TurnContext = {
     runtime: SessionRuntime;
     signal: AbortSignal;
+    contextWindow: number;
     request: Omit<LlmRequest, "messages" | "signal" | "tools">;
 };
 
@@ -77,6 +90,9 @@ export class Session {
     private toolUseOpen = false;
     private requestController: AbortController | null = null;
     private lastRuntime: SessionRuntime | null = null;
+    private contextWindow: number | null = null;
+    private environmentContextMessage: LlmSystemMessage | null = null;
+    private environmentKey: string | null = null;
     private shutdownPromise: Promise<void> | null = null;
 
     constructor(
@@ -87,6 +103,15 @@ export class Session {
     ) {
         this.meta = meta;
         this.history = [...messages];
+        const environmentContext = this.history.find(isEnvironmentContextMessage);
+        if (environmentContext) {
+            this.environmentContextMessage = environmentContext;
+            this.environmentKey = environmentContext.environmentKey ?? null;
+            this.history = [
+                environmentContext,
+                ...this.history.filter((message) => message !== environmentContext)
+            ];
+        }
         this.tools = tools;
         this.permissions = permissions;
     }
@@ -107,6 +132,7 @@ export class Session {
                 throw new Error("No model configured");
             }
             const { selection, model: definition } = resolved;
+            this.contextWindow = definition.contextWindow;
             const provider = runtime.config.providers?.find((item) => item.id === selection.provider);
             const model = runtime.llm.getModel(selection.provider, selection.id);
             if (!model) {
@@ -115,20 +141,27 @@ export class Session {
             const turn: TurnContext = {
                 runtime,
                 signal,
+                contextWindow: definition.contextWindow,
                 request: {
                     model,
-                    systemPrompt: systemPromptFor(runtime.workingDirectories),
+                    systemPrompt: SYSTEM_PROMPT,
                     reasoning: resolveReasoningLevel(definition, runtime.config.reasoning),
                     apiKey: provider?.apiKey
                 }
             };
 
+            this.ensureEnvironmentContext(runtime);
             const questionMessage: LlmUserMessage = {
                 role: "user",
                 content: question,
                 timestamp: Date.now()
             };
             this.append(questionMessage);
+            const environmentReminder = this.appendEnvironmentReminderIfChanged(runtime);
+            if (environmentReminder) {
+                runtime.emit({ type: "system.message", message: environmentReminder });
+            }
+            this.emitContextUsage(turn);
 
             for (let round = 0; ;) {
                 if (signal.aborted) {
@@ -201,17 +234,9 @@ export class Session {
         ) {
             return;
         }
-        this.pendingTurnMessages.push({
-            type: "system",
-            message: {
-                role: "system",
-                content: [
-                    `Permission mode changed from "${previous}" to "${permission}" during this task.`,
-                    "Subsequent tool calls use the new permission mode."
-                ].join(" "),
-                timestamp: Date.now()
-            }
-        });
+        if (!this.pendingTurnMessages.some((pending) => pending.type === "environment")) {
+            this.pendingTurnMessages.push({ type: "environment" });
+        }
     }
 
     respondPermission(requestId: string, decision: PermissionDecision): boolean {
@@ -231,14 +256,8 @@ export class Session {
         try {
             for await (const event of runtime.llm.stream({
                 ...turn.request,
-                tools: this.tools.getRegisteredTools?.(this.meta.permission) ?? this.tools.definitions,
-                messages: [
-                    ...this.history,
-                    environmentContextFor(
-                        this.meta.permission,
-                        runtime.workingDirectories
-                    )
-                ],
+                tools: this.registeredTools(),
+                messages: this.history,
                 signal
             })) {
                 if (signal.aborted) {
@@ -248,6 +267,7 @@ export class Session {
                 if (event.type === "done") {
                     completed = event.message;
                     this.append(event.message);
+                    this.emitContextUsage(turn);
                     this.toolUseOpen = event.message.stopReason === "toolUse";
                 } else if (event.type === "error") {
                     completed = undefined;
@@ -276,6 +296,7 @@ export class Session {
                         break;
                     }
                     await this.executeToolCall(toolCall, runtime, signal);
+                    this.emitContextUsage(turn);
                 }
             } finally {
                 this.toolUseOpen = false;
@@ -294,8 +315,26 @@ export class Session {
     snapshot(): JarvixSession {
         return {
             meta: this.meta,
-            messages: [...this.history]
+            messages: this.history.filter((message) => !isEnvironmentContextMessage(message))
         };
+    }
+
+    contextUsage(
+        contextWindow: number,
+        workingDirectories: readonly string[] = []
+    ): JarvixContextUsage {
+        const messages = this.environmentContextMessage
+            ? this.history
+            : [
+                environmentContextFor(this.meta.permission, workingDirectories),
+                ...this.history
+            ];
+        return estimateContextUsage({
+            contextWindow,
+            systemPrompt: SYSTEM_PROMPT,
+            messages,
+            tools: this.registeredTools()
+        });
     }
 
     shutdown(): Promise<void> {
@@ -419,6 +458,62 @@ export class Session {
         this.completeToolCall(toolCall, result, runtime);
     }
 
+    private registeredTools() {
+        return this.tools.getRegisteredTools?.(this.meta.permission) ?? this.tools.definitions;
+    }
+
+    private ensureEnvironmentContext(runtime: SessionRuntime): void {
+        if (this.environmentContextMessage) {
+            return;
+        }
+        const message = environmentContextFor(
+            this.meta.permission,
+            runtime.workingDirectories
+        );
+        message.context = "environment";
+        message.environmentKey = environmentKeyFor(
+            this.meta.permission,
+            runtime.workingDirectories
+        );
+        this.history.unshift(message);
+        this.environmentContextMessage = message;
+        this.environmentKey = message.environmentKey;
+    }
+
+    private appendEnvironmentReminderIfChanged(
+        runtime: SessionRuntime
+    ): LlmSystemMessage | null {
+        const key = environmentKeyFor(this.meta.permission, runtime.workingDirectories);
+        if (key === this.environmentKey) {
+            return null;
+        }
+
+        const reminder = environmentReminderFor(
+            this.meta.permission,
+            runtime.workingDirectories
+        );
+        this.environmentKey = key;
+        this.append(reminder.persisted);
+        return reminder.display;
+    }
+
+    private emitContextUsage(turn: TurnContext): void {
+        this.emitContextUsageFor(turn.runtime, turn.contextWindow);
+    }
+
+    private emitContextUsageFor(
+        runtime: SessionRuntime,
+        contextWindow: number | null
+    ): void {
+        if (contextWindow === null) {
+            return;
+        }
+        runtime.emit({
+            type: "context.usage",
+            usage: this.contextUsage(contextWindow, runtime.workingDirectories)
+        });
+    }
+
     private async requestSandboxPermission(
         input: PermissionGrantInput,
         runtime: SessionRuntime,
@@ -511,6 +606,8 @@ export class Session {
             if (pending.type === "prompt") {
                 injectedPrompt = true;
                 this.insertPrompt(pending, runtime);
+            } else if (pending.type === "environment") {
+                this.insertEnvironmentReminder(runtime);
             } else {
                 this.insertSystemMessage(pending, runtime);
             }
@@ -525,6 +622,7 @@ export class Session {
             timestamp: Date.now()
         };
         this.append(message);
+        this.emitContextUsageFor(runtime, this.contextWindow);
         runtime.emit({
             type: "prompt.injected",
             promptId: pending.id,
@@ -546,7 +644,17 @@ export class Session {
             });
             return;
         }
+        this.emitContextUsageFor(runtime, this.contextWindow);
         runtime.emit({ type: "system.message", message: pending.message });
+    }
+
+    private insertEnvironmentReminder(runtime: SessionRuntime): void {
+        const reminder = this.appendEnvironmentReminderIfChanged(runtime);
+        if (!reminder) {
+            return;
+        }
+        this.emitContextUsageFor(runtime, this.contextWindow);
+        runtime.emit({ type: "system.message", message: reminder });
     }
 
     private discardPendingPrompts(): void {
@@ -561,11 +669,15 @@ export class Session {
         }
         while (true) {
             const pending = this.pendingTurnMessages[0];
-            if (pending?.type !== "system") {
+            if (!pending || pending.type === "prompt") {
                 break;
             }
             this.pendingTurnMessages.shift();
-            this.insertSystemMessage(pending, runtime);
+            if (pending.type === "environment") {
+                this.insertEnvironmentReminder(runtime);
+            } else {
+                this.insertSystemMessage(pending, runtime);
+            }
         }
     }
 
@@ -600,62 +712,6 @@ export class Session {
             { cause: lastError }
         );
     }
-}
-
-function systemPromptFor(workingDirectories: readonly string[] = []): string {
-    if (workingDirectories.length === 0) {
-        return SYSTEM_PROMPT;
-    }
-    return [
-        SYSTEM_PROMPT,
-        "",
-        "Session working directories:",
-        ...workingDirectories.map((directory) => `- ${directory}`),
-        "Use one of these directories as cwd for shell commands and apply_patch when appropriate."
-    ].join("\n");
-}
-
-function environmentContextFor(
-    permission: PermissionMode,
-    workingDirectories: readonly string[] = []
-): LlmSystemMessage {
-    const writableRoots = permission === "project-read-write" || permission === "auto-review"
-        ? workingDirectories
-        : [];
-    const access = permission === "full-access"
-        ? [
-            `- permission: ${permission}`,
-            "- sandbox: off",
-            "- access: OS permissions only"
-        ]
-        : [
-            `- permission: ${permission}`,
-            "- sandbox: on",
-            writableRoots.length > 0
-                ? "- writes: writable roots and the sandbox's private temp only"
-                : "- writes: denied except the sandbox's private temp",
-            "- reads: not restricted by Jarvix; sandbox/OS rules apply",
-            "- To enable or disable network domains or filesystem read/write access for this session, call request_permission with absolute directory paths.",
-            "- Permission grants are in-memory only and are not restored after Jarvix restarts."
-        ];
-    const writableRootsLine = permission === "full-access"
-        ? null
-        : writableRoots.length === 0
-            ? "- writable roots: none"
-            : "- writable roots:";
-
-    return {
-        role: "system",
-        content: [
-            "<environment_context>",
-            "Access control:",
-            ...access,
-            ...(writableRootsLine === null ? [] : [writableRootsLine]),
-            ...writableRoots.map((root) => `  - ${root}`),
-            "</environment_context>"
-        ].join("\n"),
-        timestamp: Date.now()
-    };
 }
 
 function failedToolResult(toolCall: LlmToolCallBlock, output: string): ToolExecutionResult {

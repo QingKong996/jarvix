@@ -36,6 +36,7 @@ export function App() {
         archivedSessions,
         sessionContext,
         sessionPermission,
+        contextUsage,
         permissionRequest,
         activeSessionId,
         busy,
@@ -156,6 +157,7 @@ export function App() {
                                     projects={projects}
                                     sessionContext={sessionContext}
                                     sessionPermission={sessionPermission}
+                                    contextUsage={contextUsage}
                                     permissionRequest={permissionRequest}
                                     onSubmit={send}
                                     onStop={stop}

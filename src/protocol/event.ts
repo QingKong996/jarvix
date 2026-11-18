@@ -1,6 +1,7 @@
 import type { LlmStreamEvent, LlmSystemMessage } from "../llm/types.ts";
 import type { ToolCallEndReason, ToolTaskEvent } from "../core/tools/types.ts";
 import type { ToolCallOutputDelta, ToolCallViewData } from "../core/tools/view.ts";
+import type { JarvixContextUsage } from "./context-usage.ts";
 import type {
     PermissionDecision,
     PermissionRequest
@@ -50,6 +51,9 @@ export type JarvixEvent = LlmStreamEvent
     type: "prompt.injected";
     promptId: string;
     text: string;
+  } | {
+    type: "context.usage";
+    usage: JarvixContextUsage;
   } | {
     type: "permission.request";
     request: PermissionRequest;

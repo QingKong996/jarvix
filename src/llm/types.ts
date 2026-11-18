@@ -76,6 +76,8 @@ export type LlmUserMessage = {
     role: "user";
     content: string;
     timestamp: number;
+    /** Internal display marker for context appended as a user-role reminder. */
+    context?: "system-reminder";
 };
 
 /**
@@ -120,6 +122,10 @@ export type LlmSystemMessage = {
     content: string;
     timestamp: number;
     notice?: LlmSystemNotice;
+    /** Internal marker for the session's stable leading environment snapshot. */
+    context?: "environment";
+    /** Fingerprint used to detect environment changes without rewriting the snapshot. */
+    environmentKey?: string;
 };
 
 export type LlmMessage = LlmUserMessage | LlmAssistantMessage | LlmToolResultMessage | LlmSystemMessage;

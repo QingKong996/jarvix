@@ -309,3 +309,36 @@ test("renders background task exit notices from events and history", () => {
         text: "Background task exited."
     })]);
 });
+
+test("hides the leading environment snapshot and renders user reminders as system turns", () => {
+    const hydrated = transcriptReducer(initialTranscriptState, {
+        type: "session.loaded",
+        messages: [{
+            role: "system",
+            content: "<environment_context>\n- permission: read-only\n</environment_context>",
+            context: "environment",
+            environmentKey: "[\"read-only\",[]]",
+            timestamp: 1
+        }, {
+            role: "user",
+            content: "hello",
+            timestamp: 2
+        }, {
+            role: "user",
+            content: [
+                "<system-reminder>",
+                "The session environment changed.",
+                "<environment_context>",
+                "- permission: full-access",
+                "</environment_context>",
+                "</system-reminder>"
+            ].join("\n"),
+            context: "system-reminder",
+            timestamp: 3
+        }]
+    });
+
+    expect(hydrated.committed.map((turn) => turn.role)).toEqual(["user", "system"]);
+    expect(hydrated.committed[1]?.text).toContain("permission: full-access");
+    expect(hydrated.committed[1]?.text).not.toContain("<system-reminder>");
+});

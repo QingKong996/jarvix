@@ -1,6 +1,8 @@
 import { createLlm, type LlmAdapter } from "../llm/index.ts";
 import { i18n } from "../i18n/index.ts";
+import type { LlmUserMessage } from "../llm/types.ts";
 import type { JarvixConfig } from "../protocol/config.ts";
+import type { JarvixContextUsage } from "../protocol/context-usage.ts";
 import type { JarvixEvent, JarvixListener } from "../protocol/event.ts";
 import type { JarvixProject } from "../protocol/project.ts";
 import type {
@@ -9,6 +11,7 @@ import type {
     JarvixSessionSummary
 } from "../protocol/session.ts";
 import { sessionContextSchema, sessionNameSchema } from "../protocol/session.ts";
+import { resolveConfiguredModel } from "../protocol/providers.ts";
 import {
     DEFAULT_PERMISSION_MODE,
     type PermissionMode
@@ -19,7 +22,9 @@ import {
     listProjects as listStoredProjects,
     loadProject
 } from "../project/store.ts";
+import { workingDirectoriesFor } from "./session/directories.ts";
 import { SessionManager } from "./session/manager.ts";
+import type { Session } from "./session/session.ts";
 import { generateSessionName } from "./session/naming.ts";
 
 export type JarvixOptions = {
@@ -42,6 +47,9 @@ export class Jarvix {
 
     setConfig(config: JarvixConfig): void {
         this.config = config;
+        for (const session of this.sessions.listLoaded()) {
+            this.emitContextUsage(session);
+        }
     }
 
     createProject(name: string, workingDirectories: readonly string[]): JarvixProject {
@@ -62,11 +70,14 @@ export class Jarvix {
             throw new Error(`Project not found: ${normalizedContext.projectId}`);
         }
         const sessionName = name?.trim() || i18n.t("sessions.untitled", { lng: this.config.language ?? "zh" });
-        return this.sessions.create(normalizedContext, sessionName, permission).snapshot();
+        return this.snapshotSession(
+            this.sessions.create(normalizedContext, sessionName, permission)
+        );
     }
 
     loadSession(sessionId: string): JarvixSession | null {
-        return this.sessions.load(sessionId)?.snapshot() ?? null;
+        const session = this.sessions.load(sessionId);
+        return session ? this.snapshotSession(session) : null;
     }
 
     listSessions(): JarvixSessionSummary[] {
@@ -97,7 +108,9 @@ export class Jarvix {
         if (normalizedContext.projectId && !loadProject(normalizedContext.projectId)) {
             throw new Error(`Project not found: ${normalizedContext.projectId}`);
         }
-        return this.sessions.updateContext(sessionId, normalizedContext);
+        const updated = this.sessions.updateContext(sessionId, normalizedContext);
+        this.emitContextUsage(this.sessions.require(sessionId));
+        return updated;
     }
 
     getPermission(sessionId: string): PermissionMode {
@@ -105,7 +118,9 @@ export class Jarvix {
     }
 
     setPermission(sessionId: string, permission: PermissionMode): PermissionMode {
-        return this.sessions.updatePermission(sessionId, permission);
+        const updated = this.sessions.updatePermission(sessionId, permission);
+        this.emitContextUsage(this.sessions.require(sessionId));
+        return updated;
     }
 
     respondPermission(sessionId: string, requestId: string, approved: boolean): boolean {
@@ -122,7 +137,10 @@ export class Jarvix {
         const session = this.sessions.require(sessionId);
         const currentName = session.meta.name;
         const prompt = firstPrompt?.trim() || session.snapshot().messages
-            .find((message) => message.role === "user")?.content;
+            .find((message): message is LlmUserMessage => (
+                message.role === "user" &&
+                message.context !== "system-reminder"
+            ))?.content;
         if (!prompt) {
             throw new Error("The session has no user prompt to name");
         }
@@ -140,6 +158,32 @@ export class Jarvix {
         }
     }
 
+    private snapshotSession(session: Session): JarvixSession {
+        const snapshot = session.snapshot();
+        const contextUsage = this.contextUsageFor(session);
+        return contextUsage ? { ...snapshot, contextUsage } : snapshot;
+    }
+
+    private contextUsageFor(session: Session): JarvixContextUsage | undefined {
+        const resolved = resolveConfiguredModel(
+            this.config.providers,
+            this.config.selectedModel
+        );
+        return resolved
+            ? session.contextUsage(
+                resolved.model.contextWindow,
+                workingDirectoriesFor(session.meta)
+            )
+            : undefined;
+    }
+
+    private emitContextUsage(session: Session): void {
+        const usage = this.contextUsageFor(session);
+        if (usage) {
+            this.emit(session.meta.id, { type: "context.usage", usage });
+        }
+    }
+
     subscribe(listener: JarvixListener): () => void {
         this.listeners.add(listener);
         return () => {
@@ -149,13 +193,10 @@ export class Jarvix {
 
     async request(question: string, sessionId: string): Promise<void> {
         const session = this.sessions.require(sessionId);
-        const project = session.meta.projectId ? loadProject(session.meta.projectId) : null;
-        const workingDirectories = project?.workingDirectories
-            ?? (session.meta.workingDirectory ? [session.meta.workingDirectory] : []);
         await session.request(question, {
             llm: this.llm,
             config: this.config,
-            workingDirectories,
+            workingDirectories: workingDirectoriesFor(session.meta),
             emit: (event) => this.emit(session.meta.id, event)
         });
     }

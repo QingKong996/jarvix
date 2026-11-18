@@ -467,7 +467,10 @@ function isLlmMessage(value: unknown): value is LlmMessage {
         return false;
     }
     if (value.role === "user") {
-        return typeof value.content === "string";
+        return (
+            typeof value.content === "string" &&
+            (value.context === undefined || value.context === "system-reminder")
+        );
     }
     if (value.role === "assistant") {
         return (
@@ -489,6 +492,12 @@ function isLlmMessage(value: unknown): value is LlmMessage {
     }
     if (value.role === "system") {
         return typeof value.content === "string" && (
+            value.context === undefined ||
+            value.context === "environment"
+        ) && (
+            value.environmentKey === undefined ||
+            typeof value.environmentKey === "string"
+        ) && (
             value.notice === undefined ||
             (
                 isRecord(value.notice) &&

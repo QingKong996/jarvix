@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { JarvixContextUsage } from "../../protocol/context-usage.ts";
 import {
     DEFAULT_PERMISSION_MODE,
-    type PermissionMode
+    type PermissionMode,
+    type PermissionRequest
 } from "../../protocol/permission.ts";
-import type { PermissionRequest } from "../../protocol/permission.ts";
 import type { JarvixProject } from "../../protocol/project.ts";
 import {
     sessionContextFrom,
@@ -36,6 +37,7 @@ export function useSessions() {
     const [sessionPermission, setSessionPermission] = useState<PermissionMode>(
         DEFAULT_PERMISSION_MODE
     );
+    const [contextUsage, setContextUsage] = useState<JarvixContextUsage | null>(null);
     const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
     const [busy, setBusy] = useState(false);
     const [running, setRunning] = useState(false);
@@ -84,6 +86,7 @@ export function useSessions() {
         setActiveSessionId(session?.meta.id ?? null);
         updateContextState(session ? sessionContextFrom(session.meta) : {});
         updatePermissionState(session?.meta.permission ?? DEFAULT_PERMISSION_MODE);
+        setContextUsage(session?.contextUsage ?? null);
         clearPermissionRequest();
         hydrate(session?.messages ?? []);
     }, [clearPermissionRequest, updateContextState, updatePermissionState]);
@@ -130,6 +133,12 @@ export function useSessions() {
         let cancelled = false;
         const unsubscribe = bridge.onEvents((batch) => {
             for (const event of batch.events) {
+                if (
+                    event.type === "context.usage" &&
+                    batch.sessionId === activeSessionIdRef.current
+                ) {
+                    setContextUsage(event.usage);
+                }
                 if (
                     event.type === "permission.request" &&
                     batch.sessionId === activeSessionIdRef.current
@@ -210,6 +219,7 @@ export function useSessions() {
         clearPermissionRequest();
         updateContextState(projectId ? { projectId } : {});
         updatePermissionState(DEFAULT_PERMISSION_MODE);
+        setContextUsage(null);
         hydrate([]);
     }, [busy, clearPermissionRequest, ready, updateContextState, updatePermissionState]);
 
@@ -532,6 +542,7 @@ export function useSessions() {
         archivedSessions,
         sessionContext,
         sessionPermission,
+        contextUsage,
         permissionRequest,
         activeSessionId,
         busy,

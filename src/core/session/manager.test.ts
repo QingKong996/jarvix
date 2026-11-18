@@ -143,10 +143,11 @@ test("notifies an active request when its permission changes", async () => {
     expect(session.snapshot().messages.map((message) => message.role)).toEqual([
         "user",
         "assistant",
-        "system"
+        "user"
     ]);
     expect(session.snapshot().messages.at(-1)).toMatchObject({
-        content: expect.stringContaining('changed from "read-only" to "full-access"')
+        context: "system-reminder",
+        content: expect.stringContaining("permission: full-access")
     });
 });
 
