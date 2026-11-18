@@ -12,6 +12,7 @@ import { afterAll, expect, test, vi } from "vitest";
 import type { LlmAdapter } from "../../llm/index.ts";
 import type { LlmAssistantMessage, LlmModelInfo, LlmStreamEvent } from "../../llm/types.ts";
 import { providerConfigSchema } from "../../protocol/providers.ts";
+import { APPLY_PATCH_TOOL } from "../tools/index.ts";
 import { SessionManager } from "./manager.ts";
 
 const home = vi.hoisted(() => ({ path: "" }));
@@ -175,6 +176,54 @@ test("uses an updated working directory for relative shell commands", async () =
     expect(existsSync(join(firstDirectory, "marker.txt"))).toBe(false);
 });
 
+test("uses an updated working directory for relative apply_patch paths", async () => {
+    home.path = join(base, "patch-cwd-home");
+    const manager = new SessionManager();
+    const firstDirectory = join(base, "patch-cwd-first");
+    const secondDirectory = join(base, "patch-cwd-second");
+    mkdirSync(firstDirectory, { recursive: true });
+    mkdirSync(secondDirectory, { recursive: true });
+    const session = manager.create(
+        { workingDirectory: firstDirectory },
+        "Patch working directory session",
+        "full-access"
+    );
+    manager.updateContext(session.meta.id, {
+        workingDirectory: secondDirectory
+    });
+    let calls = 0;
+    const llm: LlmAdapter = {
+        getModel: () => MODEL,
+        stream(): AsyncIterable<LlmStreamEvent> {
+            return (async function* (): AsyncIterable<LlmStreamEvent> {
+                if (calls++ === 0) {
+                    yield {
+                        type: "done",
+                        message: applyPatchCallMessage()
+                    };
+                    return;
+                }
+                yield { type: "done", message: assistantMessage() };
+            })();
+        }
+    };
+
+    await session.request("create a nested file", {
+        llm,
+        config: TEST_CONFIG,
+        workingDirectories: [secondDirectory],
+        emit: () => undefined
+    });
+
+    const toolResult = session.snapshot().messages.find(
+        (message) => message.role === "toolResult"
+    );
+    expect(toolResult?.isError, toolResult?.content).toBe(false);
+    expect(readFileSync(join(secondDirectory, "nested", "marker.txt"), "utf8"))
+        .toBe("created\n");
+    expect(existsSync(join(firstDirectory, "nested", "marker.txt"))).toBe(false);
+});
+
 test("notifies an active request when its permission changes", async () => {
     home.path = join(base, "permission-home");
     const manager = new SessionManager();
@@ -256,6 +305,27 @@ function toolCallMessage(command: string): LlmAssistantMessage {
                 command,
                 cwd: ".",
                 timeoutMs: 10_000
+            }
+        }],
+        stopReason: "toolUse"
+    };
+}
+
+function applyPatchCallMessage(): LlmAssistantMessage {
+    return {
+        ...assistantMessage(),
+        content: [{
+            type: "toolCall",
+            id: "call-patch-working-directory",
+            name: APPLY_PATCH_TOOL,
+            arguments: {
+                patch: [
+                    "*** Begin Patch",
+                    "*** Add File: nested/marker.txt",
+                    "+created",
+                    "*** End Patch"
+                ].join("\n"),
+                cwd: "."
             }
         }],
         stopReason: "toolUse"

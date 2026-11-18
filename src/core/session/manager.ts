@@ -158,6 +158,7 @@ export class SessionManager {
                     sandboxPreflight: this.sandboxPreflight
                 },
                 applyPatch: {
+                    defaultCwd: () => workingDirectoriesFor(session.meta)[0],
                     sandboxPolicy
                 },
                 requestPermission: {
