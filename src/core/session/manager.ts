@@ -10,6 +10,7 @@ import type { SandboxPreflight } from "../permissions/sandbox-launch.ts";
 import { SessionPermissions } from "../permissions/session-permissions.ts";
 import { createSandboxPolicy } from "../permissions/sandbox.ts";
 import { createDefaultTools } from "../tools/index.ts";
+import { ShellSessionBudget } from "../tools/shell.ts";
 import { workingDirectoriesFor } from "./directories.ts";
 import { Session } from "./session.ts";
 import {
@@ -29,6 +30,7 @@ import {
 export class SessionManager {
     private readonly sessions = new Map<string, Session>();
     private readonly sandboxPreflight?: SandboxPreflight;
+    private readonly shellSessionBudget = new ShellSessionBudget();
 
     constructor(sandboxPreflight?: SandboxPreflight) {
         this.sandboxPreflight = sandboxPreflight;
@@ -190,7 +192,8 @@ export class SessionManager {
                 shell: {
                     defaultCwd: () => workingDirectoriesFor(session.meta)[0],
                     sandboxPolicy,
-                    sandboxPreflight: this.sandboxPreflight
+                    sandboxPreflight: this.sandboxPreflight,
+                    sharedBudget: this.shellSessionBudget
                 },
                 applyPatch: {
                     defaultCwd: () => workingDirectoriesFor(session.meta)[0],

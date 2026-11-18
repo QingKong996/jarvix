@@ -7,6 +7,7 @@ import { createSandboxPolicy } from "../permissions/sandbox.ts";
 import { MAX_TOOL_OUTPUT_CHARS } from "./output.ts";
 import {
     MAX_STDIN_COMMAND_CHARS,
+    ShellSessionBudget,
     ShellTool,
     type ShellSessionExit
 } from "./shell.ts";
@@ -266,6 +267,71 @@ test("bounds retained shell sessions and reuses released slots", async () => {
         expect(released.data.output).toContain("slot-released");
     } finally {
         tool.dispose();
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
+test("bounds retained shell sessions across tool instances with a shared budget", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-shell-shared-limit-"));
+    const script = join(directory, "short-lived.mjs");
+    writeFileSync(script, [
+        "process.stdout.write('ready\\n');",
+        "setTimeout(() => process.exit(0), 300);"
+    ].join("\n"), "utf8");
+    const budget = new ShellSessionBudget(1);
+    const first = new ShellTool({ sharedBudget: budget });
+    const second = new ShellTool({ sharedBudget: budget });
+    tools.push(first, second);
+    const command = process.platform === "win32"
+        ? `& ${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`
+        : `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`;
+
+    try {
+        const started = await first.execute(call("exec_command", {
+            command,
+            cwd: directory,
+            timeoutMs: 75
+        }, "call-shared-limit-first"), { onOutput: () => undefined });
+        const sessionId = started.task?.id;
+        expect(sessionId).toBeTruthy();
+        if (!sessionId) {
+            throw new Error("Expected a background task.");
+        }
+
+        await new Promise<ShellSessionExit>((resolvePromise) => {
+            first.watchSession(sessionId, () => undefined, resolvePromise);
+        });
+        expect(budget.inUse).toBe(1);
+
+        const rejected = await second.execute(call("exec_command", {
+            command: "echo should-not-start",
+            cwd: directory,
+            timeoutMs: 5_000
+        }, "call-shared-limit-rejected"), { onOutput: () => undefined });
+
+        expect(rejected.isError).toBe(true);
+        expect(rejected.task).toBeUndefined();
+        expect(rejected.content).toContain("Application-wide shell session limit reached (1");
+
+        first.releaseSession(sessionId);
+        expect(budget.inUse).toBe(0);
+
+        const releasedCommand = process.platform === "win32"
+            ? "Write-Output shared-slot-released"
+            : "printf shared-slot-released";
+        const released = await second.execute(call("exec_command", {
+            command: releasedCommand,
+            cwd: directory,
+            timeoutMs: 5_000
+        }), { onOutput: () => undefined });
+
+        expect(released.isError).toBe(false);
+        expect(released.data.output).toContain("shared-slot-released");
+        expect(budget.inUse).toBe(0);
+    } finally {
+        first.dispose();
+        second.dispose();
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
         rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
