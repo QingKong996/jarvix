@@ -114,7 +114,7 @@ function toolCallEntry(toolCall: LlmToolCallBlock): ContextMessageEntry {
         ].join("\n"),
         preview: detailPreview(
             toolCall.name,
-            JSON.stringify(toolCall.arguments)
+            previewJson(toolCall.arguments)
         )
     };
 }
@@ -133,6 +133,96 @@ function previewText(value: string, limit = 120): string {
     return text.length > limit
         ? `${text.slice(0, limit).trimEnd()}…`
         : text;
+}
+
+function previewJson(value: unknown): string {
+    const chunks: string[] = [];
+    let length = 0;
+    let truncated = false;
+
+    const append = (text: string): void => {
+        if (truncated) {
+            return;
+        }
+        const remaining = PREVIEW_SCAN_CHARS - length;
+        if (remaining <= 0) {
+            truncated = true;
+            return;
+        }
+        if (text.length > remaining) {
+            chunks.push(text.slice(0, remaining));
+            length += remaining;
+            truncated = true;
+            return;
+        }
+        chunks.push(text);
+        length += text.length;
+    };
+
+    const visit = (current: unknown, depth: number): void => {
+        if (truncated) {
+            return;
+        }
+        if (current === null) {
+            append("null");
+            return;
+        }
+        if (typeof current === "string") {
+            const remaining = PREVIEW_SCAN_CHARS - length;
+            const visible = current.length > remaining
+                ? current.slice(0, Math.max(0, remaining))
+                : current;
+            append(JSON.stringify(visible));
+            if (visible.length < current.length) {
+                truncated = true;
+            }
+            return;
+        }
+        if (typeof current === "number" || typeof current === "boolean") {
+            append(JSON.stringify(current));
+            return;
+        }
+        if (typeof current !== "object" || depth >= 8) {
+            append("null");
+            return;
+        }
+        if (Array.isArray(current)) {
+            append("[");
+            for (let index = 0; index < current.length; index += 1) {
+                if (truncated) {
+                    break;
+                }
+                if (index > 0) {
+                    append(",");
+                }
+                visit(current[index], depth + 1);
+            }
+            append("]");
+            return;
+        }
+
+        append("{");
+        let first = true;
+        for (const key in current) {
+            if (truncated) {
+                break;
+            }
+            if (!Object.prototype.hasOwnProperty.call(current, key)) {
+                continue;
+            }
+            if (!first) {
+                append(",");
+            }
+            first = false;
+            append(JSON.stringify(key));
+            append(":");
+            visit((current as Record<string, unknown>)[key], depth + 1);
+        }
+        append("}");
+    };
+
+    visit(value, 0);
+    return `${chunks.join("")}${truncated ? "…" : ""}`;
 }
 
 const PREVIEW_SCAN_CHARS = 4_096;

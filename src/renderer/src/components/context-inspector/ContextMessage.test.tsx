@@ -105,4 +105,43 @@ describe("ContextMessage", () => {
         expect(html).not.toContain(hiddenTail);
         expect(html).not.toContain("<pre");
     });
+
+    test("bounds tool argument previews without visiting properties past the limit", () => {
+        const arguments_ = {
+            command: "x".repeat(8_000),
+            get beyondPreview() {
+                throw new Error("preview traversed the full argument object");
+            }
+        };
+
+        const entries = contextMessagesFor({
+            systemPrompt: "",
+            messages: [{
+                role: "assistant",
+                content: [{
+                    type: "toolCall",
+                    id: "call-large",
+                    name: "write_stdin",
+                    arguments: arguments_
+                }],
+                provider: "test",
+                model: "test",
+                api: "test",
+                usage: {
+                    inputTokens: 0,
+                    outputTokens: 0,
+                    cacheReadTokens: 0,
+                    cacheWriteTokens: 0,
+                    totalTokens: 0,
+                    cost: 0
+                },
+                stopReason: "toolUse",
+                timestamp: 1
+            }]
+        });
+        const preview = entries.find((entry) => entry.kind === "toolCall")?.preview;
+
+        expect(preview).toContain("write_stdin");
+        expect(preview?.length).toBeLessThan(200);
+    });
 });
