@@ -188,6 +188,20 @@ test("loadSession ignores corrupt and blank lines between valid records", () => 
     });
 });
 
+test("appendSessionMessage isolates a partial trailing record", () => {
+    const directory = join(base, "partial-tail");
+    const created = createSession({ projectId: PROJECT_ID }, SESSION_NAME, directory);
+    const file = sessionFile(created.meta.id, directory);
+    appendFileSync(file, '{"type":"message","message":{"role":"user",', "utf8");
+
+    appendSessionMessage(created.meta.id, assistantMessage, directory);
+
+    expect(loadSession(created.meta.id, directory)).toEqual({
+        meta: created.meta,
+        messages: [assistantMessage]
+    });
+});
+
 test("loadSession returns null when the file has no valid session header", () => {
     const directory = join(base, "no-header");
     mkdirSync(directory, { recursive: true });
