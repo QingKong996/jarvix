@@ -8,6 +8,7 @@ import type {
     SandboxRunnerInvocation,
     SandboxRunnerMessage
 } from "./sandbox-protocol.ts";
+import { rememberSandboxViolation } from "./violations.ts";
 
 if (process.env.JARVIX_SANDBOX_RUNNER === "1") {
     void runSandboxRunner(process.argv[2]).catch((error: unknown) => {
@@ -36,11 +37,7 @@ async function runSandboxRunner(invocationPath: string | undefined): Promise<voi
         const violations = store.getViolationsForCommand(commandId)
             .filter((violation) => {
                 const signature = violationSignature(violation);
-                if (seenViolations.has(signature)) {
-                    return false;
-                }
-                seenViolations.add(signature);
-                return true;
+                return rememberSandboxViolation(seenViolations, signature);
             })
             .map((violation) => ({
                 line: violation.line,
