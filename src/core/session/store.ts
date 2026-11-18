@@ -5,7 +5,6 @@ import {
     fstatSync,
     mkdirSync,
     openSync,
-    readFileSync,
     readdirSync,
     readSync,
     renameSync,
@@ -41,6 +40,7 @@ export const SESSION_FORMAT_VERSION = 3;
 const SESSION_FILE_EXTENSION = ".jsonl";
 const SESSION_FILE_MODE = 0o600;
 const SESSION_HEADER_CHUNK_SIZE = 4 * 1024;
+const SESSION_LOAD_CHUNK_SIZE = 64 * 1024;
 const SESSION_TAIL_CHUNK_SIZE = 64 * 1024;
 const SESSION_COPY_CHUNK_SIZE = 64 * 1024;
 
@@ -298,30 +298,65 @@ export function appendSessionMessage(id: string, message: LlmMessage, directory 
 /** Load a session, or null when the file is unreadable or has no valid session header. */
 export function loadSession(id: string, directory = defaultSessionDirectory()): JarvixSession | null {
     const file = sessionFile(id, directory);
-    let content: string;
+    let descriptor: number;
     try {
-        content = readFileSync(file, "utf8");
+        descriptor = openSync(file, "r");
     } catch {
         return null;
     }
 
-    let meta: JarvixSessionMeta | null = null;
+    const state: { meta: JarvixSessionMeta | null } = { meta: null };
     const messages: LlmMessage[] = [];
-    for (const line of content.split("\n")) {
-        const record = parseRecord(line);
+    const pending: Buffer[] = [];
+    const consume = (line: Buffer): void => {
+        const record = parseRecord(line.toString("utf8"));
         if (record === undefined) {
-            continue;
+            return;
         }
-        if (!meta) {
-            meta = parseSessionMeta(record);
-            continue;
+        if (!state.meta) {
+            state.meta = parseSessionMeta(record);
+            return;
         }
         if (isSessionMessage(record)) {
             messages.push(record.message);
         }
+    };
+
+    try {
+        while (true) {
+            const buffer = Buffer.allocUnsafe(SESSION_LOAD_CHUNK_SIZE);
+            const bytesRead = readSync(descriptor, buffer, 0, buffer.length, null);
+            if (bytesRead === 0) {
+                break;
+            }
+            const chunk = buffer.subarray(0, bytesRead);
+            let start = 0;
+            while (start < bytesRead) {
+                const newline = chunk.indexOf(0x0a, start);
+                if (newline === -1) {
+                    pending.push(chunk.subarray(start));
+                    break;
+                }
+                if (pending.length === 0) {
+                    consume(chunk.subarray(start, newline));
+                } else {
+                    pending.push(chunk.subarray(start, newline));
+                    consume(Buffer.concat(pending));
+                    pending.length = 0;
+                }
+                start = newline + 1;
+            }
+        }
+        if (pending.length > 0) {
+            consume(Buffer.concat(pending));
+        }
+    } catch {
+        return null;
+    } finally {
+        closeSync(descriptor);
     }
 
-    return meta?.id === id ? { meta, messages } : null;
+    return state.meta?.id === id ? { meta: state.meta, messages } : null;
 }
 
 /** List session summaries newest first by their last message timestamp. */

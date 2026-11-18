@@ -44,8 +44,10 @@ test("metadata updates stream large histories without reading them into memory",
     const meta = updateSessionName(created.meta.id, "Renamed large session", base);
 
     expect(readFileSyncCalls).toEqual([]);
-    expect(loadSession(created.meta.id, base)).toEqual({
+    const loaded = loadSession(created.meta.id, base);
+    expect(loaded).toEqual({
         meta,
         messages: [message]
     });
+    expect(readFileSyncCalls).toEqual([]);
 });
