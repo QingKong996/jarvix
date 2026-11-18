@@ -42,6 +42,19 @@ export class MainWindowController {
         }
     }
 
+    focus(): void {
+        const window = this.current;
+        if (!window) {
+            this.ensureOpen();
+            return;
+        }
+        if (window.isMinimized()) {
+            window.restore();
+        }
+        window.show();
+        window.focus();
+    }
+
     assertSender(event: IpcMainInvokeEvent): void {
         if (event.sender !== this.current?.webContents) {
             throw new Error("Unexpected IPC sender");
