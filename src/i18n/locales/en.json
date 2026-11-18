@@ -47,7 +47,8 @@
         "send": "Send",
         "stop": "Stop",
         "contextUsage": {
-            "label": "About {{used}} of {{limit}} context tokens used ({{percent}}%)"
+            "label": "About {{used}} of {{limit}} context tokens used ({{percent}}%)",
+            "omitted": "{{count}} older messages will be omitted"
         },
         "model": "Model",
         "reasoning": "Reasoning",
