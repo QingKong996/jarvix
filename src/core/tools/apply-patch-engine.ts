@@ -13,6 +13,7 @@ import type {
 } from "./apply-patch-parser.ts";
 
 type LineEnding = "\n" | "\r\n" | "\r";
+const MAX_PATCH_FILE_BYTES = 16 * 1024 * 1024;
 
 type SourceLine = {
     text: string;
@@ -252,8 +253,18 @@ function applyUpdate(
 ): AppliedFile {
     let originalContents: string;
     try {
+        const size = statSync(path).size;
+        if (size > MAX_PATCH_FILE_BYTES) {
+            throw new Error(
+                `Refusing to update ${path}: ${formatBytes(size)} exceeds the `
+                + `${formatBytes(MAX_PATCH_FILE_BYTES)} limit.`
+            );
+        }
         originalContents = readFileSync(path, "utf8");
     } catch (error) {
+        if (error instanceof Error && error.message.startsWith("Refusing to update ")) {
+            throw error;
+        }
         throw new Error(`Failed to read file to update ${path}: ${errorMessage(error)}`);
     }
 
@@ -510,4 +521,8 @@ function assertDeleteTargetIsFile(path: string): void {
 
 function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+}
+
+function formatBytes(bytes: number): string {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }

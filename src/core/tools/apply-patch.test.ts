@@ -3,6 +3,7 @@ import {
     mkdtempSync,
     readFileSync,
     rmSync,
+    truncateSync,
     writeFileSync
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,6 +16,31 @@ import {
     ApplyPatchTool,
     createDefaultTools
 } from "./index.ts";
+
+test("rejects updates to files above the safe size limit", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-apply-patch-large-"));
+    const tool = new ApplyPatchTool();
+    const file = join(directory, "large.txt");
+    try {
+        writeFileSync(file, "old\n", "utf8");
+        truncateSync(file, 16 * 1024 * 1024 + 1);
+
+        const result = await tool.execute(call(directory, [
+            "*** Begin Patch",
+            "*** Update File: large.txt",
+            "@@",
+            "-old",
+            "+new",
+            "*** End Patch"
+        ]), { onOutput: () => undefined });
+
+        expect(result.isError).toBe(true);
+        expect(result.content).toContain("exceeds the 16.0 MiB limit");
+    } finally {
+        tool.dispose();
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
 
 test("applies add, update, move, and delete hunks", async () => {
     const directory = mkdtempSync(join(tmpdir(), "jarvix-apply-patch-"));
