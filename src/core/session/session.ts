@@ -428,7 +428,6 @@ export class Session {
                                 endReason: "exited"
                             });
                             if (
-                                !signal.aborted &&
                                 unreadOutput.length > 0 &&
                                 !this.backgroundExitNotices.has(taskId)
                             ) {
@@ -443,9 +442,7 @@ export class Session {
                             }
                         },
                         onTaskEvent: (event) => {
-                            if (!signal.aborted) {
-                                runtime.emit(event);
-                            }
+                            runtime.emit(event);
                         },
                         requestPermission: (request) =>
                             this.requestSandboxPermission(request, runtime, signal)
