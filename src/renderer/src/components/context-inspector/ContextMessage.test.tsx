@@ -88,4 +88,21 @@ describe("ContextMessage", () => {
         expect(html).not.toContain("<details open");
         expect(html).toContain("exec_command · {&quot;command&quot;:&quot;pwd&quot;}");
     });
+
+    test("defers the full body until the message is expanded", () => {
+        const hiddenTail = `${"x".repeat(200)}hidden-tail`;
+        const html = renderToStaticMarkup(
+            <I18nextProvider i18n={i18n}>
+                <ContextMessage entry={{
+                    kind: "toolResult",
+                    text: () => hiddenTail,
+                    preview: "earlier output"
+                }} />
+            </I18nextProvider>
+        );
+
+        expect(html).toContain("earlier output");
+        expect(html).not.toContain(hiddenTail);
+        expect(html).not.toContain("<pre");
+    });
 });

@@ -14,7 +14,7 @@ export type ContextMessageKind =
 
 export type ContextMessageEntry = {
     kind: ContextMessageKind;
-    text: string;
+    text(): string;
     preview: string;
 };
 
@@ -22,7 +22,7 @@ export function contextMessagesFor(context: JarvixProviderContext): ContextMessa
     const systemPrompt = context.systemPrompt
         ? [{
             kind: "system" as const,
-            text: context.systemPrompt,
+            text: () => context.systemPrompt,
             preview: previewText(context.systemPrompt)
         }]
         : [];
@@ -37,14 +37,14 @@ function messageEntries(message: LlmMessage): ContextMessageEntry[] {
     if (message.role === "system" || message.role === "user") {
         return [{
             kind: message.role,
-            text: message.content,
+            text: () => message.content,
             preview: previewText(message.content)
         }];
     }
     if (message.role === "toolResult") {
         return [{
             kind: "toolResult",
-            text: message.content,
+            text: () => message.content,
             preview: detailPreview(message.toolName, message.content)
         }];
     }
@@ -59,10 +59,11 @@ function assistantEntries(blocks: readonly LlmContentBlock[]): ContextMessageEnt
         if (assistantBlocks.length === 0) {
             return;
         }
+        const blocksInEntry = assistantBlocks;
         entries.push({
             kind: "assistant",
-            text: assistantBlocks.map(assistantBlockText).filter(Boolean).join("\n\n"),
-            preview: assistantPreview(assistantBlocks)
+            text: () => blocksInEntry.map(assistantBlockText).filter(Boolean).join("\n\n"),
+            preview: assistantPreview(blocksInEntry)
         });
         assistantBlocks = [];
     };
@@ -105,12 +106,11 @@ function assistantPreview(blocks: readonly LlmContentBlock[]): string {
 }
 
 function toolCallEntry(toolCall: LlmToolCallBlock): ContextMessageEntry {
-    const argumentsText = JSON.stringify(toolCall.arguments, null, 2);
     return {
         kind: "toolCall",
-        text: [
+        text: () => [
             toolCall.name,
-            argumentsText
+            JSON.stringify(toolCall.arguments, null, 2)
         ].join("\n"),
         preview: detailPreview(
             toolCall.name,
@@ -129,8 +129,10 @@ function detailPreview(name: string, value: string): string {
 }
 
 function previewText(value: string, limit = 120): string {
-    const text = value.replace(/\s+/g, " ").trim();
+    const text = value.slice(0, PREVIEW_SCAN_CHARS).replace(/\s+/g, " ").trim();
     return text.length > limit
         ? `${text.slice(0, limit).trimEnd()}…`
         : text;
 }
+
+const PREVIEW_SCAN_CHARS = 4_096;
