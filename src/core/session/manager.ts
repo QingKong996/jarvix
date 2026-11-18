@@ -143,7 +143,6 @@ export class SessionManager {
     }
 
     private track(session: JarvixSession): Session {
-        const directories = workingDirectoriesFor(session.meta);
         const permissions = new SessionPermissions();
         const sandboxPolicy = () => permissions.apply(createSandboxPolicy(
             session.meta.permission,
@@ -154,7 +153,7 @@ export class SessionManager {
             session.messages,
             createDefaultTools({
                 shell: {
-                    defaultCwd: directories[0],
+                    defaultCwd: () => workingDirectoriesFor(session.meta)[0],
                     sandboxPolicy,
                     sandboxPreflight: this.sandboxPreflight
                 },
