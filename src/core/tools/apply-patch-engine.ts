@@ -30,6 +30,32 @@ type AppliedFile = {
     newContents: string;
 };
 
+type PatchOperation =
+    | {
+        kind: "add";
+        path: string;
+        displayPath: string;
+        contents: string;
+    }
+    | {
+        kind: "delete";
+        path: string;
+        displayPath: string;
+    }
+    | {
+        kind: "update";
+        path: string;
+        displayPath: string;
+        contents: string;
+    }
+    | {
+        kind: "move";
+        source: string;
+        destination: string;
+        displayPath: string;
+        contents: string;
+    };
+
 export type AffectedPaths = {
     added: string[];
     modified: string[];
@@ -87,37 +113,35 @@ export async function applyParsedPatch(
         deleted: [],
         aborted: false
     };
+    const operations = prepareOperations(patch, baseDirectory);
 
-    for (const hunk of patch.hunks) {
+    for (const operation of operations) {
         await yieldForCancellation(signal);
         if (signal?.aborted) {
             affected.aborted = true;
             return affected;
         }
 
-        const target = resolve(baseDirectory, hunk.path);
-        switch (hunk.kind) {
+        switch (operation.kind) {
             case "add": {
-                createFile(target, hunk.contents);
-                affected.added.push(hunk.path);
+                createFile(operation.path, operation.contents);
+                affected.added.push(operation.displayPath);
                 break;
             }
             case "delete": {
-                deleteFile(target);
-                affected.deleted.push(hunk.path);
+                deleteFile(operation.path);
+                affected.deleted.push(operation.displayPath);
                 break;
             }
             case "update": {
-                const applied = applyUpdate(target, hunk.chunks);
-                if (hunk.movePath === null) {
-                    writeFile(target, applied.newContents, "Failed to write file");
-                    affected.modified.push(hunk.path);
-                    break;
-                }
-                const destination = resolve(baseDirectory, hunk.movePath);
-                createFile(destination, applied.newContents);
-                deleteFile(target, "Failed to remove original");
-                affected.modified.push(hunk.movePath);
+                writeFile(operation.path, operation.contents, "Failed to write file");
+                affected.modified.push(operation.displayPath);
+                break;
+            }
+            case "move": {
+                createFile(operation.destination, operation.contents);
+                deleteFile(operation.source, "Failed to remove original");
+                affected.modified.push(operation.displayPath);
                 break;
             }
         }
@@ -126,6 +150,48 @@ export async function applyParsedPatch(
     await yieldForCancellation(signal);
     affected.aborted = signal?.aborted ?? false;
     return affected;
+}
+
+function prepareOperations(
+    patch: ParsedApplyPatch,
+    baseDirectory: string
+): PatchOperation[] {
+    return patch.hunks.map((hunk) => {
+        const target = resolve(baseDirectory, hunk.path);
+        if (hunk.kind === "add") {
+            return {
+                kind: "add",
+                path: target,
+                displayPath: hunk.path,
+                contents: hunk.contents
+            };
+        }
+        if (hunk.kind === "delete") {
+            assertDeleteTargetIsFile(target);
+            return {
+                kind: "delete",
+                path: target,
+                displayPath: hunk.path
+            };
+        }
+
+        const applied = applyUpdate(target, hunk.chunks);
+        if (hunk.movePath === null) {
+            return {
+                kind: "update",
+                path: target,
+                displayPath: hunk.path,
+                contents: applied.newContents
+            };
+        }
+        return {
+            kind: "move",
+            source: target,
+            destination: resolve(baseDirectory, hunk.movePath),
+            displayPath: hunk.movePath,
+            contents: applied.newContents
+        };
+    });
 }
 
 /** Format the git-style summary returned by OpenAI's apply_patch implementation. */
@@ -429,12 +495,16 @@ function createFile(path: string, contents: string): void {
 
 function deleteFile(path: string, context = "Failed to delete file"): void {
     try {
-        if (statSync(path).isDirectory()) {
-            throw new Error("path is a directory");
-        }
+        assertDeleteTargetIsFile(path);
         rmSync(path);
     } catch (error) {
         throw new Error(`${context} ${path}: ${errorMessage(error)}`);
+    }
+}
+
+function assertDeleteTargetIsFile(path: string): void {
+    if (statSync(path).isDirectory()) {
+        throw new Error("path is a directory");
     }
 }
 
