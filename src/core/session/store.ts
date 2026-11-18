@@ -214,7 +214,8 @@ function writeSessionMeta(file: string, meta: JarvixSessionMeta): void {
 /** Append one message to an existing session file as a new JSONL line. */
 export function appendSessionMessage(id: string, message: LlmMessage, directory = defaultSessionDirectory()): void {
     const record: SessionMessageRecord = { type: "message", message };
-    appendFileSync(sessionFile(id, directory), serializeRecord(record), {
+    const file = sessionFile(id, directory);
+    appendFileSync(file, `${trailingRecordSeparator(file)}${serializeRecord(record)}`, {
         encoding: "utf8",
         mode: SESSION_FILE_MODE
     });
@@ -402,6 +403,21 @@ function readSessionMeta(file: string): JarvixSessionMeta | null {
 
 function serializeRecord(record: SessionRecord): string {
     return `${JSON.stringify(record)}\n`;
+}
+
+function trailingRecordSeparator(file: string): string {
+    const descriptor = openSync(file, "r");
+    try {
+        const size = fstatSync(descriptor).size;
+        if (size === 0) {
+            return "";
+        }
+        const lastByte = Buffer.allocUnsafe(1);
+        readSync(descriptor, lastByte, 0, 1, size - 1);
+        return lastByte[0] === 0x0a ? "" : "\n";
+    } finally {
+        closeSync(descriptor);
+    }
 }
 
 function parseRecord(line: string): unknown {
