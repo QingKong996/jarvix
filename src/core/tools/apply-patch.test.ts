@@ -278,6 +278,60 @@ test("rejects an apply_patch move whose destination is outside the workspace", a
     }
 });
 
+test("rejects move destinations that collide with another target", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-apply-patch-collision-"));
+    const tool = new ApplyPatchTool();
+    try {
+        writeFileSync(join(directory, "source.txt"), "source\n", "utf8");
+        writeFileSync(join(directory, "destination.txt"), "original\n", "utf8");
+
+        const result = await tool.execute(call(directory, [
+            "*** Begin Patch",
+            "*** Add File: destination.txt",
+            "+replacement",
+            "*** Update File: source.txt",
+            "*** Move to: destination.txt",
+            "@@",
+            "-source",
+            "+moved",
+            "*** End Patch"
+        ]), { onOutput: () => undefined });
+
+        expect(result.isError).toBe(true);
+        expect(result.content).toContain("multiple operations target");
+        expect(readFileSync(join(directory, "source.txt"), "utf8")).toBe("source\n");
+        expect(readFileSync(join(directory, "destination.txt"), "utf8")).toBe("original\n");
+    } finally {
+        tool.dispose();
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
+test("rejects a move whose destination is its source", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-apply-patch-self-move-"));
+    const tool = new ApplyPatchTool();
+    try {
+        writeFileSync(join(directory, "source.txt"), "source\n", "utf8");
+
+        const result = await tool.execute(call(directory, [
+            "*** Begin Patch",
+            "*** Update File: source.txt",
+            "*** Move to: source.txt",
+            "@@",
+            "-source",
+            "+changed",
+            "*** End Patch"
+        ]), { onOutput: () => undefined });
+
+        expect(result.isError).toBe(true);
+        expect(result.content).toContain("multiple operations target");
+        expect(readFileSync(join(directory, "source.txt"), "utf8")).toBe("source\n");
+    } finally {
+        tool.dispose();
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
 function call(cwd: string, patchLines: string[]): LlmToolCallBlock {
     return {
         type: "toolCall",
