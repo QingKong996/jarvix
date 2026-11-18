@@ -11,6 +11,7 @@ import {
     renameSync,
     statSync,
     unlinkSync,
+    writeSync,
     writeFileSync
 } from "node:fs";
 import { homedir } from "node:os";
@@ -41,6 +42,7 @@ const SESSION_FILE_EXTENSION = ".jsonl";
 const SESSION_FILE_MODE = 0o600;
 const SESSION_HEADER_CHUNK_SIZE = 4 * 1024;
 const SESSION_TAIL_CHUNK_SIZE = 64 * 1024;
+const SESSION_COPY_CHUNK_SIZE = 64 * 1024;
 
 type SessionMessageRecord = {
     type: "message";
@@ -191,15 +193,21 @@ export function deleteSession(id: string, directory = defaultSessionDirectory())
 }
 
 function writeSessionMeta(file: string, meta: JarvixSessionMeta): void {
-    const content = readFileSync(file, "utf8");
-    const newline = content.indexOf("\n");
-    const remainder = newline === -1 ? "" : content.slice(newline + 1);
     const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
     try {
-        writeFileSync(temporary, `${serializeRecord(meta)}${remainder}`, {
-            encoding: "utf8",
-            mode: SESSION_FILE_MODE
-        });
+        const source = openSync(file, "r");
+        try {
+            const sourceMode = fstatSync(source).mode & 0o777;
+            const target = openSync(temporary, "wx", sourceMode || SESSION_FILE_MODE);
+            try {
+                writeAll(target, Buffer.from(serializeRecord(meta), "utf8"));
+                copySessionBody(source, target);
+            } finally {
+                closeSync(target);
+            }
+        } finally {
+            closeSync(source);
+        }
         renameSync(temporary, file);
     } catch (error) {
         try {
@@ -208,6 +216,47 @@ function writeSessionMeta(file: string, meta: JarvixSessionMeta): void {
             // The temporary file may not have been created.
         }
         throw error;
+    }
+}
+
+function copySessionBody(source: number, target: number): void {
+    const buffer = Buffer.allocUnsafe(SESSION_COPY_CHUNK_SIZE);
+    let copyingBody = false;
+    while (true) {
+        const bytesRead = readSync(source, buffer, 0, buffer.length, null);
+        if (bytesRead === 0) {
+            return;
+        }
+        const chunk = buffer.subarray(0, bytesRead);
+        if (copyingBody) {
+            writeAll(target, chunk);
+            continue;
+        }
+
+        const newline = chunk.indexOf(0x0a);
+        if (newline === -1) {
+            continue;
+        }
+        copyingBody = true;
+        if (newline + 1 < bytesRead) {
+            writeAll(target, chunk.subarray(newline + 1));
+        }
+    }
+}
+
+function writeAll(descriptor: number, buffer: Buffer): void {
+    let offset = 0;
+    while (offset < buffer.length) {
+        const bytesWritten = writeSync(
+            descriptor,
+            buffer,
+            offset,
+            buffer.length - offset
+        );
+        if (bytesWritten === 0) {
+            throw new Error("Failed to write session metadata");
+        }
+        offset += bytesWritten;
     }
 }
 
