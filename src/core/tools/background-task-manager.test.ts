@@ -5,7 +5,10 @@ import { expect, test, vi } from "vitest";
 import type { LlmToolCallBlock } from "../../llm/types.ts";
 import type { SandboxPreflight } from "../permissions/sandbox-launch.ts";
 import { createSandboxPolicy } from "../permissions/sandbox.ts";
-import { BackgroundTaskManager } from "./background-task-manager.ts";
+import {
+    BackgroundTaskManager,
+    MAX_BACKGROUND_SUBSCRIPTIONS
+} from "./background-task-manager.ts";
 import { ShellTool } from "./shell.ts";
 import type { ToolBackgroundEnd, ToolTaskEvent } from "./types.ts";
 
@@ -207,6 +210,59 @@ test("stops active tasks and returns their end events", async () => {
     }
 }, 15_000);
 
+test("bounds subscriptions accumulated by polling a long-running task", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-background-subscriptions-"));
+    const script = join(directory, "running.mjs");
+    writeFileSync(script, "setTimeout(() => process.exit(0), 2_000);", "utf8");
+    const command = process.platform === "win32"
+        ? `& ${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`
+        : `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`;
+    const manager = new BackgroundTaskManager();
+    const completed: string[] = [];
+
+    try {
+        const started = await manager.execute(call("exec_command", {
+            command,
+            cwd: directory,
+            timeoutMs: 50
+        }), {
+            onOutput: () => undefined,
+            onBackgroundEnd: () => {
+                completed.push("start");
+            }
+        });
+        const taskId = started.task?.id;
+        expect(taskId).toBeTruthy();
+
+        for (let index = 0; index < MAX_BACKGROUND_SUBSCRIPTIONS + 8; index += 1) {
+            const toolCallId = `poll-${index}`;
+            await manager.execute(
+                call("write_stdin", { sessionId: taskId, command: "" }, toolCallId),
+                {
+                    onOutput: () => undefined,
+                    onBackgroundEnd: () => {
+                        completed.push(toolCallId);
+                    }
+                }
+            );
+        }
+
+        await vi.waitFor(() => {
+            expect(completed).toHaveLength(MAX_BACKGROUND_SUBSCRIPTIONS);
+        }, { timeout: 5_000 });
+        expect(completed).toEqual(
+            Array.from(
+                { length: MAX_BACKGROUND_SUBSCRIPTIONS },
+                (_, index) => `poll-${index + 8}`
+            )
+        );
+        expect(manager.hasActiveWork()).toBe(false);
+    } finally {
+        manager.dispose();
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+}, 20_000);
+
 test("keeps a timed-out task failed without repeating reported violations", async () => {
     const directory = mkdtempSync(join(tmpdir(), "jarvix-background-sandbox-"));
     const runner = join(directory, "fake-sandbox-runner.mjs");
@@ -260,6 +316,10 @@ test("keeps a timed-out task failed without repeating reported violations", asyn
     }
 });
 
-function call(name: string, arguments_: Record<string, unknown>): LlmToolCallBlock {
-    return { type: "toolCall", id: "call-1", name, arguments: arguments_ };
+function call(
+    name: string,
+    arguments_: Record<string, unknown>,
+    id = "call-1"
+): LlmToolCallBlock {
+    return { type: "toolCall", id, name, arguments: arguments_ };
 }
