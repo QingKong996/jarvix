@@ -17,6 +17,7 @@ export type ToolTaskState = {
     exitCode: number | null;
     error: string | null;
     unreadCharacters: number;
+    truncatedCharacters: number;
 };
 
 export type ToolTaskSnapshot = ToolTaskState & {
@@ -35,7 +36,12 @@ export type ToolOutputHandler = (delta: ToolCallOutputDelta) => void;
 
 export type ToolTaskEvent =
     | { type: "backgroundTask.start"; task: ToolTaskSnapshot }
-    | { type: "backgroundTask.output"; taskId: string; output: string }
+    | {
+        type: "backgroundTask.output";
+        taskId: string;
+        output: string;
+        truncatedCharacters: number;
+    }
     | { type: "backgroundTask.end"; task: ToolTaskState }
     | { type: "backgroundTask.consume"; task: ToolTaskState };
 

@@ -1,4 +1,5 @@
 import type { Jarvix } from "../core/index.ts";
+import { appendBoundedOutput } from "../core/tools/output.ts";
 import type { JarvixEvent } from "../protocol/event.ts";
 import { IPC_CHANNELS, type JarvixEventBatch } from "../protocol/ipc.ts";
 import type { MainWindowController } from "./window.ts";
@@ -71,7 +72,7 @@ function createStreamBatcher(flush: Flush): { push(event: JarvixEvent): void } {
                         ...event,
                         data: {
                             ...event.data,
-                            output: last.data.output + event.data.output
+                            output: appendBoundedOutput(last.data.output, event.data.output)
                         } as typeof event.data
                     };
                 } else {
@@ -86,7 +87,8 @@ function createStreamBatcher(flush: Flush): { push(event: JarvixEvent): void } {
                 if (last?.type === "backgroundTask.output" && last.taskId === event.taskId) {
                     pending[pending.length - 1] = {
                         ...event,
-                        output: last.output + event.output
+                        output: appendBoundedOutput(last.output, event.output),
+                        truncatedCharacters: event.truncatedCharacters
                     };
                 } else {
                     pending.push(event);

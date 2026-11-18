@@ -5,6 +5,7 @@ import {
     type PermissionDomainChange,
     type PermissionRequestStatus
 } from "../../protocol/permission.ts";
+import { appendBoundedOutput } from "./output.ts";
 
 export const EXEC_COMMAND_TOOL = "exec_command";
 export const WRITE_STDIN_TOOL = "write_stdin";
@@ -164,7 +165,7 @@ export function appendToolOutput(data: ToolCallViewData, delta: ToolCallOutputDe
     if (data.kind !== delta.kind) {
         return data;
     }
-    return { ...data, output: data.output + delta.output };
+    return { ...data, output: appendBoundedOutput(data.output, delta.output) };
 }
 
 export function toToolResultDetails(data: ToolCallViewData): LlmJsonObject {

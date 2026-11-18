@@ -38,11 +38,17 @@ test("keeps background task activity and completion notices after a stop", () =>
         status: "running" as const,
         exitCode: null,
         error: null,
-        unreadCharacters: 0
+        unreadCharacters: 0,
+        truncatedCharacters: 0
     };
     const backgroundEvents: JarvixEvent[] = [
         { type: "backgroundTask.start", task },
-        { type: "backgroundTask.output", taskId: task.id, output: "more\n" },
+        {
+            type: "backgroundTask.output",
+            taskId: task.id,
+            output: "more\n",
+            truncatedCharacters: 0
+        },
         {
             type: "backgroundTask.end",
             task: {

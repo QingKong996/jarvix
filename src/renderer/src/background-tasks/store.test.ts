@@ -1,6 +1,10 @@
 import { expect, test } from "vitest";
 import type { JarvixEvent } from "../../../protocol/event.ts";
 import type { ToolTaskSnapshot, ToolTaskState } from "../../../core/tools/types.ts";
+import {
+    MAX_TOOL_OUTPUT_CHARS,
+    OUTPUT_TRUNCATION_NOTICE
+} from "../../../core/tools/output.ts";
 import { reduceBackgroundTasks } from "./store.ts";
 
 test("keeps completed tasks only until their buffered output is consumed", () => {
@@ -9,7 +13,12 @@ test("keeps completed tasks only until their buffered output is consumed", () =>
     const started = reduceBackgroundTasks([], [
         { type: "backgroundTask.start", task },
         { type: "backgroundTask.start", task: second },
-        { type: "backgroundTask.output", taskId: task.id, output: "later\n" }
+        {
+            type: "backgroundTask.output",
+            taskId: task.id,
+            output: "later\n",
+            truncatedCharacters: 0
+        }
     ]);
 
     expect(started.map((item) => item.id)).toEqual(["task-1", "task-2"]);
@@ -41,6 +50,22 @@ test("keeps completed tasks only until their buffered output is consumed", () =>
     expect(consumed.map((item) => item.id)).toEqual(["task-2"]);
 });
 
+test("bounds retained task output and tracks discarded characters", () => {
+    const task = snapshot("task-1", "noisy");
+    const output = `${"prefix\n".repeat(MAX_TOOL_OUTPUT_CHARS)}tail\n`;
+    const next = reduceBackgroundTasks([task], [{
+        type: "backgroundTask.output",
+        taskId: task.id,
+        output,
+        truncatedCharacters: output.length - MAX_TOOL_OUTPUT_CHARS
+    }]);
+
+    expect(next[0]?.output.length).toBeLessThanOrEqual(MAX_TOOL_OUTPUT_CHARS);
+    expect(next[0]?.output).toContain(OUTPUT_TRUNCATION_NOTICE);
+    expect(next[0]?.output).toContain("tail\n");
+    expect(next[0]?.truncatedCharacters).toBeGreaterThan(0);
+});
+
 function snapshot(id: string, command: string): ToolTaskSnapshot {
     return {
         id,
@@ -51,7 +76,8 @@ function snapshot(id: string, command: string): ToolTaskSnapshot {
         status: "running",
         exitCode: null,
         error: null,
-        unreadCharacters: 0
+        unreadCharacters: 0,
+        truncatedCharacters: 0
     };
 }
 

@@ -22,6 +22,11 @@ import {
     appendSandboxViolations,
     formatSandboxViolations
 } from "../permissions/violations.ts";
+import {
+    MAX_TOOL_OUTPUT_CHARS,
+    OUTPUT_TRUNCATION_NOTICE,
+    formatTruncatedOutput
+} from "./output.ts";
 import type {
     ToolExecutionResult,
     ToolExecutionObserver,
@@ -96,6 +101,8 @@ type ShellSession = {
     cwd: string;
     child: ChildProcessWithoutNullStreams;
     output: string;
+    truncatedCharacters: number;
+    truncationNoticeSent: boolean;
     /** Cursor for output already broadcast to the UI. */
     broadcastOffset: number;
     /** Cursor for output already returned to the model. */
@@ -133,6 +140,7 @@ export type ShellSessionExit = {
     exitCode: number | null;
     error: string | null;
     unreadOutput: string;
+    truncatedCharacters: number;
     /** Whether this sandbox session has produced any violation. */
     intercepted: boolean;
     /** Violations not yet included in a previous tool result. */
@@ -234,7 +242,7 @@ export class ShellTool implements ToolExecutor {
      */
     watchSession(
         sessionId: string,
-        listener: (chunk: string) => void,
+        listener: (chunk: string, truncatedCharacters: number) => void,
         onExit?: (exit: ShellSessionExit) => void
     ): () => void {
         const session = this.addressableSessions.get(sessionId);
@@ -251,6 +259,7 @@ export class ShellTool implements ToolExecutor {
                 exitCode: session.exitCode,
                 error: session.error,
                 unreadOutput: session.output.slice(session.readOffset),
+                truncatedCharacters: session.truncatedCharacters,
                 intercepted: (session.sandbox?.violations.length ?? 0) > 0,
                 violations: takeViolations(session)
             });
@@ -258,7 +267,7 @@ export class ShellTool implements ToolExecutor {
         const pending = session.output.slice(session.broadcastOffset);
         session.broadcastOffset = session.output.length;
         if (pending.length > 0) {
-            listener(pending);
+            listener(pending, session.truncatedCharacters);
         }
         if (session.ended) {
             notifyExit();
@@ -267,7 +276,7 @@ export class ShellTool implements ToolExecutor {
 
         const wrapped = (chunk: string): void => {
             session.broadcastOffset = session.output.length;
-            listener(chunk);
+            listener(chunk, session.truncatedCharacters);
         };
         const exitListener = (): void => {
             if (session.exitListener === exitListener) {
@@ -324,7 +333,7 @@ export class ShellTool implements ToolExecutor {
         if (outcome === "aborted") {
             await interruptSession(session);
             const violations = takeViolations(session);
-            const output = appendSandboxViolations(session.output, violations);
+            const output = appendSandboxViolations(sessionDisplayOutput(session), violations);
             return {
                 content: appendViolationContent("Command aborted.", violations),
                 data: { kind: "shell.exec_command", command, output, status: "failed" },
@@ -340,13 +349,13 @@ export class ShellTool implements ToolExecutor {
             this.addressableSessions.set(session.id, session);
             return {
                 content: appendViolationContent(
-                    timedOutContent(session.id, timeoutMs, session.output),
+                    timedOutContent(session.id, timeoutMs, sessionDisplayOutput(session)),
                     violations
                 ),
                 data: {
                     kind: "shell.exec_command",
                     command,
-                    output: appendSandboxViolations(session.output, violations),
+                    output: appendSandboxViolations(sessionDisplayOutput(session), violations),
                     status: violations.length > 0 ? "failed" : "timed_out"
                 },
                 isError: violations.length > 0,
@@ -425,16 +434,19 @@ export class ShellTool implements ToolExecutor {
 
         const processStatus = sessionStatus(session);
         const status = violations.length > 0 ? "failed" : processStatus;
+        const output = buffered.length > 0
+            ? formatTruncatedOutput(buffered, session.truncatedCharacters)
+            : "";
         const data: ShellWriteStdinView = {
             kind: "shell.write_stdin",
             sessionId,
             command,
-            output: appendSandboxViolations(buffered, violations),
+            output: appendSandboxViolations(output, violations),
             status
         };
         return {
             content: appendViolationContent(
-                writeResultContent(sessionId, processStatus, session.exitCode, session.error, buffered, commandState),
+                writeResultContent(sessionId, processStatus, session.exitCode, session.error, output, commandState),
                 violations
             ),
             data,
@@ -478,6 +490,8 @@ export class ShellTool implements ToolExecutor {
             cwd,
             child,
             output: "",
+            truncatedCharacters: 0,
+            truncationNoticeSent: false,
             broadcastOffset: 0,
             readOffset: 0,
             commandQueue: [],
@@ -617,6 +631,17 @@ function sandboxBinShell(): string | WindowsBinShell | undefined {
 
 function appendOutput(session: ShellSession, chunk: string): void {
     session.output += chunk;
+    const overflow = session.output.length - MAX_TOOL_OUTPUT_CHARS;
+    if (overflow > 0) {
+        session.output = session.output.slice(overflow);
+        session.truncatedCharacters += overflow;
+        session.broadcastOffset = Math.max(0, session.broadcastOffset - overflow);
+        session.readOffset = Math.max(0, session.readOffset - overflow);
+    }
+    if (session.truncatedCharacters > 0 && !session.truncationNoticeSent) {
+        session.listener?.(OUTPUT_TRUNCATION_NOTICE);
+        session.truncationNoticeSent = session.listener !== null;
+    }
     session.listener?.(chunk);
 }
 
@@ -737,6 +762,7 @@ async function stopSession(session: ShellSession): Promise<ShellSessionExit> {
         exitCode: session.exitCode,
         error: session.error,
         unreadOutput: session.output.slice(session.readOffset),
+        truncatedCharacters: session.truncatedCharacters,
         intercepted: (session.sandbox?.violations.length ?? 0) > 0,
         violations: takeViolations(session)
     };
@@ -818,7 +844,8 @@ async function taskkill(pid: number, session: ShellSession): Promise<void> {
 function finishedResult(command: string, session: ShellSession): ToolExecutionResult {
     const violations = takeViolations(session);
     const status = violations.length > 0 ? "failed" : sessionStatus(session);
-    const output = appendSandboxViolations(session.output, violations);
+    const renderedOutput = sessionDisplayOutput(session);
+    const output = appendSandboxViolations(renderedOutput, violations);
     const details: ShellExecCommandView = {
         kind: "shell.exec_command",
         command,
@@ -827,7 +854,7 @@ function finishedResult(command: string, session: ShellSession): ToolExecutionRe
     };
     return {
         content: appendViolationContent(
-            finishedContent(session.exitCode, session.error, session.output),
+            finishedContent(session.exitCode, session.error, renderedOutput),
             violations
         ),
         data: details,
@@ -879,8 +906,13 @@ function taskSnapshot(session: ShellSession): ToolTaskSnapshot {
         status: sessionStatus(session),
         exitCode: session.exitCode,
         error: session.error,
-        unreadCharacters: session.output.length - session.readOffset
+        unreadCharacters: session.output.length - session.readOffset,
+        truncatedCharacters: session.truncatedCharacters
     };
+}
+
+function sessionDisplayOutput(session: ShellSession): string {
+    return formatTruncatedOutput(session.output, session.truncatedCharacters);
 }
 
 function sessionStatus(session: ShellSession): "running" | "completed" | "failed" {
