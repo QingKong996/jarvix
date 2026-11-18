@@ -51,7 +51,7 @@ export function ProviderConfigForm({
     const { t } = useTranslation();
     const search = query.trim().toLowerCase();
     const visibleModels = draft.models.filter((model) => `${model.name} ${model.id}`.toLowerCase().includes(search));
-    const fieldsDisabled = disabled || modelPanelOpen;
+    const fieldsDisabled = disabled || modelPanelOpen || syncingModels;
 
     return (
         <form
@@ -95,6 +95,7 @@ export function ProviderConfigForm({
                     value={draft.baseUrl}
                     disabled={fieldsDisabled}
                     onChange={(event) => onUpdate({ baseUrl: event.target.value })}
+                    data-testid="provider-base-url"
                 />
             </FormField>
 
