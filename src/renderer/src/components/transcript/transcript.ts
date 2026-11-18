@@ -383,7 +383,22 @@ function commitMessage(state: TranscriptState, message: LlmAssistantMessage): Tr
 function commitLive(state: TranscriptState, error: string): TranscriptState {
     const live = state.live;
     if (!live) {
-        return state.injected.length === 0 ? state : { ...state, injected: [] };
+        const last = state.committed.at(-1);
+        if (last?.role === "assistant" && last.error === error) {
+            return state.injected.length === 0 ? state : { ...state, injected: [] };
+        }
+        return {
+            committed: [...state.committed, {
+                id: `request-error-${state.committed.length}`,
+                role: "assistant",
+                text: "",
+                blocks: [],
+                error,
+                reason: null
+            }],
+            live: null,
+            injected: []
+        };
     }
     return {
         committed: [...state.committed, {
