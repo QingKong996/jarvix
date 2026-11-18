@@ -26,3 +26,16 @@ test("returns an empty list for an empty response and rejects HTTP failures", as
     const failed = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 401 }));
     await expect(syncProviderModels({ baseUrl: "https://example.com/v1" }, failed)).rejects.toThrow("HTTP 401");
 });
+
+test("rejects an oversized provider model list", async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+            controller.enqueue(new Uint8Array(8 * 1024 * 1024 + 1));
+            controller.close();
+        }
+    })));
+
+    await expect(syncProviderModels({ baseUrl: "https://example.com/v1" }, request)).rejects.toThrow(
+        "Provider models: response exceeds"
+    );
+});

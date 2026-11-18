@@ -3,9 +3,11 @@ import { dirname } from "node:path";
 import { z } from "zod";
 import { parseModelsDevCatalog } from "../../llm/catalog.ts";
 import { providerCatalogEntrySchema, type ModelCatalog } from "../../protocol/providers.ts";
+import { readJsonResponse } from "./response-body.ts";
 
 const TTL = 24 * 60 * 60 * 1000;
 const CACHE_VERSION = 4;
+const MAX_CATALOG_RESPONSE_BYTES = 8 * 1024 * 1024;
 const cacheSchema = z.object({
     version: z.literal(CACHE_VERSION),
     providers: z.array(providerCatalogEntrySchema).min(1),
@@ -48,7 +50,13 @@ export class ModelCatalogService {
         try {
             const response = await this.fetchCatalog("https://models.dev/api.json", { signal: AbortSignal.timeout(5000) });
             if (!response.ok) throw new Error(`models.dev: HTTP ${response.status}`);
-            const next = { providers: parseModelsDevCatalog(await response.json()), fetchedAt: Date.now(), stale: false };
+            const next = {
+                providers: parseModelsDevCatalog(
+                    await readJsonResponse(response, MAX_CATALOG_RESPONSE_BYTES, "models.dev")
+                ),
+                fetchedAt: Date.now(),
+                stale: false
+            };
             await mkdir(dirname(this.file), { recursive: true });
             await writeFile(`${this.file}.tmp`, JSON.stringify({ version: CACHE_VERSION, ...next }), "utf8");
             await rename(`${this.file}.tmp`, this.file);
