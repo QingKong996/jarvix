@@ -51,6 +51,38 @@ export const MAX_STDIN_COMMAND_CHARS = 128 * 1024;
 export const MAX_STDIN_QUEUE_CHARS = MAX_STDIN_COMMAND_CHARS * 2;
 export const MAX_STDIN_QUEUE_COMMANDS = 16;
 export const DEFAULT_MAX_SHELL_SESSIONS = 8;
+export const DEFAULT_MAX_APP_SHELL_SESSIONS = 16;
+
+/** Shares a bounded number of active or retained shell sessions across conversations. */
+export class ShellSessionBudget {
+    readonly capacity: number;
+    private used = 0;
+
+    constructor(capacity = DEFAULT_MAX_APP_SHELL_SESSIONS) {
+        if (!Number.isSafeInteger(capacity) || capacity < 1) {
+            throw new RangeError("capacity must be a positive safe integer.");
+        }
+        this.capacity = capacity;
+    }
+
+    get inUse(): number {
+        return this.used;
+    }
+
+    tryAcquire(): boolean {
+        if (this.used >= this.capacity) {
+            return false;
+        }
+        this.used += 1;
+        return true;
+    }
+
+    release(): void {
+        if (this.used > 0) {
+            this.used -= 1;
+        }
+    }
+}
 
 const execCommandArguments = z.object({
     command: z.string().trim().min(1),
@@ -124,6 +156,10 @@ type ShellSession = {
     commandQueue: string[];
     commandQueueChars: number;
     writing: boolean;
+    /** Whether this session can be addressed after its foreground wait ends. */
+    retained: boolean;
+    /** Whether this session currently owns a shared application-wide slot. */
+    sharedSlotHeld: boolean;
     ended: boolean;
     exitCode: number | null;
     error: string | null;
@@ -168,6 +204,7 @@ export type ShellToolOptions = {
     sandboxPreflight?: SandboxPreflight;
     sandboxRunnerPath?: string;
     maxSessions?: number;
+    sharedBudget?: ShellSessionBudget;
 };
 
 /** Executes shell commands in child processes and keeps timed-out sessions addressable. */
@@ -178,6 +215,7 @@ export class ShellTool implements ToolExecutor {
     private readonly sandboxPreflight: SandboxPreflight;
     private readonly sandboxRunnerPath?: string;
     private readonly maxSessions: number;
+    private readonly sharedBudget?: ShellSessionBudget;
     private readonly addressableSessions = new Map<string, ShellSession>();
     private readonly children = new Set<ShellSession>();
 
@@ -187,6 +225,7 @@ export class ShellTool implements ToolExecutor {
         this.sandboxPreflight = options.sandboxPreflight ?? preflightSandbox;
         this.sandboxRunnerPath = options.sandboxRunnerPath;
         this.maxSessions = normalizeSessionLimit(options.maxSessions);
+        this.sharedBudget = options.sharedBudget;
     }
 
     handles(name: string): boolean {
@@ -216,12 +255,20 @@ export class ShellTool implements ToolExecutor {
     }
 
     dispose(): void {
-        for (const session of this.children) {
+        const sessions = new Set([
+            ...this.children,
+            ...this.addressableSessions.values()
+        ]);
+        for (const session of sessions) {
             session.listener = null;
             session.exitListener = null;
             if (!session.ended) {
                 session.child.kill();
             }
+        }
+        for (const session of sessions) {
+            session.retained = false;
+            this.releaseSharedSlot(session);
         }
         this.children.clear();
         this.addressableSessions.clear();
@@ -242,8 +289,10 @@ export class ShellTool implements ToolExecutor {
         );
         this.addressableSessions.clear();
         for (const session of sessions) {
+            session.retained = false;
             if (session.ended) {
                 this.children.delete(session);
+                this.releaseSharedSlot(session);
             }
         }
         return exits;
@@ -251,7 +300,15 @@ export class ShellTool implements ToolExecutor {
 
     /** Release a completed session after its final buffered output was consumed. */
     releaseSession(sessionId: string): void {
+        const session = this.addressableSessions.get(sessionId);
+        if (!session) {
+            return;
+        }
         this.addressableSessions.delete(sessionId);
+        session.retained = false;
+        if (session.ended) {
+            this.releaseSharedSlot(session);
+        }
     }
 
     /**
@@ -337,13 +394,17 @@ export class ShellTool implements ToolExecutor {
         if (this.sessionCount() >= this.maxSessions) {
             return sessionLimitResult(command, this.maxSessions);
         }
+        if (this.sharedBudget && !this.sharedBudget.tryAcquire()) {
+            return sharedSessionLimitResult(command, this.sharedBudget.capacity);
+        }
         let session: ShellSession;
         try {
             session = this.start(command, this.resolveCwd(parsed.data.cwd), (chunk) => {
                 session.broadcastOffset = session.output.length;
                 observer.onOutput({ kind: "shell.exec_command", output: chunk });
-            }, call.id);
+            }, call.id, this.sharedBudget !== undefined);
         } catch (error) {
+            this.sharedBudget?.release();
             const message = errorMessage(error);
             return {
                 content: `Failed to start command: ${message}`,
@@ -370,6 +431,7 @@ export class ShellTool implements ToolExecutor {
             session.listener = null;
             session.readOffset = session.output.length;
             const violations = takeViolations(session);
+            session.retained = true;
             this.addressableSessions.set(session.id, session);
             return {
                 content: appendViolationContent(
@@ -493,7 +555,8 @@ export class ShellTool implements ToolExecutor {
         command: string,
         cwd: string,
         listener: (chunk: string) => void,
-        toolCallId: string
+        toolCallId: string,
+        sharedSlotHeld: boolean
     ): ShellSession {
         const sandboxed = this.sandboxLaunch(command, cwd, toolCallId);
         const launch = sandboxed?.launch ?? shellLaunch(command);
@@ -530,6 +593,8 @@ export class ShellTool implements ToolExecutor {
             commandQueue: [],
             commandQueueChars: 0,
             writing: false,
+            retained: false,
+            sharedSlotHeld,
             ended: false,
             exitCode: null,
             error: null,
@@ -557,6 +622,9 @@ export class ShellTool implements ToolExecutor {
                 session.cleanup?.();
                 session.cleanup = undefined;
                 this.children.delete(session);
+                if (!session.retained) {
+                    this.releaseSharedSlot(session);
+                }
                 resolveDone();
                 exitListener?.();
             },
@@ -649,6 +717,14 @@ export class ShellTool implements ToolExecutor {
             binShell: sandboxBinShell(),
             runnerPath: this.sandboxRunnerPath
         });
+    }
+
+    private releaseSharedSlot(session: ShellSession): void {
+        if (!session.sharedSlotHeld) {
+            return;
+        }
+        session.sharedSlotHeld = false;
+        this.sharedBudget?.release();
     }
 }
 
@@ -922,6 +998,24 @@ function sessionLimitResult(command: string, limit: number): ToolExecutionResult
     const message = [
         `Shell session limit reached (${limit} active or retained sessions).`,
         "Drain or finish an existing background session with write_stdin before starting another command."
+    ].join(" ");
+    return {
+        content: message,
+        data: {
+            kind: "shell.exec_command",
+            command,
+            output: message,
+            status: "failed"
+        },
+        isError: true,
+        endReason: "exited"
+    };
+}
+
+function sharedSessionLimitResult(command: string, limit: number): ToolExecutionResult {
+    const message = [
+        `Application-wide shell session limit reached (${limit} active or retained sessions across all conversations).`,
+        "Drain or finish a background session with write_stdin, or stop its conversation, before starting another command."
     ].join(" ");
     return {
         content: message,
