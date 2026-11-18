@@ -32,8 +32,11 @@ import {
     createToolCallViewData,
     type ApplyPatchView
 } from "./view.ts";
+import { resolve } from "node:path";
 
 export { APPLY_PATCH_TOOL };
+
+const DEFAULT_CWD = process.cwd();
 
 const applyPatchArguments = z.object({
     patch: z.string(),
@@ -74,15 +77,18 @@ export const APPLY_PATCH_TOOL_DEFINITIONS: readonly LlmToolDefinition[] = [{
 }];
 
 export type ApplyPatchToolOptions = {
+    defaultCwd?: string | (() => string | undefined);
     sandboxPolicy?: () => SandboxPolicy | null;
 };
 
 /** Executes OpenAI apply_patch hunks against the local filesystem. */
 export class ApplyPatchTool implements ToolExecutor {
     readonly definitions = APPLY_PATCH_TOOL_DEFINITIONS;
+    private readonly defaultCwd?: string | (() => string | undefined);
     private readonly sandboxPolicy?: () => SandboxPolicy | null;
 
     constructor(options: ApplyPatchToolOptions = {}) {
+        this.defaultCwd = options.defaultCwd;
         this.sandboxPolicy = options.sandboxPolicy;
     }
 
@@ -111,7 +117,8 @@ export class ApplyPatchTool implements ToolExecutor {
             return failedResult(call, formatParseError(error));
         }
 
-        const targets = patchWriteTargets(parsed, arguments_.data.cwd);
+        const cwd = this.resolveCwd(arguments_.data.cwd);
+        const targets = patchWriteTargets(parsed, cwd);
         let decisions: SandboxPathDecision[];
         try {
             decisions = authorizeSandboxWrites(
@@ -132,15 +139,15 @@ export class ApplyPatchTool implements ToolExecutor {
         }
 
         try {
-            const affected = await applyParsedPatch(parsed, arguments_.data.cwd, signal);
+            const affected = await applyParsedPatch(parsed, cwd, signal);
             if (affected.aborted) {
-                return abortedResult(arguments_.data, affected);
+                return abortedResult({ ...arguments_.data, cwd }, affected);
             }
             const summary = formatPatchSummary(affected);
             const data: ApplyPatchView = {
                 kind: "apply_patch",
                 patch: arguments_.data.patch,
-                cwd: arguments_.data.cwd,
+                cwd,
                 output: summary,
                 status: "completed"
             };
@@ -161,6 +168,13 @@ export class ApplyPatchTool implements ToolExecutor {
 
     async stop(): Promise<readonly ToolStopEvent[]> {
         return [];
+    }
+
+    private resolveCwd(cwd: string): string {
+        const configured = typeof this.defaultCwd === "function"
+            ? this.defaultCwd()
+            : this.defaultCwd;
+        return resolve(configured ?? DEFAULT_CWD, cwd);
     }
 }
 
