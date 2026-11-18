@@ -49,6 +49,15 @@ export const modelDefinitionSchema = z.object({
         cacheRead: z.number().nonnegative().default(0),
         cacheWrite: z.number().nonnegative().default(0)
     }).default({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
+}).superRefine((model, context) => {
+    if (model.maxTokens < model.contextWindow) {
+        return;
+    }
+    context.addIssue({
+        code: "custom",
+        path: ["maxTokens"],
+        message: "Max output tokens must be less than the context window"
+    });
 });
 
 const modelDefinitionsSchema = z.array(modelDefinitionSchema).refine(

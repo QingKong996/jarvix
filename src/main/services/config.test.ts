@@ -31,6 +31,30 @@ test("round-trips provider defaults and rejects invalid selections and duplicate
     expect(() => parseConfig({ providers: [{ ...provider, models: [provider.models[0], provider.models[0]] }] })).toThrow(/Duplicate model/);
 });
 
+test("rejects models that reserve the entire context window for output", () => {
+    const provider = {
+        id: "custom:test",
+        name: "Test",
+        protocol: "openai-completions",
+        baseUrl: "http://localhost:8080/v1",
+        models: [{
+            id: "chat",
+            name: "Chat",
+            contextWindow: 8_192,
+            maxTokens: 8_192
+        }]
+    };
+
+    expect(() => parseConfig({ providers: [provider] }, defaults)).toThrow(/less than the context window/);
+
+    const valid = {
+        ...provider,
+        models: [{ ...provider.models[0], maxTokens: 8_191 }]
+    };
+    expect(parseConfig({ providers: [valid] }, defaults).providers?.[0]?.models[0]?.maxTokens)
+        .toBe(8_191);
+});
+
 test("syncs the selected model and reasoning with configured models", () => {
     const provider = providerConfigSchema.parse({
         id: "custom:test", name: "Test", protocol: "openai-completions", baseUrl: "http://localhost:8080/v1",
