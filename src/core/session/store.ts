@@ -411,34 +411,84 @@ function readLastMessageTimestamp(file: string): number | null {
     }
 
     try {
-        let position = fstatSync(descriptor).size;
-        let suffix = Buffer.alloc(0);
-        while (position > 0) {
-            const length = Math.min(SESSION_TAIL_CHUNK_SIZE, position);
-            position -= length;
-            const chunk = Buffer.allocUnsafe(length);
-            readSync(descriptor, chunk, 0, length, position);
-            suffix = Buffer.concat([chunk, suffix]);
+        const size = fstatSync(descriptor).size;
+        const chunks: Array<{ start: number; buffer: Buffer }> = [];
+        let loadedStart = size;
+        let lineEnd = size;
+        while (true) {
+            let separator = findPreviousNewline(chunks, lineEnd);
+            while (separator === null && loadedStart > 0) {
+                const length = Math.min(SESSION_TAIL_CHUNK_SIZE, loadedStart);
+                loadedStart -= length;
+                const chunk = Buffer.allocUnsafe(length);
+                readSync(descriptor, chunk, 0, length, loadedStart);
+                chunks.unshift({ start: loadedStart, buffer: chunk });
+                separator = findPreviousNewline([chunks[0]!], lineEnd);
+            }
 
-            let lineEnd = suffix.length;
-            while (lineEnd > 0) {
-                const lineStart = suffix.lastIndexOf(0x0a, lineEnd - 1) + 1;
-                if (lineStart === 0 && position > 0) {
-                    break;
-                }
-                const record = parseRecord(suffix.subarray(lineStart, lineEnd).toString("utf8"));
+            const lineStart = separator === null ? 0 : separator + 1;
+            if (lineEnd > lineStart) {
+                const record = parseRecord(
+                    bufferRange(chunks, lineStart, lineEnd).toString("utf8")
+                );
                 if (isSessionMessage(record)) {
                     return record.message.timestamp;
                 }
-                lineEnd = lineStart - 1;
             }
+            if (separator === null) {
+                return null;
+            }
+            lineEnd = separator;
         }
-        return null;
     } catch {
         return null;
     } finally {
         closeSync(descriptor);
     }
+}
+
+function findPreviousNewline(
+    chunks: ReadonlyArray<{ start: number; buffer: Buffer }>,
+    before: number
+): number | null {
+    for (let index = chunks.length - 1; index >= 0; index -= 1) {
+        const chunk = chunks[index]!;
+        const end = Math.min(chunk.start + chunk.buffer.length, before);
+        if (end <= chunk.start) {
+            continue;
+        }
+        const newline = chunk.buffer.lastIndexOf(0x0a, end - chunk.start - 1);
+        if (newline >= 0) {
+            return chunk.start + newline;
+        }
+    }
+    return null;
+}
+
+function bufferRange(
+    chunks: ReadonlyArray<{ start: number; buffer: Buffer }>,
+    start: number,
+    end: number
+): Buffer {
+    const result = Buffer.allocUnsafe(end - start);
+    let offset = 0;
+    for (const chunk of chunks) {
+        const chunkEnd = chunk.start + chunk.buffer.length;
+        const overlapStart = Math.max(start, chunk.start);
+        const overlapEnd = Math.min(end, chunkEnd);
+        if (overlapStart >= overlapEnd) {
+            continue;
+        }
+        const length = overlapEnd - overlapStart;
+        chunk.buffer.copy(
+            result,
+            offset,
+            overlapStart - chunk.start,
+            overlapEnd - chunk.start
+        );
+        offset += length;
+    }
+    return result;
 }
 
 /** Read only the first JSONL record, which holds the session meta. */
