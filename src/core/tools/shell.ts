@@ -140,7 +140,7 @@ export type ShellSessionExit = {
 };
 
 export type ShellToolOptions = {
-    defaultCwd?: string;
+    defaultCwd?: string | (() => string | undefined);
     sandboxPolicy?: () => SandboxPolicy | null;
     sandboxPreflight?: SandboxPreflight;
     sandboxRunnerPath?: string;
@@ -149,7 +149,7 @@ export type ShellToolOptions = {
 /** Executes shell commands in child processes and keeps timed-out sessions addressable. */
 export class ShellTool implements ToolExecutor {
     readonly definitions = SHELL_TOOL_DEFINITIONS;
-    private readonly defaultCwd: string;
+    private readonly defaultCwd?: string | (() => string | undefined);
     private readonly sandboxPolicy?: () => SandboxPolicy | null;
     private readonly sandboxPreflight: SandboxPreflight;
     private readonly sandboxRunnerPath?: string;
@@ -157,7 +157,7 @@ export class ShellTool implements ToolExecutor {
     private readonly children = new Set<ShellSession>();
 
     constructor(options: ShellToolOptions = {}) {
-        this.defaultCwd = resolve(options.defaultCwd ?? DEFAULT_CWD);
+        this.defaultCwd = options.defaultCwd;
         this.sandboxPolicy = options.sandboxPolicy;
         this.sandboxPreflight = options.sandboxPreflight ?? preflightSandbox;
         this.sandboxRunnerPath = options.sandboxRunnerPath;
@@ -306,7 +306,7 @@ export class ShellTool implements ToolExecutor {
         }
         let session: ShellSession;
         try {
-            session = this.start(command, resolve(this.defaultCwd, parsed.data.cwd), (chunk) => {
+            session = this.start(command, this.resolveCwd(parsed.data.cwd), (chunk) => {
                 session.broadcastOffset = session.output.length;
                 observer.onOutput({ kind: "shell.exec_command", output: chunk });
             }, call.id);
@@ -358,6 +358,13 @@ export class ShellTool implements ToolExecutor {
         session.listener = null;
         session.readOffset = session.output.length;
         return finishedResult(command, session);
+    }
+
+    private resolveCwd(cwd: string): string {
+        const configured = typeof this.defaultCwd === "function"
+            ? this.defaultCwd()
+            : this.defaultCwd;
+        return resolve(configured ?? DEFAULT_CWD, cwd);
     }
 
     private async writeStdin(

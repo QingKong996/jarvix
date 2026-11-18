@@ -1,4 +1,11 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import {
+    existsSync,
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    realpathSync,
+    rmSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, test, vi } from "vitest";
@@ -112,6 +119,62 @@ test("updates a session context in memory and on disk", () => {
     expect(session.meta.workingDirectory).toBeUndefined();
 });
 
+test("uses an updated working directory for relative shell commands", async () => {
+    home.path = join(base, "cwd-home");
+    const manager = new SessionManager();
+    const firstDirectory = join(base, "cwd-first");
+    const secondDirectory = join(base, "cwd-second");
+    mkdirSync(firstDirectory, { recursive: true });
+    mkdirSync(secondDirectory, { recursive: true });
+    const session = manager.create(
+        { workingDirectory: firstDirectory },
+        "Working directory session",
+        "full-access"
+    );
+    manager.updateContext(session.meta.id, {
+        workingDirectory: secondDirectory
+    });
+    const nodePath = JSON.stringify(process.execPath);
+    const script = JSON.stringify(
+        "require('node:fs').writeFileSync('marker.txt', process.cwd())"
+    );
+    const command = process.platform === "win32"
+        ? `& ${nodePath} -e ${script}`
+        : `${nodePath} -e ${script}`;
+    let calls = 0;
+    const llm: LlmAdapter = {
+        getModel: () => MODEL,
+        stream(): AsyncIterable<LlmStreamEvent> {
+            return (async function* (): AsyncIterable<LlmStreamEvent> {
+                if (calls++ === 0) {
+                    yield {
+                        type: "done",
+                        message: toolCallMessage(command)
+                    };
+                    return;
+                }
+                yield { type: "done", message: assistantMessage() };
+            })();
+        }
+    };
+
+    await session.request("create a marker", {
+        llm,
+        config: TEST_CONFIG,
+        workingDirectories: [secondDirectory],
+        emit: () => undefined
+    });
+
+    const toolResult = session.snapshot().messages.find(
+        (message) => message.role === "toolResult"
+    );
+    expect(toolResult?.isError, toolResult?.content).toBe(false);
+    expect(realpathSync.native(
+        readFileSync(join(secondDirectory, "marker.txt"), "utf8").trim()
+    )).toBe(realpathSync.native(secondDirectory));
+    expect(existsSync(join(firstDirectory, "marker.txt"))).toBe(false);
+});
+
 test("notifies an active request when its permission changes", async () => {
     home.path = join(base, "permission-home");
     const manager = new SessionManager();
@@ -179,5 +242,22 @@ function assistantMessage(): LlmAssistantMessage {
         },
         stopReason: "stop",
         timestamp: Date.now()
+    };
+}
+
+function toolCallMessage(command: string): LlmAssistantMessage {
+    return {
+        ...assistantMessage(),
+        content: [{
+            type: "toolCall",
+            id: "call-working-directory",
+            name: "exec_command",
+            arguments: {
+                command,
+                cwd: ".",
+                timeoutMs: 10_000
+            }
+        }],
+        stopReason: "toolUse"
     };
 }
