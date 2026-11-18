@@ -50,6 +50,7 @@ const MAX_TIMEOUT_MS = 2_147_483_647;
 export const MAX_STDIN_COMMAND_CHARS = 128 * 1024;
 export const MAX_STDIN_QUEUE_CHARS = MAX_STDIN_COMMAND_CHARS * 2;
 export const MAX_STDIN_QUEUE_COMMANDS = 16;
+export const DEFAULT_MAX_SHELL_SESSIONS = 8;
 
 const execCommandArguments = z.object({
     command: z.string().trim().min(1),
@@ -166,6 +167,7 @@ export type ShellToolOptions = {
     sandboxPolicy?: () => SandboxPolicy | null;
     sandboxPreflight?: SandboxPreflight;
     sandboxRunnerPath?: string;
+    maxSessions?: number;
 };
 
 /** Executes shell commands in child processes and keeps timed-out sessions addressable. */
@@ -175,6 +177,7 @@ export class ShellTool implements ToolExecutor {
     private readonly sandboxPolicy?: () => SandboxPolicy | null;
     private readonly sandboxPreflight: SandboxPreflight;
     private readonly sandboxRunnerPath?: string;
+    private readonly maxSessions: number;
     private readonly addressableSessions = new Map<string, ShellSession>();
     private readonly children = new Set<ShellSession>();
 
@@ -183,6 +186,7 @@ export class ShellTool implements ToolExecutor {
         this.sandboxPolicy = options.sandboxPolicy;
         this.sandboxPreflight = options.sandboxPreflight ?? preflightSandbox;
         this.sandboxRunnerPath = options.sandboxRunnerPath;
+        this.maxSessions = normalizeSessionLimit(options.maxSessions);
     }
 
     handles(name: string): boolean {
@@ -321,11 +325,17 @@ export class ShellTool implements ToolExecutor {
         }
 
         const { command, timeoutMs } = parsed.data;
+        if (this.sessionCount() >= this.maxSessions) {
+            return sessionLimitResult(command, this.maxSessions);
+        }
         if (this.sandboxPolicy?.()) {
             const preflight = await this.sandboxPreflight();
             if (!preflight.ready) {
                 return sandboxPreflightResult(command, preflight);
             }
+        }
+        if (this.sessionCount() >= this.maxSessions) {
+            return sessionLimitResult(command, this.maxSessions);
         }
         let session: ShellSession;
         try {
@@ -388,6 +398,16 @@ export class ShellTool implements ToolExecutor {
             ? this.defaultCwd()
             : this.defaultCwd;
         return resolve(configured ?? DEFAULT_CWD, cwd);
+    }
+
+    private sessionCount(): number {
+        let count = this.children.size;
+        for (const session of this.addressableSessions.values()) {
+            if (!this.children.has(session)) {
+                count += 1;
+            }
+        }
+        return count;
     }
 
     private async writeStdin(
@@ -898,6 +918,24 @@ function invalidArgumentsResult(call: LlmToolCallBlock, message: string): ToolEx
     };
 }
 
+function sessionLimitResult(command: string, limit: number): ToolExecutionResult {
+    const message = [
+        `Shell session limit reached (${limit} active or retained sessions).`,
+        "Drain or finish an existing background session with write_stdin before starting another command."
+    ].join(" ");
+    return {
+        content: message,
+        data: {
+            kind: "shell.exec_command",
+            command,
+            output: message,
+            status: "failed"
+        },
+        isError: true,
+        endReason: "exited"
+    };
+}
+
 function sandboxPreflightResult(
     command: string,
     preflight: Extract<SandboxPreflightResult, { ready: false }>
@@ -1038,4 +1076,14 @@ function shellDisplayName(): string {
 
 function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+}
+
+function normalizeSessionLimit(limit: number | undefined): number {
+    if (limit === undefined) {
+        return DEFAULT_MAX_SHELL_SESSIONS;
+    }
+    if (!Number.isSafeInteger(limit) || limit < 1) {
+        throw new RangeError("maxSessions must be a positive safe integer.");
+    }
+    return limit;
 }

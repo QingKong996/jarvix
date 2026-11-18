@@ -206,6 +206,71 @@ test("keeps a timed-out shell addressable through write_stdin", async () => {
     }
 });
 
+test("bounds retained shell sessions and reuses released slots", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-shell-session-limit-"));
+    const script = join(directory, "short-lived.mjs");
+    writeFileSync(script, [
+        "process.stdout.write('ready\\n');",
+        "setTimeout(() => process.exit(0), 300);"
+    ].join("\n"), "utf8");
+    const tool = new ShellTool({ maxSessions: 2 });
+    tools.push(tool);
+    const command = process.platform === "win32"
+        ? `& ${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`
+        : `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`;
+
+    try {
+        const sessionIds: string[] = [];
+        const exits: Promise<ShellSessionExit>[] = [];
+        for (let index = 0; index < 2; index += 1) {
+            const started = await tool.execute(call("exec_command", {
+                command,
+                cwd: directory,
+                timeoutMs: 75
+            }, `call-limit-${index}`), { onOutput: () => undefined });
+            const sessionId = started.task?.id;
+            expect(sessionId).toBeTruthy();
+            if (!sessionId) {
+                throw new Error("Expected a background task.");
+            }
+            sessionIds.push(sessionId);
+            exits.push(new Promise((resolvePromise) => {
+                tool.watchSession(sessionId, () => undefined, resolvePromise);
+            }));
+        }
+        await Promise.all(exits);
+
+        const rejected = await tool.execute(call("exec_command", {
+            command: "echo should-not-start",
+            cwd: directory,
+            timeoutMs: 5_000
+        }, "call-limit-rejected"), { onOutput: () => undefined });
+
+        expect(rejected.isError).toBe(true);
+        expect(rejected.task).toBeUndefined();
+        expect(rejected.content).toContain("Shell session limit reached (2");
+
+        for (const sessionId of sessionIds) {
+            tool.releaseSession(sessionId);
+        }
+        const releasedCommand = process.platform === "win32"
+            ? "Write-Output slot-released"
+            : "printf slot-released";
+        const released = await tool.execute(call("exec_command", {
+            command: releasedCommand,
+            cwd: directory,
+            timeoutMs: 5_000
+        }), { onOutput: () => undefined });
+
+        expect(released.isError).toBe(false);
+        expect(released.data.output).toContain("slot-released");
+    } finally {
+        tool.dispose();
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
 test("rejects an oversized write_stdin command before dispatching it", async () => {
     const tool = new ShellTool();
     tools.push(tool);
