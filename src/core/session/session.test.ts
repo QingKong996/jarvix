@@ -1295,6 +1295,103 @@ test("routes background task output outside the tool call after timeout", async 
     }
 });
 
+test("keeps background task events and exit notices after stopping the request", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-session-task-stop-"));
+    const script = join(directory, "task.mjs");
+    writeFileSync(script, [
+        "process.stdout.write('start\\n');",
+        "setTimeout(() => process.stdout.write('later\\n', () => process.exit(0)), 400);"
+    ].join("\n"), "utf8");
+    const command = process.platform === "win32"
+        ? `& ${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`
+        : `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`;
+    const toolCall = {
+        type: "toolCall" as const,
+        id: "call-background-stop",
+        name: "exec_command",
+        arguments: { command, cwd: directory, timeoutMs: 50 }
+    };
+    let response = 0;
+    const llm: LlmAdapter = {
+        getModel: () => MODEL,
+        stream(request) {
+            if (response++ === 0) {
+                return (async function* (): AsyncIterable<LlmStreamEvent> {
+                    yield {
+                        type: "done",
+                        message: {
+                            ...assistantMessage(),
+                            content: [toolCall],
+                            stopReason: "toolUse"
+                        }
+                    };
+                })();
+            }
+            return (async function* (): AsyncIterable<LlmStreamEvent> {
+                await new Promise<void>((resolvePromise) => {
+                    if (request.signal?.aborted) {
+                        resolvePromise();
+                        return;
+                    }
+                    request.signal?.addEventListener("abort", () => resolvePromise(), {
+                        once: true
+                    });
+                });
+            })();
+        }
+    };
+    const events: JarvixEvent[] = [];
+    const session = new Session(meta, [], new BackgroundTaskManager());
+
+    try {
+        const pending = session.request("start a background task", {
+            llm,
+            config: TEST_CONFIG,
+            emit: (event) => { events.push(event); }
+        });
+        await vi.waitFor(() => {
+            expect(events).toContainEqual(expect.objectContaining({
+                type: "backgroundTask.start"
+            }));
+        }, { timeout: 5_000 });
+        const taskId = events.find(
+            (event) => event.type === "backgroundTask.start"
+        )?.task.id;
+        expect(taskId).toBeTruthy();
+
+        session.abort();
+        await pending;
+
+        await vi.waitFor(() => {
+            expect(events).toContainEqual(expect.objectContaining({
+                type: "backgroundTask.output",
+                taskId,
+                output: expect.stringContaining("later")
+            }));
+            expect(events).toContainEqual(expect.objectContaining({
+                type: "backgroundTask.end",
+                task: expect.objectContaining({
+                    id: taskId,
+                    status: "completed"
+                })
+            }));
+            expect(events).toContainEqual(expect.objectContaining({
+                type: "system.message",
+                message: expect.objectContaining({
+                    notice: expect.objectContaining({
+                        kind: "background.task_exit",
+                        sessionId: taskId
+                    })
+                })
+            }));
+        }, { timeout: 5_000 });
+    } finally {
+        session.dispose();
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
 function fakeLlm(message: LlmAssistantMessage): LlmAdapter {
     return streamLlm((async function* (): AsyncIterable<LlmStreamEvent> {
         yield { type: "done", message };
