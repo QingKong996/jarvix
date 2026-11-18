@@ -182,6 +182,10 @@
         "shellDetails": {
             "polling": "读取输出"
         },
+        "patchDetails": {
+            "truncated": "补丁预览已截断。",
+            "omittedLines_other": "另有 {{count}} 行未显示。"
+        },
         "generic": "调用工具",
         "status": {
             "running": "运行中…",

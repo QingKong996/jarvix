@@ -182,6 +182,11 @@
         "shellDetails": {
             "polling": "Reading output"
         },
+        "patchDetails": {
+            "truncated": "Patch preview truncated.",
+            "omittedLines_one": "{{count}} more line not shown.",
+            "omittedLines_other": "{{count}} more lines not shown."
+        },
         "generic": "Tool call",
         "status": {
             "running": "Running…",
