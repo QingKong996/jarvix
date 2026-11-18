@@ -47,6 +47,9 @@ const WINDOWS_POWERSHELL = findWindowsPowerShell();
 const STOP_GRACE_MS = 2_000;
 const STOP_FORCE_MS = 2_000;
 const MAX_TIMEOUT_MS = 2_147_483_647;
+export const MAX_STDIN_COMMAND_CHARS = 128 * 1024;
+export const MAX_STDIN_QUEUE_CHARS = MAX_STDIN_COMMAND_CHARS * 2;
+export const MAX_STDIN_QUEUE_COMMANDS = 16;
 
 const execCommandArguments = z.object({
     command: z.string().trim().min(1),
@@ -56,7 +59,7 @@ const execCommandArguments = z.object({
 
 const writeStdinArguments = z.object({
     sessionId: z.string().trim().min(1),
-    command: z.string()
+    command: z.string().max(MAX_STDIN_COMMAND_CHARS)
 });
 
 export const SHELL_TOOL_DEFINITIONS: readonly LlmToolDefinition[] = [{
@@ -94,7 +97,11 @@ export const SHELL_TOOL_DEFINITIONS: readonly LlmToolDefinition[] = [{
         type: "object",
         properties: {
             sessionId: { type: "string", description: "Session id returned by exec_command." },
-            command: { type: "string", description: "Text to write to stdin, or empty to poll." }
+            command: {
+                type: "string",
+                maxLength: MAX_STDIN_COMMAND_CHARS,
+                description: "Text to write to stdin, or empty to poll."
+            }
         },
         required: ["sessionId", "command"],
         additionalProperties: false
@@ -114,6 +121,7 @@ type ShellSession = {
     /** Cursor for output already returned to the model. */
     readOffset: number;
     commandQueue: string[];
+    commandQueueChars: number;
     writing: boolean;
     ended: boolean;
     exitCode: number | null;
@@ -139,7 +147,7 @@ type ShellLaunch = {
     args: string[];
 };
 
-type WriteCommandState = "none" | "queued" | "rejected";
+type WriteCommandState = "none" | "queued" | "rejected" | "overflowed";
 
 export type ShellSessionExit = {
     sessionId: string;
@@ -431,8 +439,7 @@ export class ShellTool implements ToolExecutor {
         let commandState: WriteCommandState = "none";
         if (command.length > 0) {
             if (!session.ended && session.child.stdin.writable) {
-                enqueueCommand(session, command);
-                commandState = "queued";
+                commandState = enqueueCommand(session, command) ? "queued" : "overflowed";
             } else {
                 commandState = "rejected";
             }
@@ -456,7 +463,7 @@ export class ShellTool implements ToolExecutor {
                 violations
             ),
             data,
-            isError: status === "failed",
+            isError: status === "failed" || commandState === "overflowed",
             endReason: processStatus === "running" ? "background" : "exited",
             task: taskSnapshot(session)
         };
@@ -501,6 +508,7 @@ export class ShellTool implements ToolExecutor {
             broadcastOffset: 0,
             readOffset: 0,
             commandQueue: [],
+            commandQueueChars: 0,
             writing: false,
             ended: false,
             exitCode: null,
@@ -522,6 +530,7 @@ export class ShellTool implements ToolExecutor {
                 session.ended = true;
                 session.listener = null;
                 session.commandQueue.length = 0;
+                session.commandQueueChars = 0;
                 session.writing = false;
                 const exitListener = session.exitListener;
                 session.exitListener = null;
@@ -680,9 +689,18 @@ function appendViolationContent(content: string, violations: readonly string[]):
     return block.length > 0 ? `${content}\n\n${block}` : content;
 }
 
-function enqueueCommand(session: ShellSession, command: string): void {
-    session.commandQueue.push(command.endsWith("\n") ? command : `${command}\n`);
+function enqueueCommand(session: ShellSession, command: string): boolean {
+    const payload = command.endsWith("\n") ? command : `${command}\n`;
+    if (
+        session.commandQueue.length >= MAX_STDIN_QUEUE_COMMANDS
+        || session.commandQueueChars + payload.length > MAX_STDIN_QUEUE_CHARS
+    ) {
+        return false;
+    }
+    session.commandQueue.push(payload);
+    session.commandQueueChars += payload.length;
     flushCommandQueue(session);
+    return true;
 }
 
 function flushCommandQueue(session: ShellSession): void {
@@ -692,6 +710,7 @@ function flushCommandQueue(session: ShellSession): void {
 
     while (session.commandQueue.length > 0) {
         const command = session.commandQueue.shift()!;
+        session.commandQueueChars -= command.length;
         try {
             const accepted = session.child.stdin.write(command);
             if (!accepted) {
@@ -965,7 +984,9 @@ function writeResultContent(
         ? "No stdin command was queued."
         : commandState === "queued"
             ? "The stdin command was queued."
-            : "The stdin command was not executed because the shell has already exited.";
+            : commandState === "overflowed"
+                ? "The stdin command was not queued because the pending input buffer is full. Poll with write_stdin before sending more input."
+                : "The stdin command was not executed because the shell has already exited.";
     const buffer = output.length > 0
         ? `Buffered output returned:\n${output}`
         : "No buffered output was available.";
