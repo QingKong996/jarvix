@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, type RefObject } from "react";
+import { memo, useLayoutEffect, useRef, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
 import { useCommitted, useInjected, useLive } from "./transcript-hooks.ts";
@@ -94,7 +94,7 @@ function InjectedList() {
 const FOLLOW_THRESHOLD_PX = 80;
 
 function useFollowBottom(ref: RefObject<HTMLElement | null>): void {
-    useEffect(() => {
+    useLayoutEffect(() => {
         const container = ref.current;
         if (!container) {
             return;
@@ -125,6 +125,10 @@ function useFollowBottom(ref: RefObject<HTMLElement | null>): void {
             });
         };
 
+        // The keyed transcript mounts after hydration, so no store notification
+        // remains to position the new scroll container at the latest turn.
+        container.scrollTop = container.scrollHeight;
+        autoScrollTop = container.scrollTop;
         container.addEventListener("scroll", updateFollow, { passive: true });
         const unsubscribeCommitted = subscribeCommitted(scrollToBottom);
         const unsubscribeLive = subscribeLive(scrollToBottom);
