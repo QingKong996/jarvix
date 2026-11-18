@@ -14,9 +14,8 @@ export async function readJsonResponse(
     }
 
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    const chunks: Uint8Array[] = [];
     let totalBytes = 0;
-    let text = "";
     try {
         while (true) {
             const chunk = await reader.read();
@@ -28,10 +27,15 @@ export async function readJsonResponse(
                 await reader.cancel().catch(() => undefined);
                 throw new Error(`${label}: response exceeds ${maxBytes} bytes`);
             }
-            text += decoder.decode(chunk.value, { stream: true });
+            chunks.push(chunk.value);
         }
-        text += decoder.decode();
-        return JSON.parse(text);
+        const bytes = new Uint8Array(totalBytes);
+        let offset = 0;
+        for (const chunk of chunks) {
+            bytes.set(chunk, offset);
+            offset += chunk.byteLength;
+        }
+        return JSON.parse(new TextDecoder().decode(bytes));
     } finally {
         reader.releaseLock();
     }
