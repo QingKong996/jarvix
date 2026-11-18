@@ -33,3 +33,17 @@ test("serves stale persisted data offline and reports an initial fetch failure",
     expect(await new ModelCatalogService(file, request).get()).toMatchObject({ fetchedAt: 1, stale: true });
     await expect(new ModelCatalogService(join(directory, "missing.json"), request).get()).rejects.toThrow("Offline");
 });
+
+test("rejects an oversized catalog response without replacing the cache", async () => {
+    const file = join(directory, "oversized.json");
+    const request = vi.fn<typeof fetch>().mockResolvedValue(new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+            controller.enqueue(new Uint8Array(8 * 1024 * 1024 + 1));
+            controller.close();
+        }
+    })));
+
+    await expect(new ModelCatalogService(file, request).get()).rejects.toThrow(
+        "models.dev: response exceeds"
+    );
+});

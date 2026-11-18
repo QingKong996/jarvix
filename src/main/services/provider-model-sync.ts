@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { modelDefinitionSchema, type ModelDefinition } from "../../protocol/providers.ts";
+import { readJsonResponse } from "./response-body.ts";
+
+const MAX_MODELS_RESPONSE_BYTES = 8 * 1024 * 1024;
 
 const requestSchema = z.object({
     baseUrl: z.string().trim().min(1).refine((value) => {
@@ -51,7 +54,9 @@ export async function syncProviderModels(
     });
     if (!response.ok) throw new Error(`Provider models: HTTP ${response.status}`);
 
-    const body = responseSchema.safeParse(await response.json());
+    const body = responseSchema.safeParse(
+        await readJsonResponse(response, MAX_MODELS_RESPONSE_BYTES, "Provider models")
+    );
     if (!body.success) throw new Error("Provider models: invalid response");
 
     const models: ModelDefinition[] = [];
