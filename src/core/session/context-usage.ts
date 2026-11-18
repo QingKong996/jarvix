@@ -13,6 +13,8 @@ const CONTEXT_OMISSION_NOTICE = [
     "Earlier conversation history was omitted to fit the model context window.",
     "</system-reminder>"
 ].join("\n");
+// Session history is append-only, so each message's estimate can be reused.
+const messageTokenCache = new WeakMap<LlmMessage, number>();
 
 export type ContextUsageInput = {
     contextWindow: number;
@@ -250,6 +252,16 @@ function estimateFixedTokens(input: Pick<ContextUsageInput, "systemPrompt" | "to
 }
 
 function estimateMessageTokens(message: LlmMessage): number {
+    const cached = messageTokenCache.get(message);
+    if (cached !== undefined) {
+        return cached;
+    }
+    const tokens = estimateMessageTokensUncached(message);
+    messageTokenCache.set(message, tokens);
+    return tokens;
+}
+
+function estimateMessageTokensUncached(message: LlmMessage): number {
     switch (message.role) {
         case "user":
             return MESSAGE_OVERHEAD_TOKENS + estimateTextTokens(message.content);

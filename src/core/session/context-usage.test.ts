@@ -186,3 +186,27 @@ test("estimates each history message only once while trimming an oversized promp
     expect(fitted.fits).toBe(false);
     expect(detailReads).toBe(1);
 });
+
+test("reuses message token estimates across context usage checks", () => {
+    let detailReads = 0;
+    const details = {
+        get payload(): string {
+            detailReads += 1;
+            return "x";
+        }
+    };
+    const message: LlmMessage = {
+        role: "toolResult",
+        toolCallId: "call",
+        toolName: "exec_command",
+        content: "result",
+        details,
+        isError: false,
+        timestamp: 1
+    };
+
+    estimateContextUsage({ contextWindow: 1_000, messages: [message] });
+    estimateContextUsage({ contextWindow: 1_000, messages: [message] });
+
+    expect(detailReads).toBe(1);
+});
