@@ -65,6 +65,25 @@ test("lists only valid project files", () => {
     expect(listProjects(join(base, "missing"))).toEqual([]);
 });
 
+test("loadProject rejects a header id that does not match the file id", () => {
+    const directory = join(base, "mismatched-header");
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(
+        join(directory, "requested-project.json"),
+        `${JSON.stringify({
+            type: "project",
+            version: PROJECT_FORMAT_VERSION,
+            id: "different-project",
+            name: "Mismatched project",
+            workingDirectories: [join(base, "different-workspace")],
+            createdAt: 1_700_000_000_000
+        })}\n`,
+        "utf8"
+    );
+
+    expect(loadProject("requested-project", directory)).toBeNull();
+});
+
 test("rejects projects without a name or working directory", () => {
     const directory = join(base, "invalid");
 
