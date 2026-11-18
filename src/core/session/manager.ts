@@ -20,6 +20,7 @@ import {
     loadSession,
     updateSessionContext,
     updateSessionName,
+    updateSessionNameIfUnchanged,
     updateSessionPermission as updateStoredSessionPermission,
     updateSessionStatus
 } from "./store.ts";
@@ -110,6 +111,21 @@ export class SessionManager {
             session.meta.name = meta.name;
         }
         return meta.name;
+    }
+
+    renameIfUnchanged(
+        id: string,
+        expectedName: string,
+        name: string
+    ): { name: string; renamed: boolean } {
+        const update = updateSessionNameIfUnchanged(id, expectedName, name);
+        if (update.updated) {
+            const session = this.sessions.get(id);
+            if (session) {
+                session.meta.name = update.meta.name;
+            }
+        }
+        return { name: update.meta.name, renamed: update.updated };
     }
 
     updateStatus(id: string, status: JarvixSessionStatus): void {

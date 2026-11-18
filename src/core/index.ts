@@ -174,10 +174,11 @@ export class Jarvix {
         }
 
         const name = await generateSessionName(this.llm, this.config, prompt);
-        if (session.meta.name !== currentName) {
-            return session.meta.name;
+        const update = this.sessions.renameIfUnchanged(sessionId, currentName, name);
+        if (update.renamed) {
+            this.emit(sessionId, { type: "session.renamed", name: update.name });
         }
-        return this.renameSession(sessionId, name);
+        return update.name;
     }
 
     private emit(sessionId: string, event: JarvixEvent): void {

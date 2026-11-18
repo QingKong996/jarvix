@@ -154,6 +154,31 @@ export function updateSessionName(
     return meta;
 }
 
+/** Replace a session name only when its persisted value still matches the expected name. */
+export function updateSessionNameIfUnchanged(
+    id: string,
+    expectedName: string,
+    name: string,
+    directory = defaultSessionDirectory()
+): { meta: JarvixSessionMeta; updated: boolean } {
+    const file = sessionFile(id, directory);
+    const current = readSessionMeta(file);
+    if (!current || current.id !== id) {
+        throw new Error(`Session not found: ${id}`);
+    }
+    if (current.name !== expectedName) {
+        return { meta: current, updated: false };
+    }
+
+    const meta: JarvixSessionMeta = {
+        ...current,
+        version: SESSION_FORMAT_VERSION,
+        name: sessionNameSchema.parse(name)
+    };
+    writeSessionMeta(file, meta);
+    return { meta, updated: true };
+}
+
 /** Change a session's archive state while preserving its messages. */
 export function updateSessionStatus(
     id: string,

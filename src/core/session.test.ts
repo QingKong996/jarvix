@@ -333,6 +333,41 @@ test("renames sessions manually and from the first user prompt", async () => {
     expect(renamed).toEqual(["Manual title", "Focused title"]);
 });
 
+test("does not overwrite a title changed while automatic naming is in flight", async () => {
+    home.path = join(base, "naming-race-home");
+    const directory = join(home.path, ".jarvix", "sessions");
+    const requests: LlmMessage[][] = [];
+    let releaseName!: () => void;
+    const nameGate = new Promise<void>((resolve) => {
+        releaseName = resolve;
+    });
+    const jarvix = new Jarvix({
+        llm: gatedLlm(requests, nameGate),
+        config: TEST_CONFIG
+    });
+    const session = jarvix.createSession({}, SESSION_NAME);
+
+    const naming = jarvix.autoNameSession(session.meta.id, "Name this session");
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+
+    expect(jarvix.releaseSession(session.meta.id)).toBe(true);
+    expect(jarvix.renameSession(session.meta.id, "Manual title")).toBe("Manual title");
+    const reloaded = jarvix.loadSession(session.meta.id);
+    const events: string[] = [];
+    jarvix.subscribe((event) => {
+        if (event.type === "session.renamed") {
+            events.push(event.name);
+        }
+    });
+
+    releaseName();
+
+    expect(await naming).toBe("Manual title");
+    expect(events).toEqual([]);
+    expect(reloaded?.meta.name).toBe("Manual title");
+    expect(loadSession(session.meta.id, directory)?.meta.name).toBe("Manual title");
+});
+
 test("times out session auto-naming when the provider stream stalls", async () => {
     home.path = join(base, "naming-timeout-home");
     const requests: LlmMessage[][] = [];
