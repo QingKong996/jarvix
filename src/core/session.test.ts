@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterAll, expect, test, vi } from "vitest";
 import type { LlmAdapter, LlmAssistantMessage, LlmMessage, LlmModelInfo, LlmStreamEvent } from "../llm/index.ts";
 import { loadSession } from "./session/store.ts";
+import { SESSION_NAME_TIMEOUT_MS } from "./session/naming.ts";
 import { Jarvix } from "./index.ts";
 import type { Language } from "../protocol/config.ts";
 import { providerConfigSchema } from "../protocol/providers.ts";
@@ -98,6 +99,22 @@ function gatedLlm(seen: LlmMessage[][], gate: Promise<void>): LlmAdapter {
                 yield { type: "text.delta", index: 0, delta: reply };
                 yield { type: "text.end", index: 0, text: reply };
                 yield { type: "done", message };
+            })();
+        }
+    };
+}
+
+function stalledLlm(seen: LlmMessage[][], signals: AbortSignal[]): LlmAdapter {
+    return {
+        getModel: () => MODEL,
+        stream(request) {
+            seen.push([...request.messages]);
+            if (request.signal) {
+                signals.push(request.signal);
+            }
+            return (async function* (): AsyncIterable<LlmStreamEvent> {
+                yield { type: "start" };
+                await new Promise<void>(() => undefined);
             })();
         }
     };
@@ -314,6 +331,31 @@ test("renames sessions manually and from the first user prompt", async () => {
     });
     expect(loadSession(session.meta.id, directory)?.meta.name).toBe("Focused title");
     expect(renamed).toEqual(["Manual title", "Focused title"]);
+});
+
+test("times out session auto-naming when the provider stream stalls", async () => {
+    home.path = join(base, "naming-timeout-home");
+    const requests: LlmMessage[][] = [];
+    const signals: AbortSignal[] = [];
+    const jarvix = new Jarvix({
+        llm: stalledLlm(requests, signals),
+        config: TEST_CONFIG
+    });
+    const session = jarvix.createSession({}, SESSION_NAME);
+    vi.useFakeTimers();
+
+    try {
+        const naming = expect(jarvix.autoNameSession(session.meta.id, "Stalled prompt"))
+            .rejects.toThrow("Session naming timed out");
+        await vi.advanceTimersByTimeAsync(SESSION_NAME_TIMEOUT_MS);
+        await naming;
+    } finally {
+        vi.useRealTimers();
+    }
+
+    expect(requests).toHaveLength(1);
+    expect(signals[0]?.aborted).toBe(true);
+    expect(jarvix.loadSession(session.meta.id)?.meta.name).toBe(SESSION_NAME);
 });
 
 test("creates temporary sessions by default and validates explicit project context", () => {
