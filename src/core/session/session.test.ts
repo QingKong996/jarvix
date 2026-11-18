@@ -165,6 +165,39 @@ test("reports a model stream that ends without a completion event", async () => 
     })]);
 });
 
+test("persists the user prompt when model setup fails", async () => {
+    const session = new Session(meta);
+    const events: JarvixEvent[] = [];
+    const stream = vi.fn(() => (async function* (): AsyncIterable<LlmStreamEvent> {
+        yield { type: "done", message: assistantMessage() };
+    })());
+
+    await expect(session.request("keep this prompt", {
+        llm: { getModel: () => MODEL, stream },
+        config: {},
+        emit: (event) => events.push(event)
+    })).rejects.toThrow("No model configured");
+
+    expect(stream).not.toHaveBeenCalled();
+    expect(events).toContainEqual({
+        type: "request.error",
+        error: "No model configured"
+    });
+    expect(session.snapshot().messages).toEqual([
+        expect.objectContaining({
+            role: "user",
+            content: "keep this prompt"
+        })
+    ]);
+    expect(persist).toHaveBeenCalledWith(
+        meta.id,
+        expect.objectContaining({
+            role: "user",
+            content: "keep this prompt"
+        })
+    );
+});
+
 test("registers request_permission unless the session has full access", async () => {
     const toolNames: string[][] = [];
     const llm: LlmAdapter = {
