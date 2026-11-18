@@ -1,3 +1,19 @@
+export const SANDBOX_VIOLATION_TRACKING_LIMIT = 256;
+
+export function rememberSandboxViolation(seen: Set<string>, signature: string): boolean {
+    if (seen.has(signature)) {
+        return false;
+    }
+    seen.add(signature);
+    if (seen.size > SANDBOX_VIOLATION_TRACKING_LIMIT) {
+        const oldest = seen.values().next().value;
+        if (oldest !== undefined) {
+            seen.delete(oldest);
+        }
+    }
+    return true;
+}
+
 export function formatSandboxViolations(lines: readonly string[]): string {
     const sanitized = lines
         .map((line) => sanitizeViolationLine(line))

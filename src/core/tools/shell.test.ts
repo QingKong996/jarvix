@@ -620,6 +620,49 @@ test("returns only new sandbox violations when a timed-out task exits", async ()
     }
 });
 
+test("bounds pending sandbox violations in a long-running session", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-shell-sandbox-bounded-"));
+    const runner = join(directory, "fake-sandbox-runner.mjs");
+    writeFileSync(runner, [
+        "import { readFileSync } from 'node:fs';",
+        "const invocation = JSON.parse(readFileSync(process.argv[2], 'utf8'));",
+        "const violations = Array.from({ length: 300 }, (_, index) => ({",
+        "  line: `blocked-${index}`,",
+        "  timestamp: Date.now() + index",
+        "}));",
+        "process.send?.({",
+        "  type: 'violations',",
+        "  commandId: invocation.commandId,",
+        "  violations",
+        "}, () => process.send?.({",
+        "  type: 'done',",
+        "  commandId: invocation.commandId,",
+        "  exitCode: 0",
+        "}, () => process.exit(0)));"
+    ].join("\n"), "utf8");
+    const tool = new ShellTool({
+        sandboxPolicy: () => createSandboxPolicy("read-only", [directory]),
+        sandboxPreflight: readySandboxPreflight,
+        sandboxRunnerPath: runner
+    });
+    tools.push(tool);
+
+    try {
+        const result = await tool.execute(call("exec_command", {
+            command: "ignored",
+            cwd: directory,
+            timeoutMs: 5_000
+        }, "call-bounded-violations"), { onOutput: () => undefined });
+
+        expect(result.content).toContain("200 earlier sandbox violations omitted");
+        expect(result.content).toContain("blocked-299");
+        expect(result.content).not.toContain("blocked-0");
+    } finally {
+        tool.dispose();
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
 test("returns a setup error before starting a sandboxed command", async () => {
     const tool = new ShellTool({
         sandboxPolicy: () => createSandboxPolicy("project-read-write", [process.cwd()]),

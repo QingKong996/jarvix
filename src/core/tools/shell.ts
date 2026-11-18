@@ -21,7 +21,8 @@ import { isSandboxRunnerMessage } from "../permissions/sandbox-protocol.ts";
 import type { SandboxPolicy } from "../permissions/sandbox.ts";
 import {
     appendSandboxViolations,
-    formatSandboxViolations
+    formatSandboxViolations,
+    rememberSandboxViolation
 } from "../permissions/violations.ts";
 import {
     MAX_TOOL_OUTPUT_CHARS,
@@ -53,6 +54,7 @@ export const MAX_STDIN_QUEUE_CHARS = MAX_STDIN_COMMAND_CHARS * 2;
 export const MAX_STDIN_QUEUE_COMMANDS = 16;
 export const DEFAULT_MAX_SHELL_SESSIONS = 8;
 export const DEFAULT_MAX_APP_SHELL_SESSIONS = 16;
+const MAX_PENDING_SANDBOX_VIOLATIONS = 100;
 
 /** Shares a bounded number of active or retained shell sessions across conversations. */
 export class ShellSessionBudget {
@@ -176,7 +178,8 @@ type SandboxSessionState = {
     commandId: string;
     violations: string[];
     seenViolations: Set<string>;
-    reportedViolations: number;
+    omittedViolations: number;
+    intercepted: boolean;
     done: boolean;
 };
 
@@ -336,7 +339,7 @@ export class ShellTool implements ToolExecutor {
                 error: session.error,
                 unreadOutput: session.output.slice(session.readOffset),
                 truncatedCharacters: session.truncatedCharacters,
-                intercepted: (session.sandbox?.violations.length ?? 0) > 0,
+                intercepted: session.sandbox?.intercepted ?? false,
                 violations: takeViolations(session)
             });
         };
@@ -604,7 +607,8 @@ export class ShellTool implements ToolExecutor {
                     commandId: sandboxed.commandId,
                     violations: [],
                     seenViolations: new Set(),
-                    reportedViolations: 0,
+                    omittedViolations: 0,
+                    intercepted: false,
                     done: false
                 }
                 : null,
@@ -763,11 +767,15 @@ function addSandboxViolations(
 ): void {
     for (const violation of violations) {
         const line = violation.line.trim();
-        if (line.length === 0 || sandbox.seenViolations.has(line)) {
+        if (line.length === 0 || !rememberSandboxViolation(sandbox.seenViolations, line)) {
             continue;
         }
-        sandbox.seenViolations.add(line);
+        sandbox.intercepted = true;
         sandbox.violations.push(line);
+        if (sandbox.violations.length > MAX_PENDING_SANDBOX_VIOLATIONS) {
+            sandbox.violations.shift();
+            sandbox.omittedViolations += 1;
+        }
     }
 }
 
@@ -776,8 +784,13 @@ function takeViolations(session: ShellSession): string[] {
     if (!sandbox) {
         return [];
     }
-    const violations = sandbox.violations.slice(sandbox.reportedViolations);
-    sandbox.reportedViolations = sandbox.violations.length;
+    const violations = sandbox.violations.splice(0);
+    if (sandbox.omittedViolations > 0) {
+        violations.unshift(
+            `[${sandbox.omittedViolations} earlier sandbox violations omitted]`
+        );
+        sandbox.omittedViolations = 0;
+    }
     return violations;
 }
 
@@ -885,7 +898,7 @@ async function stopSession(session: ShellSession): Promise<ShellSessionExit> {
         error: session.error,
         unreadOutput: session.output.slice(session.readOffset),
         truncatedCharacters: session.truncatedCharacters,
-        intercepted: (session.sandbox?.violations.length ?? 0) > 0,
+        intercepted: session.sandbox?.intercepted ?? false,
         violations: takeViolations(session)
     };
 }
