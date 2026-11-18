@@ -129,6 +129,38 @@ test("rejects a patch when its expected lines cannot be found", async () => {
     }
 });
 
+test("validates every hunk before changing any file", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-apply-patch-preflight-"));
+    const tool = new ApplyPatchTool();
+    try {
+        const first = join(directory, "first.txt");
+        const second = join(directory, "second.txt");
+        writeFileSync(first, "old first\n", "utf8");
+        writeFileSync(second, "untouched\n", "utf8");
+
+        const result = await tool.execute(call(directory, [
+            "*** Begin Patch",
+            "*** Update File: first.txt",
+            "@@",
+            "-old first",
+            "+new first",
+            "*** Update File: second.txt",
+            "@@",
+            "-missing",
+            "+replacement",
+            "*** End Patch"
+        ]), { onOutput: () => undefined });
+
+        expect(result.isError).toBe(true);
+        expect(result.content).toContain("Failed to find expected lines");
+        expect(readFileSync(first, "utf8")).toBe("old first\n");
+        expect(readFileSync(second, "utf8")).toBe("untouched\n");
+    } finally {
+        tool.dispose();
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
 test("registers apply_patch in the default tool set", () => {
     const tools = createDefaultTools();
     try {
