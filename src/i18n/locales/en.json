@@ -124,6 +124,7 @@
                 "system": "System",
                 "user": "User",
                 "assistant": "Assistant",
+                "toolCall": "Tool call",
                 "toolResult": "Tool result"
             }
         },

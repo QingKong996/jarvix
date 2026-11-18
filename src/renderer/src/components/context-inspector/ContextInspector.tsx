@@ -99,7 +99,7 @@ export function ContextInspector({
                 >
                     {entries.map((entry, index) => (
                         <ContextMessage
-                            key={`${entry.role}-${index}`}
+                            key={`${entry.kind}-${index}`}
                             entry={entry}
                         />
                     ))}

@@ -10,7 +10,7 @@ beforeAll(async () => {
 });
 
 describe("ContextMessage", () => {
-    test("renders only the four message types and their raw text", () => {
+    test("renders message roles and tool calls as raw text", () => {
         const messages = contextMessagesFor({
             systemPrompt: "system prompt",
             messages: [
@@ -26,12 +26,18 @@ describe("ContextMessage", () => {
                 },
                 {
                     role: "assistant",
-                    content: [{
-                        type: "toolCall",
-                        id: "call-1",
-                        name: "exec_command",
-                        arguments: { command: "pwd" }
-                    }],
+                    content: [
+                        {
+                            type: "thinking",
+                            thinking: "checking"
+                        },
+                        {
+                            type: "toolCall",
+                            id: "call-1",
+                            name: "exec_command",
+                            arguments: { command: "pwd" }
+                        }
+                    ],
                     provider: "test",
                     model: "test",
                     api: "test",
@@ -67,16 +73,18 @@ describe("ContextMessage", () => {
         expect(html.match(/>系统消息</g)).toHaveLength(2);
         expect(html.match(/>用户</g)).toHaveLength(1);
         expect(html.match(/>助手</g)).toHaveLength(1);
+        expect(html.match(/>工具调用</g)).toHaveLength(1);
         expect(html.match(/>工具结果</g)).toHaveLength(1);
         expect(html).toContain("system prompt");
         expect(html).toContain("&lt;environment_context&gt;");
         expect(html).toContain("hello");
+        expect(html).toContain("checking");
         expect(html).toContain("exec_command");
         expect(html).toContain("C:\\workspace");
         expect(html).not.toContain("环境快照");
         expect(html).not.toContain("系统提示词");
         expect(html).not.toContain("#02");
-        expect(html.match(/<details/g)).toHaveLength(5);
+        expect(html.match(/<details/g)).toHaveLength(6);
         expect(html).not.toContain("<details open");
         expect(html).toContain("exec_command · {&quot;command&quot;:&quot;pwd&quot;}");
     });

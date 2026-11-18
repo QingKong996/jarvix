@@ -3,14 +3,15 @@ import { useTranslation } from "react-i18next";
 import { cn } from "cn";
 import type { ContextMessageEntry } from "./context-messages.ts";
 
-type RoleLabelKey =
+type KindLabelKey =
     | "rightSidebar.context.roles.system"
     | "rightSidebar.context.roles.user"
     | "rightSidebar.context.roles.assistant"
+    | "rightSidebar.context.roles.toolCall"
     | "rightSidebar.context.roles.toolResult";
 
-const TYPE_STYLE: Record<ContextMessageEntry["role"], {
-    labelKey: RoleLabelKey;
+const TYPE_STYLE: Record<ContextMessageEntry["kind"], {
+    labelKey: KindLabelKey;
     badge: string;
 }> = {
     system: {
@@ -25,6 +26,10 @@ const TYPE_STYLE: Record<ContextMessageEntry["role"], {
         labelKey: "rightSidebar.context.roles.assistant",
         badge: "border-fuchsia-400/25 bg-fuchsia-400/10 text-fuchsia-700 dark:text-fuchsia-200"
     },
+    toolCall: {
+        labelKey: "rightSidebar.context.roles.toolCall",
+        badge: "border-cyan-400/25 bg-cyan-400/10 text-cyan-700 dark:text-cyan-200"
+    },
     toolResult: {
         labelKey: "rightSidebar.context.roles.toolResult",
         badge: "border-emerald-400/25 bg-emerald-400/10 text-emerald-700 dark:text-emerald-200"
@@ -33,7 +38,7 @@ const TYPE_STYLE: Record<ContextMessageEntry["role"], {
 
 export function ContextMessage({ entry }: { entry: ContextMessageEntry }) {
     const { t } = useTranslation();
-    const style = TYPE_STYLE[entry.role];
+    const style = TYPE_STYLE[entry.kind];
 
     return (
         <article className="border-b border-border/60 last:border-b-0">
