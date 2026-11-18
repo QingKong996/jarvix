@@ -45,3 +45,16 @@ test("renders all turns when the history is smaller than one page", () => {
     expect(window.omitted).toBe(0);
     expect(window.turns).toHaveLength(12);
 });
+
+test("does not expand a tool-heavy page to the only old user prompt", () => {
+    const history = turns(500).map((turn, index): CommittedTurn => ({
+        ...turn,
+        role: index === 0 ? "user" : "assistant"
+    }));
+
+    const window = visibleTranscriptWindow(history, null);
+
+    expect(window.start).toBe(420);
+    expect(window.omitted).toBe(420);
+    expect(window.turns).toHaveLength(80);
+});
