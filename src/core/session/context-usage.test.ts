@@ -121,3 +121,33 @@ test("reports when even the newest turn exceeds the input budget", () => {
         content: [{ type: "text", text: "a".repeat(500) }]
     });
 });
+
+test("retains a required reminder without counting or duplicating it as omitted history", () => {
+    const reminder: LlmMessage = {
+        role: "user",
+        content: "<system-reminder>\n<environment_context>\nworkspace-b\n</environment_context>\n</system-reminder>",
+        context: "system-reminder",
+        timestamp: 2
+    };
+    const messages: LlmMessage[] = [
+        { role: "user", content: `old ${"a".repeat(1_000)}`, timestamp: 1 },
+        reminder,
+        { role: "assistant", content: [{ type: "text", text: "old response" }], provider: "test", model: "test", api: "test", usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0 }, stopReason: "stop", timestamp: 3 },
+        { role: "user", content: "latest question", timestamp: 4 }
+    ];
+
+    const fitted = fitMessagesToContext({
+        contextWindow: 250,
+        maxOutputTokens: 20,
+        messages,
+        requiredMessages: [reminder]
+    });
+
+    expect(fitted.fits).toBe(true);
+    expect(fitted.messages.filter((message) => message === reminder)).toHaveLength(1);
+    expect(fitted.omittedMessages).toBe(2);
+    expect(fitted.messages.at(-1)).toMatchObject({
+        role: "user",
+        content: "latest question"
+    });
+});
