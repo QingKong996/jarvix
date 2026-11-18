@@ -234,11 +234,11 @@ export class Session {
     applyPermission(permission: PermissionMode): void {
         const previous = this.meta.permission;
         this.meta.permission = permission;
-        if (
-            previous === permission ||
-            !this.running ||
-            this.requestController?.signal.aborted
-        ) {
+        if (previous === permission) {
+            return;
+        }
+        this.permissions.reset();
+        if (!this.running || this.requestController?.signal.aborted) {
             return;
         }
         if (!this.pendingTurnMessages.some((pending) => pending.type === "environment")) {

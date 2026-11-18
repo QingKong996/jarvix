@@ -28,7 +28,7 @@ export function environmentContextFor(
                 : "- writes: denied except the sandbox's private temp",
             "- reads: not restricted by Jarvix; sandbox/OS rules apply",
             "- To enable or disable network domains or filesystem read/write access for this session, call request_permission with absolute directory paths.",
-            "- Permission grants are in-memory only and are not restored after Jarvix restarts."
+            "- Permission grants are in-memory only, are not restored after Jarvix restarts, and are cleared when the permission mode changes."
         ];
     const writableRootsLine = permission === "full-access"
         ? null
