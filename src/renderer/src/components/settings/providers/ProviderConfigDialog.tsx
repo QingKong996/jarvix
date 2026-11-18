@@ -11,6 +11,7 @@ import { DialogFooter } from "../../common/DialogFooter.tsx";
 import { ModelConfigPanel } from "./ModelConfigPanel.tsx";
 import { ProviderConfigForm } from "./ProviderConfigForm.tsx";
 import { ProviderIcon } from "./ProviderIcon.tsx";
+import { mergeSyncedModels } from "./model-merge.ts";
 import { Button } from "../../ui/button.tsx";
 import {
     Dialog,
@@ -162,8 +163,7 @@ export function ProviderConfigDialog({ provider, selectedModel, disabled, onClos
                 setError(t("settings.providers.syncEmpty"));
                 return;
             }
-            const existing = new Map(draft.models.map((model) => [model.id, model]));
-            const models = remoteModels.map((model) => existing.get(model.id) ?? model);
+            const models = mergeSyncedModels(draft.models, remoteModels);
             update({ models });
             if (selection?.provider === draft.id && !models.some((model) => model.id === selection.id)) {
                 setSelection(undefined);
