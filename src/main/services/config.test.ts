@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, test } from "vitest";
@@ -108,9 +108,19 @@ test("saveConfig and loadConfig round-trip the config data object", () => {
 
     saveConfig({ language: "en", theme: "light" }, paths, defaults);
     expect(loadConfig(paths, defaults)).toEqual({ language: "en", theme: "light" });
+    expect(readdirSync(paths.directory)).toEqual(["config.json"]);
 
     saveConfig({}, paths, defaults);
     expect(loadConfig(paths, defaults)).toEqual({ language: "zh", theme: "dark" });
+    expect(readdirSync(paths.directory)).toEqual(["config.json"]);
+});
+
+test("saveConfig removes its temporary file when replacement fails", () => {
+    const paths = configPaths(join(base, "failed-replace"));
+    mkdirSync(paths.file, { recursive: true });
+
+    expect(() => saveConfig({ language: "en" }, paths, defaults)).toThrow();
+    expect(readdirSync(paths.directory)).toEqual(["config.json"]);
 });
 
 test("loadConfig fills only the missing fields from the file", () => {
