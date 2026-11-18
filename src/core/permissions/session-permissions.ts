@@ -112,10 +112,20 @@ export class SessionPermissions {
         ));
     }
 
-    dispose(): void {
+    reset(): void {
+        this.enabledDomains.clear();
+        this.disabledDomains.clear();
+        this.enabledReadDirectories.clear();
+        this.disabledReadDirectories.clear();
+        this.enabledWriteDirectories.clear();
+        this.disabledWriteDirectories.clear();
         for (const pending of [...this.pending.values()]) {
             pending.settle("cancelled");
         }
+    }
+
+    dispose(): void {
+        this.reset();
     }
 
     private finish(requestId: string): void {

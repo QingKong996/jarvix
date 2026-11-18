@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, test, vi } from "vitest";
@@ -10,6 +10,7 @@ import type {
     LlmStopReason,
     LlmStreamEvent
 } from "../../llm/types.ts";
+import type { JarvixEvent } from "../../protocol/event.ts";
 import { providerConfigSchema } from "../../protocol/providers.ts";
 import { Jarvix } from "../index.ts";
 
@@ -110,6 +111,91 @@ test("approves access for the session and applies it to later tool calls", async
         decision: "approved"
     });
     expect(readFileSync(join(approvedDirectory, "access.txt"), "utf8")).toBe("allowed\n");
+});
+
+test("clears approved access when the permission mode changes", async () => {
+    home.path = join(base, "permission-change-home");
+    const workspace = join(base, "permission-change-workspace");
+    const approvedDirectory = join(base, "permission-change-approved");
+    mkdirSync(workspace, { recursive: true });
+    mkdirSync(approvedDirectory, { recursive: true });
+    let turn = 0;
+    const llm: LlmAdapter = {
+        getModel: () => MODEL,
+        stream: () => streamTurns(() => {
+            turn += 1;
+            if (turn === 1) {
+                return [toolMessage([
+                    toolCall("grant", "request_permission", {
+                        domains: [],
+                        directories: [{
+                            action: "enable",
+                            access: "write",
+                            path: approvedDirectory
+                        }]
+                    })
+                ])];
+            }
+            if (turn === 2) {
+                return [toolMessage([
+                    toolCall("first-patch", "apply_patch", {
+                        cwd: approvedDirectory,
+                        patch: [
+                            "*** Begin Patch",
+                            "*** Add File: first.txt",
+                            "+allowed",
+                            "*** End Patch"
+                        ].join("\n")
+                    })
+                ])];
+            }
+            if (turn === 4) {
+                return [toolMessage([
+                    toolCall("second-patch", "apply_patch", {
+                        cwd: approvedDirectory,
+                        patch: [
+                            "*** Begin Patch",
+                            "*** Add File: second.txt",
+                            "+should not be written",
+                            "*** End Patch"
+                        ].join("\n")
+                    })
+                ])];
+            }
+            return [assistantMessage("done")];
+        })
+    };
+    const jarvix = new Jarvix({ llm, config: CONFIG });
+    const session = jarvix.createSession(
+        { workingDirectory: workspace },
+        "permission change",
+        "auto-review"
+    );
+    const toolEnds: Array<Extract<JarvixEvent, { type: "tool.end" }>> = [];
+    const unsubscribe = jarvix.subscribe((event, sessionId) => {
+        if (event.type === "permission.request") {
+            expect(jarvix.respondPermission(sessionId, event.request.id, true)).toBe(true);
+        } else if (event.type === "tool.end") {
+            toolEnds.push(event);
+        }
+    });
+
+    try {
+        await jarvix.request("allow access", session.meta.id);
+        expect(readFileSync(join(approvedDirectory, "first.txt"), "utf8")).toBe("allowed\n");
+
+        jarvix.setPermission(session.meta.id, "read-only");
+        await jarvix.request("try again", session.meta.id);
+
+        expect(toolEnds.find((event) => event.toolCallId === "second-patch")).toMatchObject({
+            isError: true,
+            data: { status: "failed" }
+        });
+        expect(existsSync(join(approvedDirectory, "second.txt"))).toBe(false);
+    } finally {
+        unsubscribe();
+        await jarvix.shutdown();
+    }
 });
 
 function streamTurns(next: () => LlmAssistantMessage[]): AsyncIterable<LlmStreamEvent> {

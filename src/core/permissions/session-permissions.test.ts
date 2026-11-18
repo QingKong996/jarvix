@@ -56,6 +56,27 @@ test("aborting a task cancels its pending request", async () => {
     expect(permissions.respond(handle.request.id, "approved")).toBe(false);
 });
 
+test("reset clears grants and cancels pending requests", async () => {
+    const permissions = new SessionPermissions();
+    const approved = permissions.begin({
+        domains: [{ action: "enable", domain: "api.example.com" }],
+        directories: [{ action: "enable", access: "write", path: directory }]
+    });
+    permissions.respond(approved.request.id, "approved");
+
+    const pending = permissions.begin({
+        domains: [{ action: "enable", domain: "other.example.com" }],
+        directories: []
+    });
+    permissions.reset();
+
+    await expect(pending.decision).resolves.toBe("cancelled");
+    expect(permissions.respond(pending.request.id, "approved")).toBe(false);
+    const policy = permissions.apply(createSandboxPolicy("read-only", []));
+    expect(policy?.network.allowedDomains).toEqual([]);
+    expect(policy?.filesystem.allowWrite).toEqual([]);
+});
+
 test("applies and reverses every domain and filesystem access change", async () => {
     const permissions = new SessionPermissions();
     const readEnabled = resolve("read-enabled");
