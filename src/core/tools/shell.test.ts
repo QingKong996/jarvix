@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
@@ -267,6 +267,61 @@ test("bounds retained shell sessions and reuses released slots", async () => {
         expect(released.data.output).toContain("slot-released");
     } finally {
         tool.dispose();
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
+test("terminates the full process tree when disposed", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-shell-dispose-tree-"));
+    const marker = join(directory, "orphan-marker.txt");
+    const trigger = join(directory, "trigger.txt");
+    const script = join(directory, "delayed-write.mjs");
+    writeFileSync(script, [
+        "import { existsSync, writeFileSync } from 'node:fs';",
+        "process.stdout.write('child-ready:' + process.pid + '\\n');",
+        "let triggered = false;",
+        "setInterval(() => {",
+        "  if (!triggered && existsSync(process.argv[2])) {",
+        "    triggered = true;",
+        "    setTimeout(() => writeFileSync(process.argv[3], 'alive'), 200);",
+        "  }",
+        "}, 20);"
+    ].join("\n"), "utf8");
+    const tool = new ShellTool();
+    tools.push(tool);
+    const command = process.platform === "win32"
+        ? `& ${JSON.stringify(process.execPath)} ${JSON.stringify(script)} ${JSON.stringify(trigger)} ${JSON.stringify(marker)}`
+        : `${JSON.stringify(process.execPath)} ${JSON.stringify(script)} ${JSON.stringify(trigger)} ${JSON.stringify(marker)}`;
+    const outputs: string[] = [];
+    let childPid: number | undefined;
+
+    try {
+        const execution = tool.execute(call("exec_command", {
+            command,
+            cwd: directory,
+            timeoutMs: 10_000
+        }), {
+            onOutput: ({ output }) => outputs.push(output)
+        });
+        await vi.waitFor(() => {
+            expect(outputs.join("")).toMatch(/child-ready:\d+\n/);
+        }, { timeout: 5_000 });
+        childPid = Number(/child-ready:(\d+)/.exec(outputs.join(""))?.[1]);
+
+        tool.dispose();
+        writeFileSync(trigger, "go", "utf8");
+        void execution.catch(() => undefined);
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 600));
+
+        expect(existsSync(marker)).toBe(false);
+    } finally {
+        tool.dispose();
+        if (childPid !== undefined) {
+            try {
+                process.kill(childPid, "SIGKILL");
+            } catch {}
+        }
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
         rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }

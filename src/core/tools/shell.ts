@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
     spawn,
+    spawnSync,
     type ChildProcessWithoutNullStreams,
     type StdioOptions
 } from "node:child_process";
@@ -263,7 +264,7 @@ export class ShellTool implements ToolExecutor {
             session.listener = null;
             session.exitListener = null;
             if (!session.ended) {
-                session.child.kill();
+                terminateProcessTreeSync(session);
             }
         }
         for (const session of sessions) {
@@ -946,12 +947,41 @@ async function forceTerminateProcessTree(session: ShellSession): Promise<void> {
     }
 }
 
+function terminateProcessTreeSync(session: ShellSession): void {
+    const pid = session.child.pid;
+    if (pid === undefined) {
+        session.child.kill("SIGKILL");
+        return;
+    }
+
+    if (process.platform === "win32") {
+        const result = spawnSync(
+            windowsTaskkillPath(),
+            taskkillArguments(pid),
+            {
+                stdio: "ignore",
+                windowsHide: true,
+                timeout: STOP_GRACE_MS
+            }
+        );
+        if (result.error || result.status !== 0) {
+            session.child.kill("SIGKILL");
+        }
+        return;
+    }
+
+    try {
+        process.kill(-pid, "SIGKILL");
+    } catch {
+        session.child.kill("SIGKILL");
+    }
+}
+
 async function taskkill(pid: number, session: ShellSession): Promise<void> {
-    const systemRoot = process.env.SystemRoot ?? process.env.WINDIR ?? "C:\\Windows";
     await new Promise<void>((resolvePromise) => {
         const killer = spawn(
-            join(systemRoot, "System32", "taskkill.exe"),
-            ["/PID", String(pid), "/T", "/F"],
+            windowsTaskkillPath(),
+            taskkillArguments(pid),
             { stdio: "ignore", windowsHide: true }
         );
         killer.once("error", () => {
@@ -960,6 +990,15 @@ async function taskkill(pid: number, session: ShellSession): Promise<void> {
         });
         killer.once("close", () => resolvePromise());
     });
+}
+
+function windowsTaskkillPath(): string {
+    const systemRoot = process.env.SystemRoot ?? process.env.WINDIR ?? "C:\\Windows";
+    return join(systemRoot, "System32", "taskkill.exe");
+}
+
+function taskkillArguments(pid: number): string[] {
+    return ["/PID", String(pid), "/T", "/F"];
 }
 
 function finishedResult(command: string, session: ShellSession): ToolExecutionResult {
