@@ -120,6 +120,39 @@ test("updates a session context in memory and on disk", () => {
     expect(session.meta.workingDirectory).toBeUndefined();
 });
 
+test("updates metadata without loading unopened session history", () => {
+    home.path = join(base, "metadata-only-home");
+    const created = new SessionManager().create({}, "Metadata session");
+    const manager = new SessionManager();
+    const directory = join(base, "metadata-directory");
+
+    expect(manager.listLoaded()).toHaveLength(0);
+
+    manager.rename(created.meta.id, "Renamed session");
+    manager.updateStatus(created.meta.id, "archived");
+    manager.updateContext(created.meta.id, { workingDirectory: directory });
+    manager.updatePermission(created.meta.id, "project-read-write");
+
+    expect(manager.listLoaded()).toHaveLength(0);
+    expect(manager.listSummaries()[0]).toMatchObject({
+        id: created.meta.id,
+        name: "Renamed session",
+        status: "archived",
+        workingDirectory: directory
+    });
+
+    const loaded = manager.load(created.meta.id);
+    expect(loaded?.meta).toMatchObject({
+        name: "Renamed session",
+        permission: "project-read-write"
+    });
+    expect(manager.listLoaded()).toEqual([loaded]);
+
+    manager.delete(created.meta.id);
+    expect(manager.listLoaded()).toHaveLength(0);
+    expect(manager.listSummaries()).toHaveLength(0);
+});
+
 test("uses an updated working directory for relative shell commands", async () => {
     home.path = join(base, "cwd-home");
     const manager = new SessionManager();

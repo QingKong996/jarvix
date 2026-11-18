@@ -63,21 +63,27 @@ export class SessionManager {
         return [...this.sessions.values()];
     }
 
+    getLoaded(id: string): Session | undefined {
+        return this.sessions.get(id);
+    }
+
     updateContext(id: string, context: JarvixSessionContext): JarvixSessionContext {
-        const session = this.require(id);
         const meta = updateSessionContext(id, context);
         const updated = sessionContextFrom(meta);
-        this.applyContext(session, updated);
+        const session = this.sessions.get(id);
+        if (session) {
+            this.applyContext(session, updated);
+        }
         return updated;
     }
 
     updatePermission(id: string, permission: PermissionMode): PermissionMode {
-        const session = this.require(id);
-        if (session.meta.permission === permission) {
+        const session = this.sessions.get(id);
+        if (session?.meta.permission === permission) {
             return permission;
         }
         const meta = updateStoredSessionPermission(id, permission);
-        session.applyPermission(meta.permission);
+        session?.applyPermission(meta.permission);
         return meta.permission;
     }
 
@@ -89,27 +95,31 @@ export class SessionManager {
     }
 
     rename(id: string, name: string): string {
-        const session = this.require(id);
         const meta = updateSessionName(id, name);
-        session.meta.name = meta.name;
+        const session = this.sessions.get(id);
+        if (session) {
+            session.meta.name = meta.name;
+        }
         return meta.name;
     }
 
     updateStatus(id: string, status: JarvixSessionStatus): void {
-        const session = this.require(id);
         const meta = updateSessionStatus(id, status);
-        session.meta.status = meta.status;
-        if (meta.archivedAt === undefined) {
-            delete session.meta.archivedAt;
-        } else {
-            session.meta.archivedAt = meta.archivedAt;
+        const session = this.sessions.get(id);
+        if (session) {
+            session.meta.status = meta.status;
+            if (meta.archivedAt === undefined) {
+                delete session.meta.archivedAt;
+            } else {
+                session.meta.archivedAt = meta.archivedAt;
+            }
         }
     }
 
     delete(id: string): void {
-        const session = this.require(id);
+        const session = this.sessions.get(id);
         deleteSession(id);
-        session.dispose();
+        session?.dispose();
         this.sessions.delete(id);
     }
 

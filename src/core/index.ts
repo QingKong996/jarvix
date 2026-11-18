@@ -110,7 +110,10 @@ export class Jarvix {
             throw new Error(`Project not found: ${normalizedContext.projectId}`);
         }
         const updated = this.sessions.updateContext(sessionId, normalizedContext);
-        this.emitContextUsage(this.sessions.require(sessionId));
+        const session = this.sessions.getLoaded(sessionId);
+        if (session) {
+            this.emitContextUsage(session);
+        }
         return updated;
     }
 
@@ -137,7 +140,10 @@ export class Jarvix {
 
     setPermission(sessionId: string, permission: PermissionMode): PermissionMode {
         const updated = this.sessions.updatePermission(sessionId, permission);
-        this.emitContextUsage(this.sessions.require(sessionId));
+        const session = this.sessions.getLoaded(sessionId);
+        if (session) {
+            this.emitContextUsage(session);
+        }
         return updated;
     }
 
