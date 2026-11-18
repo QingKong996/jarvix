@@ -74,6 +74,21 @@ export function ingestBackgroundTasks(sessionId: string, events: readonly Jarvix
     }
 }
 
+export function clearBackgroundTasks(sessionId: string): void {
+    if (!tasksBySession.has(sessionId)) {
+        return;
+    }
+    tasksBySession = new Map(tasksBySession);
+    tasksBySession.delete(sessionId);
+    for (const listener of listeners) {
+        listener();
+    }
+}
+
+export function backgroundTasksFor(sessionId: string | null): readonly ToolTaskSnapshot[] {
+    return sessionId ? tasksBySession.get(sessionId) ?? EMPTY_TASKS : EMPTY_TASKS;
+}
+
 function subscribe(listener: () => void): () => void {
     listeners.add(listener);
     return () => {
@@ -84,7 +99,7 @@ function subscribe(listener: () => void): () => void {
 export function useBackgroundTasks(sessionId: string | null): readonly ToolTaskSnapshot[] {
     return useSyncExternalStore(
         subscribe,
-        () => sessionId ? tasksBySession.get(sessionId) ?? EMPTY_TASKS : EMPTY_TASKS,
+        () => backgroundTasksFor(sessionId),
         () => EMPTY_TASKS
     );
 }

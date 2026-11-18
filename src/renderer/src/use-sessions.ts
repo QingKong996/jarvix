@@ -12,7 +12,10 @@ import {
     type JarvixSessionContext,
     type JarvixSessionSummary
 } from "../../protocol/session.ts";
-import { ingestBackgroundTasks } from "./background-tasks/store.ts";
+import {
+    clearBackgroundTasks,
+    ingestBackgroundTasks
+} from "./background-tasks/store.ts";
 import { RequestEventGate } from "./request-event-gate.ts";
 import {
     beginTurn,
@@ -424,6 +427,7 @@ export function useSessions() {
         setBusy(true);
         try {
             await bridge.deleteSession(sessionId);
+            clearBackgroundTasks(sessionId);
             if (activeSessionIdRef.current === sessionId) {
                 activateSession(null);
             }
