@@ -63,6 +63,21 @@ test("sessionFile places <id>.jsonl in the given directory", () => {
     expect(sessionFile("abc", base)).toBe(join(base, "abc.jsonl"));
 });
 
+test.each([
+    "",
+    ".",
+    "..",
+    "../outside",
+    "..\\outside",
+    "nested/session",
+    "nested\\session",
+    "invalid\u0000id",
+    "CON",
+    " CON "
+])("sessionFile rejects unsafe id %j", (id) => {
+    expect(() => sessionFile(id, base)).toThrow("Invalid session id");
+});
+
 test("createSession writes the current header version to a <uuid>.jsonl file", () => {
     const directory = join(base, "create");
     const session = createSession({ projectId: PROJECT_ID }, SESSION_NAME, directory);

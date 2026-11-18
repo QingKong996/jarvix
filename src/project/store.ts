@@ -7,6 +7,7 @@ import {
     jarvixProjectSchema,
     type JarvixProject
 } from "../protocol/project.ts";
+import { assertStorageId, isStorageId } from "../core/storage-id.ts";
 
 export const PROJECT_FORMAT_VERSION = 1;
 
@@ -14,7 +15,10 @@ const PROJECT_FILE_EXTENSION = ".json";
 const PROJECT_FILE_MODE = 0o600;
 
 export function projectFile(id: string, directory = defaultProjectDirectory()): string {
-    return join(directory, `${id}${PROJECT_FILE_EXTENSION}`);
+    return join(
+        directory,
+        `${assertStorageId(id, "project")}${PROJECT_FILE_EXTENSION}`
+    );
 }
 
 export function createProject(
@@ -41,8 +45,9 @@ export function createProject(
 }
 
 export function loadProject(id: string, directory = defaultProjectDirectory()): JarvixProject | null {
+    const file = projectFile(id, directory);
     try {
-        return parseProject(JSON.parse(readFileSync(projectFile(id, directory), "utf8")));
+        return parseProject(JSON.parse(readFileSync(file, "utf8")));
     } catch {
         return null;
     }
@@ -67,7 +72,11 @@ export function listProjects(directory = defaultProjectDirectory()): JarvixProje
                 continue;
             }
             const project = parseProject(JSON.parse(readFileSync(file, "utf8")));
-            if (project && `${project.id}${PROJECT_FILE_EXTENSION}` === entry) {
+            if (
+                project &&
+                isStorageId(project.id) &&
+                `${project.id}${PROJECT_FILE_EXTENSION}` === entry
+            ) {
                 projects.push(project);
             }
         } catch {
