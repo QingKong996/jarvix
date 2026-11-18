@@ -47,7 +47,8 @@
         "send": "发送",
         "stop": "终止",
         "contextUsage": {
-            "label": "上下文已使用约 {{used}} / {{limit}} tokens（{{percent}}%）"
+            "label": "上下文已使用约 {{used}} / {{limit}} tokens（{{percent}}%）",
+            "omitted": "将省略 {{count}} 条较早消息"
         },
         "model": "模型",
         "reasoning": "推理等级",

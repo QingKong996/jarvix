@@ -30,7 +30,7 @@ import {
 } from "../tools/index.ts";
 import { createToolCallViewData, toToolResultDetails, type ToolCallViewData } from "../tools/view.ts";
 import { SessionPermissions } from "../permissions/session-permissions.ts";
-import { estimateContextUsage } from "./context-usage.ts";
+import { fitMessagesToContext } from "./context-usage.ts";
 import {
     SYSTEM_PROMPT,
     environmentContextFor,
@@ -66,6 +66,7 @@ type TurnContext = {
     runtime: SessionRuntime;
     signal: AbortSignal;
     contextWindow: number;
+    maxOutputTokens: number;
     request: Omit<LlmRequest, "messages" | "signal" | "tools">;
 };
 
@@ -92,6 +93,7 @@ export class Session {
     private requestController: AbortController | null = null;
     private lastRuntime: SessionRuntime | null = null;
     private contextWindow: number | null = null;
+    private maxOutputTokens = 0;
     private environmentContextMessage: LlmSystemMessage | null = null;
     private environmentKey: string | null = null;
     private shutdownPromise: Promise<void> | null = null;
@@ -133,21 +135,24 @@ export class Session {
                 throw new Error("No model configured");
             }
             const { selection, model: definition } = resolved;
-            this.contextWindow = definition.contextWindow;
             const provider = runtime.config.providers?.find((item) => item.id === selection.provider);
             const model = runtime.llm.getModel(selection.provider, selection.id);
             if (!model) {
                 throw new Error(`Model not found: ${selection.provider}/${selection.id}`);
             }
+            this.contextWindow = definition.contextWindow;
+            this.maxOutputTokens = definition.maxTokens;
             const turn: TurnContext = {
                 runtime,
                 signal,
                 contextWindow: definition.contextWindow,
+                maxOutputTokens: definition.maxTokens,
                 request: {
                     model,
                     systemPrompt: SYSTEM_PROMPT,
                     reasoning: resolveReasoningLevel(definition, runtime.config.reasoning),
-                    apiKey: provider?.apiKey
+                    apiKey: provider?.apiKey,
+                    maxTokens: definition.maxTokens
                 }
             };
 
@@ -258,7 +263,14 @@ export class Session {
             for await (const event of runtime.llm.stream({
                 ...turn.request,
                 tools: this.registeredTools(),
-                messages: this.messagesForRequest(runtime.workingDirectories ?? []),
+                messages: this.messagesForRequest(
+                    runtime.workingDirectories ?? [],
+                    {
+                        contextWindow: turn.contextWindow,
+                        maxOutputTokens: turn.maxOutputTokens
+                    },
+                    true
+                ),
                 signal
             })) {
                 if (signal.aborted) {
@@ -320,23 +332,35 @@ export class Session {
         };
     }
 
-    providerContext(workingDirectories: readonly string[] = []): JarvixProviderContext {
+    providerContext(
+        workingDirectories: readonly string[] = [],
+        budget?: { contextWindow: number; maxOutputTokens?: number }
+    ): JarvixProviderContext {
         return {
             systemPrompt: SYSTEM_PROMPT,
-            messages: this.messagesForRequest(workingDirectories)
+            messages: this.messagesForRequest(workingDirectories, budget)
         };
     }
 
     contextUsage(
         contextWindow: number,
-        workingDirectories: readonly string[] = []
+        workingDirectories: readonly string[] = [],
+        maxOutputTokens = 0
     ): JarvixContextUsage {
-        return estimateContextUsage({
+        const fitted = fitMessagesToContext({
             contextWindow,
             systemPrompt: SYSTEM_PROMPT,
             messages: this.messagesForRequest(workingDirectories),
-            tools: this.registeredTools()
+            tools: this.registeredTools(),
+            maxOutputTokens
         });
+        return {
+            estimatedTokens: fitted.estimatedTokens,
+            contextWindow,
+            ...(fitted.omittedMessages > 0
+                ? { omittedMessages: fitted.omittedMessages }
+                : {})
+        };
     }
 
     shutdown(): Promise<void> {
@@ -475,22 +499,49 @@ export class Session {
         this.environmentKey = key;
     }
 
-    private messagesForRequest(workingDirectories: readonly string[]): LlmMessage[] {
+    private messagesForRequest(
+        workingDirectories: readonly string[],
+        budget?: { contextWindow: number; maxOutputTokens?: number },
+        strict = false
+    ): LlmMessage[] {
         const key = environmentKeyFor(this.meta.permission, workingDirectories);
-        if (!this.environmentContextMessage) {
-            return [
+        const messages = !this.environmentContextMessage
+            ? [
                 this.createEnvironmentContext(workingDirectories, key),
                 ...this.history
-            ];
+            ]
+            : (() => {
+                const next = [...this.history];
+                if (this.environmentKey !== key) {
+                    next.push(
+                        environmentReminderFor(this.meta.permission, workingDirectories).persisted
+                    );
+                }
+                return next;
+            })();
+        if (!budget) {
+            return messages;
         }
-
-        const messages = [...this.history];
-        if (this.environmentKey !== key) {
-            messages.push(
-                environmentReminderFor(this.meta.permission, workingDirectories).persisted
+        const fitted = fitMessagesToContext({
+            ...budget,
+            systemPrompt: SYSTEM_PROMPT,
+            messages,
+            tools: this.registeredTools()
+        });
+        if (!fitted.fits && strict) {
+            const available = Math.max(
+                0,
+                budget.contextWindow - (budget.maxOutputTokens ?? 0)
+            );
+            throw new Error(
+                `Context window exceeded: the latest turn needs about `
+                + `${fitted.estimatedTokens} prompt tokens but only `
+                + `${available} input tokens `
+                + `are available after reserving output space. Start a new session or `
+                + `reduce the latest message/tool output.`
             );
         }
-        return messages;
+        return fitted.messages;
     }
 
     private createEnvironmentContext(
@@ -534,7 +585,11 @@ export class Session {
         }
         runtime.emit({
             type: "context.usage",
-            usage: this.contextUsage(contextWindow, runtime.workingDirectories)
+            usage: this.contextUsage(
+                contextWindow,
+                runtime.workingDirectories,
+                this.maxOutputTokens
+            )
         });
     }
 
