@@ -47,7 +47,8 @@ export function createProject(
 export function loadProject(id: string, directory = defaultProjectDirectory()): JarvixProject | null {
     const file = projectFile(id, directory);
     try {
-        return parseProject(JSON.parse(readFileSync(file, "utf8")));
+        const project = parseProject(JSON.parse(readFileSync(file, "utf8")));
+        return project?.id === id ? project : null;
     } catch {
         return null;
     }
