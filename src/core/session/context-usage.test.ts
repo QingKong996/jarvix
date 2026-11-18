@@ -151,3 +151,38 @@ test("retains a required reminder without counting or duplicating it as omitted 
         content: "latest question"
     });
 });
+
+test("estimates each history message only once while trimming an oversized prompt", () => {
+    let detailReads = 0;
+    const details = {
+        get payload(): string {
+            detailReads += 1;
+            return "x";
+        }
+    };
+    const messages: LlmMessage[] = [...Array.from({ length: 80 }, (_, index): LlmMessage => ({
+        role: "user",
+        content: `question ${index}`,
+        timestamp: index + 1
+    })), {
+        role: "toolResult",
+        toolCallId: "old-call",
+        toolName: "exec_command",
+        content: "old result",
+        details,
+        isError: false,
+        timestamp: 81
+    }, {
+        role: "user",
+        content: "x".repeat(10_000),
+        timestamp: 82
+    }];
+
+    const fitted = fitMessagesToContext({
+        contextWindow: 100,
+        messages
+    });
+
+    expect(fitted.fits).toBe(false);
+    expect(detailReads).toBe(1);
+});
