@@ -59,6 +59,36 @@ test("keeps streamed content when a request fails before a complete message", ()
     });
 });
 
+test("shows request errors after the live response has already completed", () => {
+    const started = transcriptReducer(initialTranscriptState, {
+        type: "turn.send",
+        userId: "user-1",
+        assistantId: "assistant-1",
+        text: "use a tool"
+    });
+    const toolTurn = transcriptReducer(started, {
+        type: "events.batch",
+        events: [{ type: "done", message }]
+    });
+
+    const failed = transcriptReducer(toolTurn, {
+        type: "events.batch",
+        events: [{ type: "request.error", error: "Context window exceeded" }]
+    });
+    const duplicate = transcriptReducer(failed, {
+        type: "request.error",
+        error: "Context window exceeded"
+    });
+
+    expect(failed.live).toBeNull();
+    expect(failed.committed.at(-1)).toMatchObject({
+        role: "assistant",
+        blocks: [],
+        error: "Context window exceeded"
+    });
+    expect(duplicate.committed).toEqual(failed.committed);
+});
+
 test("keeps streamed thinking and text when the turn is stopped", () => {
     const started = transcriptReducer(initialTranscriptState, {
         type: "turn.send",
