@@ -1,6 +1,8 @@
-import { memo, useLayoutEffect, useRef, type RefObject } from "react";
+import { memo, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
+import { ChevronUp } from "lucide-react";
+import { Button } from "../ui/button.tsx";
 import { useCommitted, useInjected, useLive } from "./transcript-hooks.ts";
 import { subscribeCommitted, subscribeInjected, subscribeLive } from "./transcript-store.ts";
 import type { CommittedTurn, LiveTurn } from "./types.ts";
@@ -8,6 +10,10 @@ import { CHAT_COLUMN, CONTENT_GUTTER } from "../../layout.ts";
 import { Markdown } from "./Markdown.tsx";
 import { ThinkingBlock } from "./ThinkingBlock.tsx";
 import { ToolCallBlock } from "./tools/ToolCallBlock.tsx";
+import {
+    TRANSCRIPT_TURN_PAGE_SIZE,
+    visibleTranscriptWindow
+} from "./history-window.ts";
 
 const CommittedTurnView = memo(function CommittedTurnView({ turn }: { turn: CommittedTurn }) {
     const { t } = useTranslation();
@@ -49,9 +55,34 @@ const CommittedTurnView = memo(function CommittedTurnView({ turn }: { turn: Comm
 
 function CommittedList() {
     const committed = useCommitted();
+    const { t } = useTranslation();
+    const [anchorId, setAnchorId] = useState<string | null>(null);
+    const visible = useMemo(
+        () => visibleTranscriptWindow(committed, anchorId),
+        [anchorId, committed]
+    );
+
+    const revealEarlier = (): void => {
+        const target = Math.max(0, visible.start - TRANSCRIPT_TURN_PAGE_SIZE);
+        const next = visibleTranscriptWindow(committed, committed[target]?.id ?? null);
+        setAnchorId(next.anchorId);
+    };
+
     return (
         <>
-            {committed.map((turn) => (
+            {visible.omitted > 0 ? (
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="self-center"
+                    onClick={revealEarlier}
+                >
+                    <ChevronUp />
+                    {t("transcript.showEarlier", { count: visible.omitted })}
+                </Button>
+            ) : null}
+            {visible.turns.map((turn) => (
                 <CommittedTurnView key={turn.id} turn={turn} />
             ))}
         </>
