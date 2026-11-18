@@ -47,6 +47,24 @@ test("executes a command and returns its output", async () => {
     expect(result.data.output).toContain("hello");
 });
 
+test("rejects a timeout beyond the Node timer range", async () => {
+    const tool = new ShellTool();
+    tools.push(tool);
+
+    const result = await tool.execute(call("exec_command", {
+        command: "echo should-not-run",
+        cwd: process.cwd(),
+        timeoutMs: 2_147_483_648
+    }), { onOutput: () => undefined });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("timeoutMs");
+    expect(result.data).toMatchObject({
+        kind: "shell.exec_command",
+        status: "failed"
+    });
+});
+
 test("retains only the tail of oversized command output", async () => {
     const directory = mkdtempSync(join(tmpdir(), "jarvix-shell-output-"));
     const script = join(directory, "large-output.mjs");

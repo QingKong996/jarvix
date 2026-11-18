@@ -46,11 +46,12 @@ const DEFAULT_CWD = process.cwd();
 const WINDOWS_POWERSHELL = findWindowsPowerShell();
 const STOP_GRACE_MS = 2_000;
 const STOP_FORCE_MS = 2_000;
+const MAX_TIMEOUT_MS = 2_147_483_647;
 
 const execCommandArguments = z.object({
     command: z.string().trim().min(1),
     cwd: z.string().trim().min(1),
-    timeoutMs: z.number().int().positive()
+    timeoutMs: z.number().int().positive().max(MAX_TIMEOUT_MS)
 });
 
 const writeStdinArguments = z.object({
@@ -71,7 +72,12 @@ export const SHELL_TOOL_DEFINITIONS: readonly LlmToolDefinition[] = [{
         properties: {
             command: { type: "string", description: "Shell command to execute." },
             cwd: { type: "string", description: "Working directory for the command." },
-            timeoutMs: { type: "integer", minimum: 1, description: "Maximum wait time in milliseconds." }
+            timeoutMs: {
+                type: "integer",
+                minimum: 1,
+                maximum: MAX_TIMEOUT_MS,
+                description: "Maximum wait time in milliseconds."
+            }
         },
         required: ["command", "cwd", "timeoutMs"],
         additionalProperties: false
