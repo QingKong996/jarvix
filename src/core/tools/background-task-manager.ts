@@ -17,6 +17,8 @@ import {
     type ToolCallViewData
 } from "./view.ts";
 
+export const MAX_BACKGROUND_SUBSCRIPTIONS = 32;
+
 type BackgroundSubscription = {
     toolCallId: string;
     toolName: string;
@@ -68,6 +70,12 @@ export class BackgroundTaskManager implements ToolExecutor {
                         data: result.data,
                         onBackgroundEnd: observer.onBackgroundEnd
                     });
+                    if (task.subscriptions.length > MAX_BACKGROUND_SUBSCRIPTIONS) {
+                        task.subscriptions.splice(
+                            0,
+                            task.subscriptions.length - MAX_BACKGROUND_SUBSCRIPTIONS
+                        );
+                    }
                 }
                 this.consumeTask(task, result.task, observer.onTaskEvent);
             }
