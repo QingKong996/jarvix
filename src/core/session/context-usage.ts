@@ -23,15 +23,9 @@ export type ContextUsageInput = {
 
 /** Estimate the prompt footprint without provider-specific tokenizers. */
 export function estimateContextUsage(input: ContextUsageInput): JarvixContextUsage {
-    let estimatedTokens = 3;
-    if (input.systemPrompt) {
-        estimatedTokens += MESSAGE_OVERHEAD_TOKENS + estimateTextTokens(input.systemPrompt);
-    }
+    let estimatedTokens = estimateFixedTokens(input);
     for (const message of input.messages) {
         estimatedTokens += estimateMessageTokens(message);
-    }
-    for (const tool of input.tools ?? []) {
-        estimatedTokens += estimateToolTokens(tool);
     }
     return {
         estimatedTokens,
@@ -62,7 +56,10 @@ export function fitMessagesToContext(
 ): FittedContext {
     const full = [...input.messages];
     const budget = inputBudget(input);
-    const fullEstimate = estimate(input, full);
+    const fixedTokens = estimateFixedTokens(input);
+    const messageTokens = full.map(estimateMessageTokens);
+    const prefixTokens = prefixSums(messageTokens);
+    const fullEstimate = fixedTokens + prefixTokens[full.length]!;
     if (fullEstimate <= budget) {
         return {
             messages: full,
@@ -85,27 +82,49 @@ export function fitMessagesToContext(
     const environmentIndex = full.findIndex((message) => (
         message.role === "system" && message.context === "environment"
     ));
+    const requiredMessages = input.requiredMessages ?? [];
+    const requiredIndices = requiredMessageIndexSet(
+        full,
+        requiredMessages,
+        environmentIndex
+    );
+    const requiredPrefixTokens = prefixSums(messageTokens.map((tokens, index) => (
+        requiredIndices.has(index) ? tokens : 0
+    )));
+    const omittedPrefixCounts = prefixSums(full.map((_, index) => (
+        index !== environmentIndex && !requiredIndices.has(index) ? 1 : 0
+    )));
+    const environmentTokens = environmentIndex >= 0
+        ? messageTokens[environmentIndex]!
+        : 0;
+    const omissionTokens = estimateMessageTokens({
+        role: "user",
+        content: CONTEXT_OMISSION_NOTICE,
+        context: "system-reminder",
+        timestamp: Date.now()
+    });
+    const estimatedAt = (start: number): number => (
+        fixedTokens
+        + environmentTokens
+        + prefixTokens[full.length]!
+        - prefixTokens[start]!
+        + requiredPrefixTokens[start]!
+        + (omittedPrefixCounts[start]! > 0 ? omissionTokens : 0)
+    );
+
     let start = latestUser;
     while (start >= 0) {
-        const requiredIndices = requiredMessageIndices(
-            full,
-            input.requiredMessages ?? [],
-            start,
-            environmentIndex
-        );
-        const messages = candidateMessages(full, environmentIndex, start, requiredIndices);
-        const estimatedTokens = estimate(input, messages);
-        const omittedMessages = countOmittedMessages(
-            full,
-            start,
-            environmentIndex,
-            requiredIndices
-        );
+        const estimatedTokens = estimatedAt(start);
         if (estimatedTokens <= budget) {
             return {
-                messages,
+                messages: candidateMessages(
+                    full,
+                    environmentIndex,
+                    start,
+                    requiredIndicesBefore(requiredIndices, start)
+                ),
                 estimatedTokens,
-                omittedMessages,
+                omittedMessages: omittedPrefixCounts[start]!,
                 fits: true
             };
         }
@@ -117,28 +136,16 @@ export function fitMessagesToContext(
         start = previous;
     }
 
-    const requiredIndices = requiredMessageIndices(
-        full,
-        input.requiredMessages ?? [],
-        latestUser,
-        environmentIndex
-    );
     const messages = candidateMessages(
         full,
         environmentIndex,
         latestUser,
-        requiredIndices
-    );
-    const omittedMessages = countOmittedMessages(
-        full,
-        latestUser,
-        environmentIndex,
-        requiredIndices
+        requiredIndicesBefore(requiredIndices, latestUser)
     );
     return {
         messages,
-        estimatedTokens: estimate(input, messages),
-        omittedMessages,
+        estimatedTokens: estimatedAt(latestUser),
+        omittedMessages: omittedPrefixCounts[latestUser]!,
         fits: false
     };
 }
@@ -169,32 +176,28 @@ function candidateMessages(
     ];
 }
 
-function requiredMessageIndices(
+function requiredMessageIndexSet(
     messages: readonly LlmMessage[],
     requiredMessages: readonly LlmMessage[],
-    start: number,
     environmentIndex: number
 ): Set<number> {
     const indices = new Set<number>();
     for (const message of requiredMessages) {
         const index = messages.indexOf(message);
-        if (index >= 0 && index < start && index !== environmentIndex) {
+        if (index >= 0 && index !== environmentIndex) {
             indices.add(index);
         }
     }
     return indices;
 }
 
-function countOmittedMessages(
-    messages: readonly LlmMessage[],
-    start: number,
-    environmentIndex: number,
-    requiredIndices: ReadonlySet<number>
-): number {
-    return messages
-        .slice(0, start)
-        .filter((_, index) => isOmittedPrefixIndex(index, environmentIndex, requiredIndices))
-        .length;
+function requiredIndicesBefore(
+    requiredIndices: ReadonlySet<number>,
+    start: number
+): Set<number> {
+    return new Set(
+        [...requiredIndices].filter((index) => index < start)
+    );
 }
 
 function isOmittedPrefixIndex(
@@ -226,16 +229,24 @@ function inputBudget(input: ContextFitInput): number {
     return Math.max(1, Math.floor(input.contextWindow) - reserve);
 }
 
-function estimate(
-    input: ContextUsageInput,
-    messages: readonly LlmMessage[]
-): number {
-    return estimateContextUsage({
-        contextWindow: input.contextWindow,
-        messages,
-        systemPrompt: input.systemPrompt,
-        tools: input.tools
-    }).estimatedTokens;
+function prefixSums(values: readonly number[]): number[] {
+    const sums = new Array<number>(values.length + 1);
+    sums[0] = 0;
+    for (let index = 0; index < values.length; index += 1) {
+        sums[index + 1] = sums[index]! + values[index]!;
+    }
+    return sums;
+}
+
+function estimateFixedTokens(input: Pick<ContextUsageInput, "systemPrompt" | "tools">): number {
+    let estimatedTokens = 3;
+    if (input.systemPrompt) {
+        estimatedTokens += MESSAGE_OVERHEAD_TOKENS + estimateTextTokens(input.systemPrompt);
+    }
+    for (const tool of input.tools ?? []) {
+        estimatedTokens += estimateToolTokens(tool);
+    }
+    return estimatedTokens;
 }
 
 function estimateMessageTokens(message: LlmMessage): number {
