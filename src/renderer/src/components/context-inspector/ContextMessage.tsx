@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
@@ -38,11 +39,16 @@ const TYPE_STYLE: Record<ContextMessageEntry["kind"], {
 
 export function ContextMessage({ entry }: { entry: ContextMessageEntry }) {
     const { t } = useTranslation();
+    const [open, setOpen] = useState(false);
     const style = TYPE_STYLE[entry.kind];
+    const text = useMemo(() => open ? entry.text() : "", [entry, open]);
 
     return (
-        <article className="border-b border-border/60 last:border-b-0">
-            <details className="group">
+        <article className="border-b border-border/60 last:border-b-0 [contain-intrinsic-size:auto_3rem] [content-visibility:auto]">
+            <details
+                className="group"
+                onToggle={(event) => setOpen(event.currentTarget.open)}
+            >
                 <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 outline-none focus-visible:bg-muted/30 [&::-webkit-details-marker]:hidden">
                     <span className={cn(
                         "inline-flex shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium",
@@ -55,9 +61,11 @@ export function ContextMessage({ entry }: { entry: ContextMessageEntry }) {
                     </span>
                     <ChevronRight className="size-3.5 shrink-0 text-muted-foreground group-open:rotate-90" />
                 </summary>
-                <pre className="border-t border-border/40 px-3 py-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-foreground/85">
-                    {entry.text || t("rightSidebar.context.emptyMessage")}
-                </pre>
+                {open ? (
+                    <pre className="border-t border-border/40 px-3 py-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-foreground/85">
+                        {text || t("rightSidebar.context.emptyMessage")}
+                    </pre>
+                ) : null}
             </details>
         </article>
     );
