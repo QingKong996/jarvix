@@ -17,6 +17,13 @@ type ModelConfigPanelProps = {
     onSave: () => void;
 };
 
+export function containNestedFormSubmit(
+    event: Pick<FormEvent<HTMLFormElement>, "preventDefault" | "stopPropagation">
+): void {
+    event.preventDefault();
+    event.stopPropagation();
+}
+
 export function ModelConfigPanel({
     model,
     originalId,
@@ -30,7 +37,7 @@ export function ModelConfigPanel({
     const titleId = useId();
 
     function handleSubmit(event: FormEvent<HTMLFormElement>): void {
-        event.preventDefault();
+        containNestedFormSubmit(event);
         onSave();
     }
 
