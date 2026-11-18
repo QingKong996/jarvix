@@ -1,4 +1,5 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
@@ -73,7 +74,21 @@ export function saveConfig(
 ): void {
     mkdirSync(dirname(paths.file), { recursive: true });
     const payload = serializeConfig(config, defaults);
-    writeFileSync(paths.file, `${JSON.stringify(payload, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    const temporary = `${paths.file}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+        writeFileSync(temporary, `${JSON.stringify(payload, null, 2)}\n`, {
+            encoding: "utf8",
+            mode: 0o600
+        });
+        renameSync(temporary, paths.file);
+    } catch (error) {
+        try {
+            unlinkSync(temporary);
+        } catch {
+            // The temporary file may not have been created.
+        }
+        throw error;
+    }
 }
 
 function configSchema(defaults: ConfigDefaults) {
