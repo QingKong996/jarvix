@@ -33,6 +33,7 @@ import {
     sessionContextSchema,
     sessionNameSchema
 } from "../../protocol/session.ts";
+import { assertStorageId, isStorageId } from "../storage-id.ts";
 
 export const SESSION_FORMAT_VERSION = 3;
 
@@ -50,7 +51,10 @@ type SessionRecord = JarvixSessionMeta | SessionMessageRecord;
 
 /** Path of the `.jsonl` file backing the session with `id`. */
 export function sessionFile(id: string, directory = defaultSessionDirectory()): string {
-    return join(directory, `${id}${SESSION_FILE_EXTENSION}`);
+    return join(
+        directory,
+        `${assertStorageId(id, "session")}${SESSION_FILE_EXTENSION}`
+    );
 }
 
 /** Create a new empty session with an optional project or custom working directory. */
@@ -218,9 +222,10 @@ export function appendSessionMessage(id: string, message: LlmMessage, directory 
 
 /** Load a session, or null when the file is unreadable or has no valid session header. */
 export function loadSession(id: string, directory = defaultSessionDirectory()): JarvixSession | null {
+    const file = sessionFile(id, directory);
     let content: string;
     try {
-        content = readFileSync(sessionFile(id, directory), "utf8");
+        content = readFileSync(file, "utf8");
     } catch {
         return null;
     }
@@ -268,8 +273,12 @@ export function listSessionSummaries(directory = defaultSessionDirectory()): Jar
         if (!stats.isFile()) {
             continue;
         }
+        const id = entry.slice(0, -SESSION_FILE_EXTENSION.length);
+        if (!isStorageId(id)) {
+            continue;
+        }
         candidates.push({
-            id: entry.slice(0, -SESSION_FILE_EXTENSION.length),
+            id,
             file
         });
     }

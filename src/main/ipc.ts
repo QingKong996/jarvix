@@ -1,6 +1,7 @@
 import { dialog, ipcMain } from "electron";
 import type { IpcMainInvokeEvent } from "electron";
 import type { Jarvix } from "../core/index.ts";
+import { assertStorageId } from "../core/storage-id.ts";
 import type { JarvixConfig } from "../protocol/config.ts";
 import { IPC_CHANNELS } from "../protocol/ipc.ts";
 import {
@@ -39,7 +40,7 @@ function requireSessionId(value: unknown): string {
     if (typeof value !== "string" || value.length === 0) {
         throw new Error("Session id must be a non-empty string");
     }
-    return value;
+    return assertStorageId(value, "session");
 }
 
 function parseSessionContext(value: unknown): JarvixSessionContext {

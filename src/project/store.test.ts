@@ -39,6 +39,21 @@ test("creates and loads a project with normalized working directories", () => {
     expect(listProjects(directory)).toEqual([project]);
 });
 
+test.each([
+    "",
+    ".",
+    "..",
+    "../outside",
+    "..\\outside",
+    "nested/project",
+    "nested\\project",
+    "invalid\u0000id",
+    "CON",
+    " CON "
+])("projectFile rejects unsafe id %j", (id) => {
+    expect(() => projectFile(id, base)).toThrow("Invalid project id");
+});
+
 test("lists only valid project files", () => {
     const directory = join(base, "list");
     const first = createProject("First", [join(base, "first")], directory);
