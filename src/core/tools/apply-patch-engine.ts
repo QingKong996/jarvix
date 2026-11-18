@@ -7,7 +7,6 @@ import {
 } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type {
-    ApplyPatchHunk,
     ParsedApplyPatch,
     UpdateFileChunk
 } from "./apply-patch-parser.ts";
@@ -79,7 +78,7 @@ export async function applyParsedPatch(
     }
 
     const baseDirectory = resolve(cwd);
-    assertUniqueTargets(patch.hunks, baseDirectory);
+    assertUniqueTargets(patch, baseDirectory);
     const affected: AffectedPaths = {
         added: [],
         modified: [],
@@ -144,13 +143,14 @@ async function yieldForCancellation(signal?: AbortSignal): Promise<void> {
     await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 0));
 }
 
-function assertUniqueTargets(hunks: readonly ApplyPatchHunk[], cwd: string): void {
+function assertUniqueTargets(patch: ParsedApplyPatch, cwd: string): void {
     const targets = new Set<string>();
-    for (const hunk of hunks) {
-        const target = resolve(cwd, hunk.path);
-        const key = process.platform === "win32" ? target.toLowerCase() : target;
+    for (const target of patchWriteTargets(patch, cwd)) {
+        const key = process.platform === "win32"
+            ? target.path.toLowerCase()
+            : target.path;
         if (targets.has(key)) {
-            throw new Error(`multiple operations target ${target}`);
+            throw new Error(`multiple operations target ${target.path}`);
         }
         targets.add(key);
     }
