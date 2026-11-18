@@ -1,15 +1,21 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, test, vi } from "vitest";
 import type { LlmUserMessage } from "../../llm/types.ts";
 
 const readFileSyncCalls = vi.hoisted(() => [] as string[]);
+const readSyncBytes = vi.hoisted(() => [] as number[]);
 
 vi.mock("node:fs", async (importOriginal) => {
     const actual = await importOriginal<typeof import("node:fs")>();
     return {
         ...actual,
+        readSync: ((...args: unknown[]) => {
+            const bytes = (actual.readSync as (...params: unknown[]) => number)(...args);
+            readSyncBytes.push(bytes);
+            return bytes;
+        }) as typeof actual.readSync,
         readFileSync: ((...args: unknown[]) => {
             const [file] = args;
             readFileSyncCalls.push(String(file));
@@ -21,6 +27,7 @@ vi.mock("node:fs", async (importOriginal) => {
 const {
     appendSessionMessage,
     createSession,
+    listSessionSummaries,
     loadSession,
     updateSessionName
 } = await import("./store.ts");
@@ -50,4 +57,18 @@ test("metadata updates stream large histories without reading them into memory",
         messages: [message]
     });
     expect(readFileSyncCalls).toEqual([]);
+});
+
+test("rejects an unterminated header without reading the whole file", () => {
+    const directory = join(base, "oversized-header");
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(
+        join(directory, "10000000-0000-4000-8000-000000000099.jsonl"),
+        "x".repeat(16 * 1024 * 1024)
+    );
+    readSyncBytes.length = 0;
+
+    expect(listSessionSummaries(directory)).toEqual([]);
+    expect(readSyncBytes.reduce((total, bytes) => total + bytes, 0))
+        .toBeLessThanOrEqual(1024 * 1024);
 });

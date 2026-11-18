@@ -40,6 +40,7 @@ export const SESSION_FORMAT_VERSION = 3;
 const SESSION_FILE_EXTENSION = ".jsonl";
 const SESSION_FILE_MODE = 0o600;
 const SESSION_HEADER_CHUNK_SIZE = 4 * 1024;
+const SESSION_HEADER_MAX_BYTES = 1024 * 1024;
 const SESSION_LOAD_CHUNK_SIZE = 64 * 1024;
 const SESSION_TAIL_CHUNK_SIZE = 64 * 1024;
 const SESSION_COPY_CHUNK_SIZE = 64 * 1024;
@@ -539,12 +540,28 @@ function readSessionMeta(file: string): JarvixSessionMeta | null {
         const buffer = Buffer.allocUnsafe(SESSION_HEADER_CHUNK_SIZE);
         const decoder = new StringDecoder("utf8");
         let header = "";
+        let headerBytes = 0;
         while (true) {
-            const bytes = readSync(descriptor, buffer, 0, buffer.length, null);
+            const remaining = SESSION_HEADER_MAX_BYTES - headerBytes;
+            if (remaining === 0) {
+                if (fstatSync(descriptor).size <= headerBytes) {
+                    header += decoder.end();
+                    break;
+                }
+                return null;
+            }
+            const bytes = readSync(
+                descriptor,
+                buffer,
+                0,
+                Math.min(buffer.length, remaining),
+                null
+            );
             if (bytes === 0) {
                 header += decoder.end();
                 break;
             }
+            headerBytes += bytes;
             header += decoder.write(buffer.subarray(0, bytes));
             const newline = header.indexOf("\n");
             if (newline !== -1) {
