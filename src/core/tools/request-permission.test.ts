@@ -1,7 +1,10 @@
 import { resolve } from "node:path";
 import { expect, test, vi } from "vitest";
 import type { LlmToolCallBlock } from "../../llm/types.ts";
-import { RequestPermissionTool } from "./request-permission.ts";
+import {
+    REQUEST_PERMISSION_TOOL_DEFINITIONS,
+    RequestPermissionTool
+} from "./request-permission.ts";
 
 const directory = resolve("approved-directory");
 
@@ -47,6 +50,51 @@ test("returns structured approved access", async () => {
     });
     expect(result.content).toContain("Permission changes approved");
     expect(result.content).toContain("Write access enabled");
+});
+
+test("allows either permission category to be omitted", async () => {
+    const requestPermission = vi.fn(async () => "approved" as const);
+    const tool = new RequestPermissionTool();
+
+    await tool.execute(
+        call({
+            directories: [{ action: "enable", access: "write", path: directory }]
+        }),
+        { onOutput: () => undefined, requestPermission }
+    );
+    await tool.execute(
+        call({
+            domains: [{ action: "enable", domain: "api.example.com" }]
+        }),
+        { onOutput: () => undefined, requestPermission }
+    );
+
+    expect(requestPermission).toHaveBeenNthCalledWith(1, {
+        domains: [],
+        directories: [{ action: "enable", access: "write", path: directory }]
+    });
+    expect(requestPermission).toHaveBeenNthCalledWith(2, {
+        domains: [{ action: "enable", domain: "api.example.com" }],
+        directories: []
+    });
+});
+
+test("describes both permission categories as optional", () => {
+    const parameters = REQUEST_PERMISSION_TOOL_DEFINITIONS[0]!.parameters;
+
+    expect(parameters.required).toBeUndefined();
+});
+
+test("rejects a request without any permission changes", async () => {
+    const requestPermission = vi.fn();
+    const result = await new RequestPermissionTool().execute(
+        call({}),
+        { onOutput: () => undefined, requestPermission }
+    );
+
+    expect(requestPermission).not.toHaveBeenCalled();
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("At least one domain or directory is required");
 });
 
 test("returns a cancelled result without granting access", async () => {
