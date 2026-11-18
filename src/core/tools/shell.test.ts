@@ -5,7 +5,11 @@ import { afterEach, expect, test, vi } from "vitest";
 import type { SandboxPreflight } from "../permissions/sandbox-launch.ts";
 import { createSandboxPolicy } from "../permissions/sandbox.ts";
 import { MAX_TOOL_OUTPUT_CHARS } from "./output.ts";
-import { ShellTool, type ShellSessionExit } from "./shell.ts";
+import {
+    MAX_STDIN_COMMAND_CHARS,
+    ShellTool,
+    type ShellSessionExit
+} from "./shell.ts";
 import type { LlmToolCallBlock } from "../../llm/types.ts";
 
 const tools: ShellTool[] = [];
@@ -198,6 +202,70 @@ test("keeps a timed-out shell addressable through write_stdin", async () => {
     } finally {
         tool.dispose();
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 200));
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
+test("rejects an oversized write_stdin command before dispatching it", async () => {
+    const tool = new ShellTool();
+    tools.push(tool);
+
+    const result = await tool.execute(call("write_stdin", {
+        sessionId: "missing-session",
+        command: "x".repeat(MAX_STDIN_COMMAND_CHARS + 1)
+    }), { onOutput: () => undefined });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("Invalid arguments for write_stdin");
+    expect(result.content).not.toContain("Shell session not found");
+});
+
+test("stops accepting stdin input when the pending queue is full", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-shell-queue-"));
+    const script = join(directory, "idle.mjs");
+    writeFileSync(script, [
+        "process.stdout.write('ready\\n');",
+        "setInterval(() => undefined, 1_000);"
+    ].join("\n"), "utf8");
+    const tool = new ShellTool();
+    tools.push(tool);
+    const command = process.platform === "win32"
+        ? `& ${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`
+        : `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`;
+
+    try {
+        const started = await tool.execute(call("exec_command", {
+            command,
+            cwd: directory,
+            timeoutMs: 100
+        }), { onOutput: () => undefined });
+        const sessionId = started.task?.id;
+        expect(sessionId).toBeTruthy();
+        if (!sessionId) {
+            throw new Error("Expected a background task.");
+        }
+        const payload = "x".repeat(MAX_STDIN_COMMAND_CHARS);
+
+        const first = await tool.execute(call("write_stdin", {
+            sessionId,
+            command: payload
+        }), { onOutput: () => undefined });
+        const second = await tool.execute(call("write_stdin", {
+            sessionId,
+            command: payload
+        }), { onOutput: () => undefined });
+        const overflow = await tool.execute(call("write_stdin", {
+            sessionId,
+            command: payload
+        }), { onOutput: () => undefined });
+
+        expect(first.content).toContain("queued");
+        expect(second.content).toContain("queued");
+        expect(overflow.isError).toBe(true);
+        expect(overflow.content).toContain("pending input buffer is full");
+    } finally {
+        tool.dispose();
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
         rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
 });
