@@ -7,7 +7,11 @@ export function createLlm(providers?: () => readonly ProviderConfig[] | undefine
     return createPiAdapter({ providers });
 }
 
-export type { LlmAdapter, LlmRequest, LlmStream } from "./adapter.ts";
+export type {
+    LlmAdapter,
+    LlmRequest,
+    LlmStream
+} from "./adapter.ts";
 export type {
     LlmAssistantMessage,
     LlmContentBlock,

@@ -29,7 +29,11 @@ test("streams through a custom endpoint with the selected model and credential",
         const model = adapter.getModel("custom:local", "local-chat")!;
         expect(model.name).toBe("Local Chat");
         const events = [];
-        for await (const event of adapter.stream({ model, apiKey: "local-key", messages: [{ role: "user", content: "Hi", timestamp: 1 }] })) events.push(event);
+        for await (const event of adapter.stream({
+            model,
+            apiKey: "local-key",
+            messages: [{ role: "user", content: "Hi", timestamp: 1 }]
+        })) events.push(event);
         expect(path).toBe("/v1/chat/completions");
         expect(authorization).toBe("Bearer local-key");
         expect(body?.model).toBe("local-chat");
