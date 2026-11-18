@@ -60,7 +60,7 @@ export function DeleteSessionDialog({
                 }
             }}
         >
-            <DialogContent>
+            <DialogContent data-testid="delete-session-dialog">
                 <DialogHeader>
                     <DialogTitle>{t("sessions.deleteTitle")}</DialogTitle>
                     <DialogDescription>
@@ -79,6 +79,7 @@ export function DeleteSessionDialog({
                         variant="destructive"
                         disabled={deleting}
                         onClick={() => void handleDelete()}
+                        data-testid="delete-session-confirm"
                     >
                         {deleting ? <LoaderCircle className="animate-spin" /> : <Trash2 />}
                         {deleting ? t("sessions.deleting") : t("sessions.deleteConfirm")}

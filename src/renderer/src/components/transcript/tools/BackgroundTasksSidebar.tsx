@@ -40,6 +40,7 @@ export function BackgroundTasksSidebar({ open, sessionId, onToggle }: Background
             />
             <aside
                 aria-labelledby="background-tasks-title"
+                data-testid="background-sidebar"
                 className="fixed inset-y-0 right-0 z-30 flex h-full w-[min(20rem,calc(100vw-2rem))] shrink-0 flex-col border-l border-border bg-popover shadow-xl xl:static xl:z-auto xl:w-80 xl:shadow-none"
             >
                 <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4">
@@ -57,6 +58,7 @@ export function BackgroundTasksSidebar({ open, sessionId, onToggle }: Background
                         aria-label={t("rightSidebar.close")}
                         title={t("rightSidebar.close")}
                         onClick={onToggle}
+                        data-testid="background-sidebar-close"
                         className="shrink-0"
                     >
                         <PanelRightClose />

@@ -85,7 +85,7 @@ export function Sidebar({
     }
 
     return (
-        <aside className="flex h-full min-h-0 flex-col bg-sidebar">
+        <aside data-testid="session-sidebar" className="flex h-full min-h-0 flex-col bg-sidebar">
             <div className="flex items-center gap-2.5 border-b border-border px-5 py-3.5">
                 <span className="text-[15px] font-semibold tracking-[0.4px]">Jarvix</span>
             </div>
@@ -95,6 +95,7 @@ export function Sidebar({
                     onClick={() => onNewSession()}
                     disabled={busy}
                     icon={<Plus />}
+                    data-testid="new-session"
                 >
                     {t("sessions.new")}
                 </NavigationItem>
@@ -111,6 +112,7 @@ export function Sidebar({
                         title={t("projects.new")}
                         onClick={onNewProject}
                         disabled={busy}
+                        data-testid="new-project"
                     >
                         <FolderPlus />
                     </Button>
@@ -160,7 +162,7 @@ export function Sidebar({
             </div>
 
             <div className="border-t border-border p-3">
-                <NavigationItem onClick={onOpenSettings} icon={<Settings />}>
+                <NavigationItem onClick={onOpenSettings} icon={<Settings />} data-testid="open-settings">
                     {t("nav.settings")}
                 </NavigationItem>
             </div>

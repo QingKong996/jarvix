@@ -16,10 +16,13 @@
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
     "test": "vitest run",
+    "test:ui": "node scripts/run-bombadil.mjs",
+    "test:ui:check": "tsc -p tests/bombadil/tsconfig.json --noEmit",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.web.json --noEmit"
   },
   "devDependencies": {
+    "@antithesishq/bombadil": "0.7.10",
     "@dnd-kit/core": "^6.3.1",
     "@lobehub/icons-static-svg": "1.102.0",
     "@tailwindcss/vite": "^4.3.4",

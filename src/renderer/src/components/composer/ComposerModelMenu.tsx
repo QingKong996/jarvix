@@ -45,6 +45,7 @@ export function ComposerModelMenu({ config, disabled, saving, onSave }: Composer
     const [menuView, setMenuView] = useState<MenuView>("root");
     const firstMenuItemRef = useRef<HTMLDivElement>(null);
     const reasoningLabel = reasoningLevel ? t(`composer.reasoningLevels.${reasoningLevel}`) : "";
+    const triggerLabel = [model, reasoningLabel].filter(Boolean).join(" ") || t("composer.model");
 
     useLayoutEffect(() => {
         if (menuOpen) {
@@ -93,10 +94,12 @@ export function ComposerModelMenu({ config, disabled, saving, onSave }: Composer
                     variant="ghost"
                     size="sm"
                     disabled={disabled || !config || saving}
+                    data-testid="model-menu-trigger"
+                    aria-label={triggerLabel}
                     className="h-8 min-w-0 max-w-72 shrink justify-start gap-1 px-2 text-xs font-normal"
-                    title={[model, reasoningLabel].filter(Boolean).join(" ")}
+                    title={triggerLabel}
                 >
-                    <span className="min-w-0 truncate">{model}</span>
+                    <span className="min-w-0 truncate">{model || t("composer.model")}</span>
                     {reasoningLabel ? (
                         <span className="shrink-0 text-muted-foreground">{reasoningLabel}</span>
                     ) : null}

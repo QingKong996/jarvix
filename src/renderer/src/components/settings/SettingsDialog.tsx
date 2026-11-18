@@ -89,6 +89,7 @@ export function SettingsDialog({
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent
                 aria-describedby={undefined}
+                data-testid="settings-dialog"
                 className="h-[clamp(28rem,72dvh,46rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-5xl"
             >
                 <DialogHeader className="border-b px-6 py-4">
@@ -105,18 +106,21 @@ export function SettingsDialog({
                             icon={<Cpu />}
                             label={t("settings.sections.model")}
                             onClick={() => setSection("model")}
+                            testId="settings-section-model"
                         />
                         <SettingsSectionButton
                             active={section === "general"}
                             icon={<Settings2 />}
                             label={t("settings.sections.general")}
                             onClick={() => setSection("general")}
+                            testId="settings-section-general"
                         />
                         <SettingsSectionButton
                             active={section === "archived"}
                             icon={<Archive />}
                             label={t("settings.sections.archived")}
                             onClick={() => setSection("archived")}
+                            testId="settings-section-archived"
                         />
                     </nav>
 
@@ -159,10 +163,16 @@ export function SettingsDialog({
                 </form>
 
                 <DialogFooter error={error} className="gap-3 border-t px-6 py-3">
-                    <Button type="button" variant="outline" disabled={saving} onClick={() => onOpenChange(false)}>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        disabled={saving}
+                        onClick={() => onOpenChange(false)}
+                        data-testid="settings-cancel"
+                    >
                         {t("settings.cancel")}
                     </Button>
-                    <Button type="submit" form="settings-form" disabled={disabled}>
+                    <Button type="submit" form="settings-form" disabled={disabled} data-testid="settings-save">
                         {saving ? <LoaderCircle className="animate-spin" /> : null}
                         {t("settings.save")}
                     </Button>
@@ -177,15 +187,17 @@ type SettingsSectionButtonProps = {
     icon: ReactNode;
     label: string;
     onClick: () => void;
+    testId: string;
 };
 
-function SettingsSectionButton({ active, icon, label, onClick }: SettingsSectionButtonProps) {
+function SettingsSectionButton({ active, icon, label, onClick, testId }: SettingsSectionButtonProps) {
     return (
         <NavigationItem
             active={active}
             aria-current={active ? "page" : undefined}
             onClick={onClick}
             icon={icon}
+            data-testid={testId}
         >
             {label}
         </NavigationItem>

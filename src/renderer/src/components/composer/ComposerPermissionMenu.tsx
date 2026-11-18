@@ -85,6 +85,8 @@ export function ComposerPermissionMenu({
                     variant="ghost"
                     size="sm"
                     disabled={disabled || saving}
+                    data-testid="permission-menu-trigger"
+                    data-permission={permission}
                     className={cn(
                         "h-8 min-w-0 max-w-36 shrink justify-start gap-1 px-2 text-xs font-normal",
                         fullAccess && "text-orange-600 hover:text-orange-600 dark:text-orange-400 dark:hover:text-orange-400"

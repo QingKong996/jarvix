@@ -117,7 +117,7 @@ export function Composer({
     return (
         <>
             <div className={cn(CONTENT_GUTTER, "py-3")}>
-                <form onSubmit={handleSubmit}>
+                <form data-testid="composer-form" onSubmit={handleSubmit}>
                     <div className={cn(CHAT_COLUMN, "flex flex-col gap-1 rounded-xl border bg-composer p-1.5 shadow-sm")}>
                         {permissionRequest ? (
                             <PermissionRequestDialog
@@ -135,6 +135,8 @@ export function Composer({
                             onKeyDown={handleKeyDown}
                             disabled={disabled || saving || permissionSaving || permissionPending}
                             placeholder={t("composer.placeholder")}
+                            aria-label={t("composer.placeholder")}
+                            data-testid="composer-input"
                             className="max-h-48 min-h-8 w-full resize-none border-0 bg-transparent px-1.5 py-1.5 shadow-none focus-visible:ring-0 dark:bg-transparent"
                         />
 
@@ -147,6 +149,9 @@ export function Composer({
                                 disabled={disabled || running || saving || permissionSaving || permissionPending}
                                 aria-haspopup="dialog"
                                 aria-expanded={contextOpen}
+                                data-testid="session-context-trigger"
+                                data-project-id={sessionContext.projectId}
+                                data-working-directory={sessionContext.workingDirectory}
                                 className="h-8 min-w-0 max-w-[45%] shrink justify-start gap-1 px-2 text-xs font-normal"
                                 title={contextLabel}
                             >
@@ -178,6 +183,7 @@ export function Composer({
                                         aria-label={t("composer.stop")}
                                         title={t("composer.stop")}
                                         onClick={onStop}
+                                        data-testid="composer-stop"
                                     >
                                         <Square aria-hidden="true" className="size-3 fill-current" />
                                     </Button>
@@ -188,6 +194,7 @@ export function Composer({
                                         className="shrink-0 bg-[#1F6FEB] p-0 text-white hover:bg-[#1F6FEB]/90"
                                         aria-label={t("composer.send")}
                                         disabled={disabled || saving || permissionSaving || permissionPending || value.trim().length === 0}
+                                        data-testid="composer-send"
                                     >
                                         <ArrowUp aria-hidden="true" className="size-4" />
                                     </Button>
