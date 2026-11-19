@@ -417,13 +417,25 @@ const viewports = actions(() => {
     return [{ SetViewport: { width: 1024, height: 768 } }];
 });
 
+let previousViewport = "";
+let viewportTransitionEndsAt = 0;
+
 const documentState = extract((state) => {
     const document = state.document;
     const window = state.window;
+    const viewport = `${window.innerWidth}x${window.innerHeight}`;
+    const now = window.performance.now();
+    if (viewport !== previousViewport) {
+        previousViewport = viewport;
+        viewportTransitionEndsAt = now + 750;
+    }
     const viewportResizePending =
-        state.lastAction !== null &&
-        typeof state.lastAction === "object" &&
-        "SetViewport" in state.lastAction;
+        now < viewportTransitionEndsAt ||
+        (
+            state.lastAction !== null &&
+            typeof state.lastAction === "object" &&
+            "SetViewport" in state.lastAction
+        );
     const root = document.querySelector("[data-testid='app-shell']");
     const sidebar = document.querySelector("[data-testid='session-sidebar']");
     const main = document.querySelector("main");
