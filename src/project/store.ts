@@ -36,9 +36,15 @@ export function createProject(
         workingDirectories: normalizeWorkingDirectories(input.workingDirectories),
         createdAt: Date.now()
     });
+    const contents = serializeProject(project);
+    if (Buffer.byteLength(contents, "utf8") > MAX_PROJECT_FILE_BYTES) {
+        throw new Error(
+            `Project file exceeds the safe size limit of ${MAX_PROJECT_FILE_BYTES} bytes`
+        );
+    }
 
     mkdirSync(directory, { recursive: true });
-    writeFileSync(projectFile(project.id, directory), serializeProject(project), {
+    writeFileSync(projectFile(project.id, directory), contents, {
         encoding: "utf8",
         mode: PROJECT_FILE_MODE
     });

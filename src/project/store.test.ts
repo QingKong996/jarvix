@@ -1,4 +1,5 @@
 import {
+    existsSync,
     mkdirSync,
     mkdtempSync,
     readFileSync,
@@ -102,4 +103,15 @@ test("rejects projects without a name or working directory", () => {
         .toThrow("Project name must be non-empty");
     expect(() => createProject("Project", [], directory))
         .toThrow("Project must have at least one working directory");
+});
+
+test("rejects project metadata that would be ignored on reload", () => {
+    const directory = join(base, "oversized-project");
+
+    expect(() => createProject(
+        "x".repeat(1024 * 1024),
+        [join(base, "workspace")],
+        directory
+    )).toThrow(/safe size limit/);
+    expect(existsSync(directory)).toBe(false);
 });
