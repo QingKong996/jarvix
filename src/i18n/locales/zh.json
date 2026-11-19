@@ -47,8 +47,7 @@
         "send": "发送",
         "stop": "终止",
         "contextUsage": {
-            "label": "上下文已使用约 {{used}} / {{limit}} tokens（{{percent}}%）",
-            "omitted": "将省略 {{count}} 条较早消息"
+            "label": "上下文已使用约 {{used}} / {{limit}} tokens（{{percent}}%）"
         },
         "model": "模型",
         "reasoning": "推理等级",
@@ -93,8 +92,7 @@
         }
     },
     "transcript": {
-        "generating": "生成中…",
-        "showEarlier": "加载更早的 {{count}} 条记录"
+        "generating": "生成中…"
     },
     "system": {
         "message": "系统消息"

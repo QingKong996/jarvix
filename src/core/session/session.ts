@@ -30,14 +30,13 @@ import {
 } from "../tools/index.ts";
 import { createToolCallViewData, toToolResultDetails, type ToolCallViewData } from "../tools/view.ts";
 import { SessionPermissions } from "../permissions/session-permissions.ts";
-import { fitMessagesToContext, type FittedContext } from "./context-usage.ts";
+import { estimateContextUsage } from "./context-usage.ts";
 import {
     SYSTEM_PROMPT,
     environmentContextFor,
     environmentKeyFor,
     environmentReminderFor,
-    isEnvironmentContextMessage,
-    isEnvironmentReminderMessage
+    isEnvironmentContextMessage
 } from "./environment.ts";
 import { appendSessionMessage } from "./store.ts";
 
@@ -68,7 +67,6 @@ type TurnContext = {
     runtime: SessionRuntime;
     signal: AbortSignal;
     contextWindow: number;
-    maxOutputTokens: number;
     request: Omit<LlmRequest, "messages" | "signal" | "tools">;
 };
 
@@ -95,7 +93,6 @@ export class Session {
     private requestController: AbortController | null = null;
     private lastRuntime: SessionRuntime | null = null;
     private contextWindow: number | null = null;
-    private maxOutputTokens = 0;
     private environmentContextMessage: LlmSystemMessage | null = null;
     private environmentKey: string | null = null;
     private shutdownPromise: Promise<void> | null = null;
@@ -155,12 +152,10 @@ export class Session {
                 throw new Error(`Model not found: ${selection.provider}/${selection.id}`);
             }
             this.contextWindow = definition.contextWindow;
-            this.maxOutputTokens = definition.maxTokens;
             const turn: TurnContext = {
                 runtime,
                 signal,
                 contextWindow: definition.contextWindow,
-                maxOutputTokens: definition.maxTokens,
                 request: {
                     model,
                     systemPrompt: SYSTEM_PROMPT,
@@ -267,14 +262,7 @@ export class Session {
             for await (const event of runtime.llm.stream({
                 ...turn.request,
                 tools: this.registeredTools(),
-                messages: this.messagesForRequest(
-                    runtime.workingDirectories ?? [],
-                    {
-                        contextWindow: turn.contextWindow,
-                        maxOutputTokens: turn.maxOutputTokens
-                    },
-                    true
-                ),
+                messages: this.messagesForRequest(runtime.workingDirectories ?? []),
                 signal
             })) {
                 if (signal.aborted) {
@@ -343,32 +331,23 @@ export class Session {
         };
     }
 
-    providerContext(
-        workingDirectories: readonly string[] = [],
-        budget?: { contextWindow: number; maxOutputTokens?: number }
-    ): JarvixProviderContext {
+    providerContext(workingDirectories: readonly string[] = []): JarvixProviderContext {
         return {
             systemPrompt: SYSTEM_PROMPT,
-            messages: this.messagesForRequest(workingDirectories, budget)
+            messages: this.messagesForRequest(workingDirectories)
         };
     }
 
     contextUsage(
         contextWindow: number,
-        workingDirectories: readonly string[] = [],
-        maxOutputTokens = 0
+        workingDirectories: readonly string[] = []
     ): JarvixContextUsage {
-        const fitted = this.fitMessagesForRequest(workingDirectories, {
+        return estimateContextUsage({
             contextWindow,
-            maxOutputTokens
+            systemPrompt: SYSTEM_PROMPT,
+            messages: this.messagesForRequest(workingDirectories),
+            tools: this.registeredTools()
         });
-        return {
-            estimatedTokens: fitted.estimatedTokens,
-            contextWindow,
-            ...(fitted.omittedMessages > 0
-                ? { omittedMessages: fitted.omittedMessages }
-                : {})
-        };
     }
 
     canRelease(): boolean {
@@ -547,29 +526,8 @@ export class Session {
         this.environmentKey = key;
     }
 
-    private messagesForRequest(
-        workingDirectories: readonly string[],
-        budget?: { contextWindow: number; maxOutputTokens?: number },
-        strict = false
-    ): LlmMessage[] {
-        if (!budget) {
-            return this.assembleMessagesForRequest(workingDirectories);
-        }
-        const fitted = this.fitMessagesForRequest(workingDirectories, budget);
-        if (!fitted.fits && strict) {
-            const available = Math.max(
-                0,
-                budget.contextWindow - (budget.maxOutputTokens ?? 0)
-            );
-            throw new Error(
-                `Context window exceeded: the latest turn needs about `
-                + `${fitted.estimatedTokens} prompt tokens but only `
-                + `${available} input tokens `
-                + `are available after reserving output space. Start a new session or `
-                + `reduce the latest message/tool output.`
-            );
-        }
-        return fitted.messages;
+    private messagesForRequest(workingDirectories: readonly string[]): LlmMessage[] {
+        return this.assembleMessagesForRequest(workingDirectories);
     }
 
     private assembleMessagesForRequest(workingDirectories: readonly string[]): LlmMessage[] {
@@ -588,23 +546,6 @@ export class Session {
                 }
                 return next;
             })();
-    }
-
-    private fitMessagesForRequest(
-        workingDirectories: readonly string[],
-        budget: { contextWindow: number; maxOutputTokens?: number }
-    ): FittedContext {
-        const messages = this.assembleMessagesForRequest(workingDirectories);
-        const latestEnvironmentReminder = messages.findLast(isEnvironmentReminderMessage);
-        return fitMessagesToContext({
-            ...budget,
-            systemPrompt: SYSTEM_PROMPT,
-            messages,
-            tools: this.registeredTools(),
-            requiredMessages: latestEnvironmentReminder
-                ? [latestEnvironmentReminder]
-                : []
-        });
     }
 
     private createEnvironmentContext(
@@ -648,11 +589,7 @@ export class Session {
         }
         runtime.emit({
             type: "context.usage",
-            usage: this.contextUsage(
-                contextWindow,
-                runtime.workingDirectories,
-                this.maxOutputTokens
-            )
+            usage: this.contextUsage(contextWindow, runtime.workingDirectories)
         });
     }
 

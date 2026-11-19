@@ -47,8 +47,7 @@
         "send": "Send",
         "stop": "Stop",
         "contextUsage": {
-            "label": "About {{used}} of {{limit}} context tokens used ({{percent}}%)",
-            "omitted": "{{count}} older messages will be omitted"
+            "label": "About {{used}} of {{limit}} context tokens used ({{percent}}%)"
         },
         "model": "Model",
         "reasoning": "Reasoning",
@@ -93,8 +92,7 @@
         }
     },
     "transcript": {
-        "generating": "Generating…",
-        "showEarlier": "Show {{count}} earlier items"
+        "generating": "Generating…"
     },
     "system": {
         "message": "System message"

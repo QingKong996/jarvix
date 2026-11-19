@@ -126,19 +126,7 @@ export class Jarvix {
 
     getProviderContext(sessionId: string): JarvixProviderContext {
         const session = this.sessions.require(sessionId);
-        const resolved = resolveConfiguredModel(
-            this.config.providers,
-            this.config.selectedModel
-        );
-        return session.providerContext(
-            workingDirectoriesFor(session.meta),
-            resolved
-                ? {
-                    contextWindow: resolved.model.contextWindow,
-                    maxOutputTokens: resolved.model.maxTokens
-                }
-                : undefined
-        );
+        return session.providerContext(workingDirectoriesFor(session.meta));
     }
 
     setPermission(sessionId: string, permission: PermissionMode): PermissionMode {
@@ -197,8 +185,7 @@ export class Jarvix {
         return resolved
             ? session.contextUsage(
                 resolved.model.contextWindow,
-                workingDirectoriesFor(session.meta),
-                resolved.model.maxTokens
+                workingDirectoriesFor(session.meta)
             )
             : undefined;
     }
