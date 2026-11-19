@@ -417,6 +417,22 @@ export function listArchivedSessionSummaries(directory = defaultSessionDirectory
         );
 }
 
+/** Read the stored name and first user prompt without loading the full history. */
+export function readSessionNamingContext(
+    id: string,
+    directory = defaultSessionDirectory()
+): { name: string; firstPrompt: string | null } | null {
+    const file = sessionFile(id, directory);
+    const meta = readSessionMeta(file);
+    if (!meta || meta.id !== id) {
+        return null;
+    }
+    return {
+        name: meta.name,
+        firstPrompt: readFirstUserPrompt(file)
+    };
+}
+
 function defaultSessionDirectory(): string {
     return join(homedir(), ".jarvix", "sessions");
 }
@@ -476,6 +492,62 @@ function readLastMessageTimestamp(file: string): number | null {
             }
             lineEnd = separator;
         }
+    } catch {
+        return null;
+    } finally {
+        closeSync(descriptor);
+    }
+}
+
+function readFirstUserPrompt(file: string): string | null {
+    let descriptor: number;
+    try {
+        descriptor = openSync(file, "r");
+    } catch {
+        return null;
+    }
+
+    const pending: Buffer[] = [];
+    const consume = (line: Buffer): string | null => {
+        const record = parseRecord(line.toString("utf8"));
+        if (!isSessionMessage(record) || record.message.role !== "user") {
+            return null;
+        }
+        return record.message.context === "system-reminder"
+            ? null
+            : record.message.content;
+    };
+
+    try {
+        while (true) {
+            const buffer = Buffer.allocUnsafe(SESSION_LOAD_CHUNK_SIZE);
+            const bytesRead = readSync(descriptor, buffer, 0, buffer.length, null);
+            if (bytesRead === 0) {
+                break;
+            }
+            const chunk = buffer.subarray(0, bytesRead);
+            let start = 0;
+            while (start < bytesRead) {
+                const newline = chunk.indexOf(0x0a, start);
+                if (newline === -1) {
+                    pending.push(chunk.subarray(start));
+                    break;
+                }
+                let prompt: string | null;
+                if (pending.length === 0) {
+                    prompt = consume(chunk.subarray(start, newline));
+                } else {
+                    pending.push(chunk.subarray(start, newline));
+                    prompt = consume(Buffer.concat(pending));
+                    pending.length = 0;
+                }
+                if (prompt !== null) {
+                    return prompt;
+                }
+                start = newline + 1;
+            }
+        }
+        return pending.length > 0 ? consume(Buffer.concat(pending)) : null;
     } catch {
         return null;
     } finally {

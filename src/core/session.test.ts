@@ -333,6 +333,27 @@ test("renames sessions manually and from the first user prompt", async () => {
     expect(renamed).toEqual(["Manual title", "Focused title"]);
 });
 
+test("names released sessions without loading their full history", async () => {
+    home.path = join(base, "rename-released-home");
+    const directory = join(home.path, ".jarvix", "sessions");
+    const requests: LlmMessage[][] = [];
+    const jarvix = new Jarvix({
+        llm: fakeLlm("Stored prompt title", requests),
+        config: TEST_CONFIG
+    });
+    const session = jarvix.createSession({}, SESSION_NAME);
+    await jarvix.request("Persisted prompt", session.meta.id);
+
+    expect(jarvix.releaseSession(session.meta.id)).toBe(true);
+    expect(await jarvix.autoNameSession(session.meta.id)).toBe("Stored prompt title");
+    expect(requests.at(-1)?.[0]).toMatchObject({
+        role: "user",
+        content: "Persisted prompt"
+    });
+    expect(loadSession(session.meta.id, directory)?.meta.name).toBe("Stored prompt title");
+    expect(jarvix.releaseSession(session.meta.id)).toBe(false);
+});
+
 test("does not overwrite a title changed while automatic naming is in flight", async () => {
     home.path = join(base, "naming-race-home");
     const directory = join(home.path, ".jarvix", "sessions");

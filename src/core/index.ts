@@ -1,6 +1,5 @@
 import { createLlm, type LlmAdapter } from "../llm/index.ts";
 import { i18n } from "../i18n/index.ts";
-import type { LlmUserMessage } from "../llm/types.ts";
 import type { JarvixConfig } from "../protocol/config.ts";
 import type { JarvixContextUsage } from "../protocol/context-usage.ts";
 import type { JarvixEvent, JarvixListener } from "../protocol/event.ts";
@@ -162,13 +161,10 @@ export class Jarvix {
     }
 
     async autoNameSession(sessionId: string, firstPrompt?: string): Promise<string> {
-        const session = this.sessions.require(sessionId);
-        const currentName = session.meta.name;
-        const prompt = firstPrompt?.trim() || session.snapshot().messages
-            .find((message): message is LlmUserMessage => (
-                message.role === "user" &&
-                message.context !== "system-reminder"
-            ))?.content;
+        const { currentName, prompt } = this.sessions.namingContext(
+            sessionId,
+            firstPrompt
+        );
         if (!prompt) {
             throw new Error("The session has no user prompt to name");
         }
