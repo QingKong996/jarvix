@@ -6,6 +6,7 @@ import { ContextInspector } from "../context-inspector/ContextInspector.tsx";
 import { BackgroundTasksPanel } from "./BackgroundTasksPanel.tsx";
 import { rightSidebarPanel, type RightSidebarPanel } from "./panel-registry.ts";
 import { RightSidebarNewTab } from "./RightSidebarNewTab.tsx";
+import { shouldDismissRightSidebar } from "./right-sidebar-escape.ts";
 import {
     activeSidebarTab,
     createSidebarTabsState,
@@ -37,7 +38,9 @@ export function RightSidebar({
     useEffect(() => {
         if (!open) return;
         const handleKeyDown = (event: KeyboardEvent): void => {
-            if (event.key === "Escape") onToggle();
+            if (shouldDismissRightSidebar(event, document)) {
+                onToggle();
+            }
         };
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
