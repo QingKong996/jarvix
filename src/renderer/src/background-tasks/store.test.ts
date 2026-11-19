@@ -71,6 +71,29 @@ test("bounds retained task output and tracks discarded characters", () => {
     expect(next[0]?.truncatedCharacters).toBeGreaterThan(0);
 });
 
+test("removes a retained task when its output is discarded under capacity pressure", () => {
+    const task = snapshot("task-1", "retained");
+    const ended = reduceBackgroundTasks([task], [{
+        type: "backgroundTask.end",
+        task: state(task, {
+            status: "completed",
+            exitCode: 0,
+            unreadCharacters: 6
+        })
+    }]);
+
+    const discarded = reduceBackgroundTasks(ended, [{
+        type: "backgroundTask.discard",
+        task: state(task, {
+            status: "completed",
+            exitCode: 0,
+            unreadCharacters: 6
+        })
+    }]);
+
+    expect(discarded).toEqual([]);
+});
+
 test("clears deleted session tasks without affecting other sessions", () => {
     const deletedTask = snapshot("task-delete", "deleted");
     const retainedTask = snapshot("task-retain", "retained");

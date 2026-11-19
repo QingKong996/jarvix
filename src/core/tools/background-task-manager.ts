@@ -1,6 +1,10 @@
 import type { LlmToolCallBlock, LlmToolDefinition } from "../../llm/types.ts";
 import { appendSandboxViolations } from "../permissions/violations.ts";
-import { ShellTool, type ShellSessionExit } from "./shell.ts";
+import {
+    ShellTool,
+    type ShellSessionBudget,
+    type ShellSessionExit
+} from "./shell.ts";
 import type {
     ToolBackgroundEndHandler,
     ToolExecutionResult,
@@ -37,10 +41,12 @@ type BackgroundTask = {
 export class BackgroundTaskManager implements ToolExecutor {
     readonly definitions: readonly LlmToolDefinition[];
     private readonly shell: ShellTool;
+    private readonly retentionBudget?: ShellSessionBudget;
     private readonly tasks = new Map<string, BackgroundTask>();
 
     constructor(shell = new ShellTool()) {
         this.shell = shell;
+        this.retentionBudget = shell.sharedBudget;
         this.definitions = shell.definitions;
     }
 
@@ -240,12 +246,25 @@ export class BackgroundTaskManager implements ToolExecutor {
 
         if (task.state.unreadCharacters === 0) {
             this.dropTask(task);
+        } else {
+            this.retentionBudget?.registerReclaimable(task.state.id, () => {
+                this.discardTask(task);
+            });
         }
+    }
+
+    private discardTask(task: BackgroundTask): void {
+        if (!this.tasks.has(task.state.id)) {
+            return;
+        }
+        task.onTaskEvent?.({ type: "backgroundTask.discard", task: task.state });
+        this.dropTask(task);
     }
 
     private dropTask(task: BackgroundTask): void {
         task.unwatch?.();
         task.unwatch = null;
+        this.retentionBudget?.unregisterReclaimable(task.state.id);
         this.tasks.delete(task.state.id);
         this.shell.releaseSession(task.state.id);
     }

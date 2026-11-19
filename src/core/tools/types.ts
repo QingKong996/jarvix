@@ -43,7 +43,8 @@ export type ToolTaskEvent =
         truncatedCharacters: number;
     }
     | { type: "backgroundTask.end"; task: ToolTaskState }
-    | { type: "backgroundTask.consume"; task: ToolTaskState };
+    | { type: "backgroundTask.consume"; task: ToolTaskState }
+    | { type: "backgroundTask.discard"; task: ToolTaskState };
 
 export type ToolBackgroundEnd = {
     taskId: string;

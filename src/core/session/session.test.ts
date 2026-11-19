@@ -109,9 +109,8 @@ test("assembles the final provider context without mutating the session", () => 
 
     const context = session.providerContext(["C:\\workspace-a"]);
 
-    expect(context).toMatchObject({
-        systemPrompt: expect.stringContaining("Respond to the user in Chinese")
-    });
+    expect(context.systemPrompt).toContain(`Current operating system: ${process.platform}.`);
+    expect(context.systemPrompt).not.toMatch(/respond to the user|Chinese/i);
     expect(context.messages[0]).toMatchObject({
         role: "system",
         context: "environment",
