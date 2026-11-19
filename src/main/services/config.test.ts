@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, test } from "vitest";
@@ -165,6 +165,15 @@ test("loadConfig falls back to the default config when the content is invalid", 
     const paths = configPaths(join(base, "corrupt"));
     mkdirSync(paths.directory, { recursive: true });
     writeFileSync(paths.file, "{not json", "utf8");
+
+    expect(loadConfig(paths, defaults)).toEqual({ language: "zh", theme: "dark" });
+});
+
+test("loadConfig ignores files above the safe size limit", () => {
+    const paths = configPaths(join(base, "oversized"));
+    mkdirSync(paths.directory, { recursive: true });
+    writeFileSync(paths.file, "", "utf8");
+    truncateSync(paths.file, 16 * 1024 * 1024);
 
     expect(loadConfig(paths, defaults)).toEqual({ language: "zh", theme: "dark" });
 });

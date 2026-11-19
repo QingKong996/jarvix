@@ -1,5 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+    closeSync,
+    fstatSync,
+    mkdirSync,
+    openSync,
+    readSync,
+    renameSync,
+    unlinkSync,
+    writeFileSync
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
@@ -26,6 +35,7 @@ export type ConfigDefaults = {
 
 const CONFIG_DIRECTORY_NAME = ".jarvix";
 const CONFIG_FILE_NAME = "config.json";
+const MAX_CONFIG_FILE_BYTES = 1024 * 1024;
 
 export type ConfigPaths = {
     directory: string;
@@ -61,9 +71,27 @@ export function serializeConfig(config: JarvixConfig, defaults: ConfigDefaults =
 
 export function loadConfig(paths: ConfigPaths = configPaths(), defaults: ConfigDefaults = systemDefaults()): JarvixConfig {
     try {
-        return parseConfig(JSON.parse(readFileSync(paths.file, "utf8")), defaults);
+        return parseConfig(JSON.parse(readConfigFile(paths.file)), defaults);
     } catch {
         return parseConfig({}, defaults);
+    }
+}
+
+function readConfigFile(file: string): string {
+    const descriptor = openSync(file, "r");
+    try {
+        const stats = fstatSync(descriptor);
+        if (!stats.isFile() || stats.size > MAX_CONFIG_FILE_BYTES) {
+            throw new Error("Config file exceeds the safe size limit");
+        }
+        const buffer = Buffer.alloc(stats.size);
+        const bytesRead = readSync(descriptor, buffer, 0, buffer.length, 0);
+        if (bytesRead !== stats.size) {
+            throw new Error("Config file changed while being read");
+        }
+        return buffer.toString("utf8");
+    } finally {
+        closeSync(descriptor);
     }
 }
 
