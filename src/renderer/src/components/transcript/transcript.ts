@@ -259,6 +259,7 @@ function applyEvent(state: TranscriptState, event: JarvixEvent): TranscriptState
         case "backgroundTask.output":
         case "backgroundTask.end":
         case "backgroundTask.consume":
+        case "backgroundTask.discard":
         case "log":
         case "session.renamed":
         case "context.usage":

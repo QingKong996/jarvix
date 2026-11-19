@@ -5,7 +5,7 @@ import type {
 } from "../../llm/types.ts";
 import type { PermissionMode } from "../../protocol/permission.ts";
 
-export const SYSTEM_PROMPT = `Respond to the user in Chinese. Current operating system: ${process.platform}.`;
+export const SYSTEM_PROMPT = `Current operating system: ${process.platform}.`;
 
 export function environmentContextFor(
     permission: PermissionMode,

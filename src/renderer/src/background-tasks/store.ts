@@ -49,6 +49,9 @@ export function reduceBackgroundTasks(
                     return [updated];
                 });
                 break;
+            case "backgroundTask.discard":
+                next = next.filter((task) => task.id !== event.task.id);
+                break;
             default:
                 break;
         }
