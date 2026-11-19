@@ -7,6 +7,7 @@ import { z } from "zod";
 import type { LlmToolCallBlock, LlmToolDefinition } from "../../llm/types.ts";
 import {
     applyParsedPatch,
+    formatPatchChanges,
     formatPatchSummary,
     patchWriteTargets,
     type AffectedPaths
@@ -140,6 +141,13 @@ export class ApplyPatchTool implements ToolExecutor {
 
         try {
             const affected = await applyParsedPatch(parsed, cwd, signal);
+            if (affected.error) {
+                return partialFailureResult(
+                    { ...arguments_.data, cwd },
+                    affected,
+                    `Failed to apply patch: ${affected.error}`
+                );
+            }
             if (affected.aborted) {
                 return abortedResult({ ...arguments_.data, cwd }, affected);
             }
@@ -229,7 +237,39 @@ function abortedResult(
     const applied = affected.added.length + affected.modified.length + affected.deleted.length;
     const output = applied === 0
         ? "Apply patch stopped. No changes were applied."
-        : `Apply patch stopped.\n${formatPatchSummary(affected)}`;
+        : [
+            "Apply patch stopped.",
+            "Changes applied before stopping:",
+            formatPatchChanges(affected)
+        ].join("\n");
+    const data: ApplyPatchView = {
+        kind: "apply_patch",
+        patch: arguments_.patch,
+        cwd: arguments_.cwd,
+        output,
+        status: "failed"
+    };
+    return {
+        content: output,
+        data,
+        isError: true,
+        endReason: "exited"
+    };
+}
+
+function partialFailureResult(
+    arguments_: z.infer<typeof applyPatchArguments>,
+    affected: AffectedPaths,
+    message: string
+): ToolExecutionResult {
+    const applied = affected.added.length + affected.modified.length + affected.deleted.length;
+    const output = applied === 0
+        ? `${message}\n\nNo file operations completed before the failure.`
+        : [
+            message,
+            "Changes applied before the failure:",
+            formatPatchChanges(affected)
+        ].join("\n");
     const data: ApplyPatchView = {
         kind: "apply_patch",
         patch: arguments_.patch,

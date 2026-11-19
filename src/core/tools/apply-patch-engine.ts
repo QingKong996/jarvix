@@ -69,6 +69,7 @@ export type AffectedPaths = {
     modified: string[];
     deleted: string[];
     aborted?: boolean;
+    error?: string;
 };
 
 export type PatchWriteTarget = {
@@ -156,7 +157,12 @@ export async function applyParsedPatch(
                         operation.destination,
                         readPreparedContents(operation.preparedPath)
                     );
-                    deleteFile(operation.source, "Failed to remove original");
+                    try {
+                        deleteFile(operation.source, "Failed to remove original");
+                    } catch (error) {
+                        affected.added.push(operation.displayPath);
+                        throw error;
+                    }
                     affected.modified.push(operation.displayPath);
                     break;
                 }
@@ -165,6 +171,9 @@ export async function applyParsedPatch(
 
         await yieldForCancellation(signal);
         affected.aborted = signal?.aborted ?? false;
+        return affected;
+    } catch (error) {
+        affected.error = errorMessage(error);
         return affected;
     } finally {
         cleanupPreparedPatch(prepared);
@@ -267,6 +276,12 @@ function cleanupSpoolDirectory(directory: string | null): void {
 export function formatPatchSummary(affected: AffectedPaths): string {
     return [
         "Success. Updated the following files:",
+        formatPatchChanges(affected)
+    ].join("\n");
+}
+
+export function formatPatchChanges(affected: AffectedPaths): string {
+    return [
         ...affected.added.map((path) => `A ${path}`),
         ...affected.modified.map((path) => `M ${path}`),
         ...affected.deleted.map((path) => `D ${path}`)

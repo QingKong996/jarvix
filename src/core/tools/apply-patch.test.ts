@@ -298,6 +298,8 @@ test("returns completed changes when cancelled between file hunks", async () => 
 
         expect(result.isError).toBe(true);
         expect(result.content).toContain("A first.txt");
+        expect(result.content).toContain("Changes applied before stopping:");
+        expect(result.content).not.toContain("Success.");
         expect(result.content).not.toContain("second.txt");
         expect(existsSync(join(directory, "first.txt"))).toBe(true);
         expect(existsSync(join(directory, "second.txt"))).toBe(false);
