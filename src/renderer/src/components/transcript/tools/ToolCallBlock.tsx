@@ -50,9 +50,11 @@ export function ToolCallBlock({ toolName, data, isError, endReason }: ToolCallBl
                     ) : data.kind === "time.sleep" ? (
                         <SleepToolCall data={data} />
                     ) : data.kind === "generic" ? (
-                        <pre className="font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-muted-foreground">
-                            {JSON.stringify(data.arguments, null, 2)}
-                        </pre>
+                        open ? (
+                            <pre className="font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-muted-foreground">
+                                {JSON.stringify(data.arguments, null, 2)}
+                            </pre>
+                        ) : null
                     ) : (
                         <ShellToolCall
                             data={data}
