@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import type { LlmAssistantMessage } from "../../../../llm/types.ts";
 import {
     MAX_TOOL_OUTPUT_CHARS,
@@ -361,6 +361,42 @@ test("marks an unfinished shell result as ended after resume", () => {
         data: { status: "running" },
         endReason: "terminated"
     });
+});
+
+test("hydrates many tool results without repeatedly searching earlier calls", () => {
+    const toolCalls = Array.from({ length: 512 }, (_, index) => ({
+        type: "toolCall" as const,
+        id: `call-${index}`,
+        name: "exec_command",
+        arguments: { command: `echo ${index}`, cwd: "/tmp", timeoutMs: 1_000 }
+    }));
+    const messages = [
+        { ...message, content: toolCalls, stopReason: "toolUse" as const },
+        ...toolCalls.map((toolCall) => ({
+            role: "toolResult" as const,
+            toolCallId: toolCall.id,
+            toolName: toolCall.name,
+            content: `result ${toolCall.id}`,
+            isError: false,
+            timestamp: 2
+        }))
+    ];
+    const findIndex = vi.spyOn(Array.prototype, "findIndex");
+    let hydrated;
+    try {
+        hydrated = transcriptReducer(initialTranscriptState, {
+            type: "session.loaded",
+            messages
+        });
+    } finally {
+        findIndex.mockRestore();
+    }
+
+    expect(findIndex).not.toHaveBeenCalled();
+    expect(hydrated.committed[0]?.blocks).toHaveLength(toolCalls.length);
+    expect(hydrated.committed[0]?.blocks.every(
+        (block) => block.type === "tool" && block.data.status === "completed"
+    )).toBe(true);
 });
 
 test("renders background task exit notices from events and history", () => {
