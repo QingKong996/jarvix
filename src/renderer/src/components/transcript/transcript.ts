@@ -102,6 +102,7 @@ export function transcriptReducer(state: TranscriptState, action: TranscriptActi
 /** Restore persisted messages as committed turns, in file order. */
 function hydrateSession(messages: LlmMessage[]): CommittedTurn[] {
     const turns: CommittedTurn[] = [];
+    const toolCalls = new Map<string, HistoryToolCallLocation>();
     for (const [index, message] of messages.entries()) {
         const id = `history-${index}`;
         if (message.role === "system" && message.context === "environment") {
@@ -130,23 +131,46 @@ function hydrateSession(messages: LlmMessage[]): CommittedTurn[] {
             continue;
         }
         if (message.role === "assistant") {
+            const turnIndex = turns.length;
+            const blocks = message.content.flatMap(toHistoryBlock);
             turns.push({
                 id,
                 role: "assistant",
                 text: "",
-                blocks: message.content.flatMap(toHistoryBlock),
+                blocks,
                 error: message.errorMessage ?? null,
                 reason: message.stopReason
             });
+            indexHistoryToolCalls(toolCalls, turnIndex, blocks);
             continue;
         }
         if (message.role === "system") {
             turns.push(systemTurn(id, message));
             continue;
         }
-        applyHistoryToolResult(turns, message.toolCallId, message.content, message.details, message.isError);
+        applyHistoryToolResult(turns, toolCalls, message.toolCallId, message.content, message.details, message.isError);
     }
     return turns;
+}
+
+type HistoryToolCallLocation = {
+    turnIndex: number;
+    blockIndex: number;
+};
+
+function indexHistoryToolCalls(
+    locations: Map<string, HistoryToolCallLocation>,
+    turnIndex: number,
+    blocks: CommittedBlock[]
+): void {
+    const seen = new Set<string>();
+    for (const [blockIndex, block] of blocks.entries()) {
+        if (block.type !== "tool" || seen.has(block.toolCallId)) {
+            continue;
+        }
+        seen.add(block.toolCallId);
+        locations.set(block.toolCallId, { turnIndex, blockIndex });
+    }
 }
 
 function systemReminderText(content: string): string {
@@ -174,43 +198,36 @@ function toHistoryBlock(block: LlmContentBlock): CommittedBlock[] {
 
 function applyHistoryToolResult(
     turns: CommittedTurn[],
+    toolCalls: ReadonlyMap<string, HistoryToolCallLocation>,
     toolCallId: string,
     content: string,
     details: unknown,
     isError: boolean
 ): void {
-    for (let turnIndex = turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
-        const turn = turns[turnIndex];
-        if (!turn || turn.role !== "assistant") {
-            continue;
-        }
-        const blockIndex = turn.blocks.findIndex(
-            (block) => block.type === "tool" && block.toolCallId === toolCallId
-        );
-        if (blockIndex === -1) {
-            continue;
-        }
-        const block = turn.blocks[blockIndex];
-        if (!block || block.type !== "tool") {
-            return;
-        }
-        const data: ToolCallViewData = isToolCallViewData(details)
-            ? details
-            : {
-                ...block.data,
-                output: content,
-                status: isError ? "failed" : "completed"
-            };
-        const blocks = [...turn.blocks];
-        blocks[blockIndex] = {
-            ...block,
-            data,
-            isError,
-            endReason: historyToolEndReason(data)
-        };
-        turns[turnIndex] = { ...turn, blocks };
+    const location = toolCalls.get(toolCallId);
+    if (!location) {
         return;
     }
+    const turn = turns[location.turnIndex];
+    const block = turn?.blocks[location.blockIndex];
+    if (!turn || block?.type !== "tool") {
+        return;
+    }
+    const data: ToolCallViewData = isToolCallViewData(details)
+        ? details
+        : {
+            ...block.data,
+            output: content,
+            status: isError ? "failed" : "completed"
+        };
+    const blocks = [...turn.blocks];
+    blocks[location.blockIndex] = {
+        ...block,
+        data,
+        isError,
+        endReason: historyToolEndReason(data)
+    };
+    turns[location.turnIndex] = { ...turn, blocks };
 }
 
 function applyEvent(state: TranscriptState, event: JarvixEvent): TranscriptState {
