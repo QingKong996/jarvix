@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
+import { mkdir, open, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
 import { parseModelsDevCatalog } from "../../llm/catalog.ts";
@@ -28,7 +28,7 @@ export class ModelCatalogService {
     async get(force = false): Promise<ModelCatalog> {
         if (!this.cached) {
             try {
-                const { version: _version, ...cached } = cacheSchema.parse(JSON.parse(await readFile(this.file, "utf8")));
+                const { version: _version, ...cached } = cacheSchema.parse(await readCatalogCache(this.file));
                 this.cached = { ...cached, stale: false };
             } catch { /* A missing or invalid cache is refreshed from the source. */ }
         }
@@ -66,5 +66,27 @@ export class ModelCatalogService {
             if (this.cached) return { ...this.cached, stale: true };
             throw error;
         }
+    }
+}
+
+async function readCatalogCache(file: string): Promise<unknown> {
+    const descriptor = await open(file, "r");
+    try {
+        const stats = await descriptor.stat();
+        if (!stats.isFile() || stats.size > MAX_CATALOG_RESPONSE_BYTES) {
+            throw new Error("Catalog cache exceeds the safe size limit");
+        }
+        const buffer = Buffer.alloc(stats.size);
+        let offset = 0;
+        while (offset < buffer.length) {
+            const { bytesRead } = await descriptor.read(buffer, offset, buffer.length - offset, offset);
+            if (bytesRead === 0) {
+                throw new Error("Catalog cache changed while being read");
+            }
+            offset += bytesRead;
+        }
+        return JSON.parse(buffer.toString("utf8"));
+    } finally {
+        await descriptor.close();
     }
 }

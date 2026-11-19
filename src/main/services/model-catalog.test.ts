@@ -1,9 +1,24 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, test, vi } from "vitest";
-import { ModelCatalogService } from "./model-catalog.ts";
 import { parseModelsDevCatalog } from "../../llm/catalog.ts";
+
+const readFileCalls = vi.hoisted(() => [] as string[]);
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("node:fs/promises")>();
+    return {
+        ...actual,
+        readFile: ((...args: unknown[]) => {
+            const [file] = args;
+            readFileCalls.push(String(file));
+            return (actual.readFile as (...params: unknown[]) => unknown)(...args);
+        }) as typeof actual.readFile
+    };
+});
+
+const { ModelCatalogService } = await import("./model-catalog.ts");
 
 const fixture = { example: { id: "example", name: "Example", npm: "@ai-sdk/openai-compatible",
     api: "https://example.com/v1", models: { chat: { id: "chat", name: "Chat", limit: { context: 128000, output: 8192 } } } } };
@@ -46,4 +61,19 @@ test("rejects an oversized catalog response without replacing the cache", async 
     await expect(new ModelCatalogService(file, request).get()).rejects.toThrow(
         "models.dev: response exceeds"
     );
+});
+
+test("refreshes an oversized persisted cache without reading it", async () => {
+    const file = join(directory, "oversized-cache.json");
+    await writeFile(file, "", "utf8");
+    await truncate(file, 8 * 1024 * 1024 + 1);
+    const request = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(fixture)));
+    readFileCalls.length = 0;
+
+    const catalog = await new ModelCatalogService(file, request).get();
+
+    expect(readFileCalls).not.toContain(file);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(catalog.providers).toEqual(parseModelsDevCatalog(fixture));
+    expect(JSON.parse(await readFile(file, "utf8")).providers).toEqual(parseModelsDevCatalog(fixture));
 });
