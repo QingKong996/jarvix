@@ -8,6 +8,7 @@ import type { LlmToolCallBlock } from "../../llm/types.ts";
 const taskkillChildren = vi.hoisted(
     () => [] as Array<{ killed: boolean }>
 );
+const syncTaskkillStall = vi.hoisted(() => ({ enabled: false }));
 
 vi.mock("node:child_process", async (importOriginal) => {
     const actual = await importOriginal<typeof import("node:child_process")>();
@@ -29,7 +30,26 @@ vi.mock("node:child_process", async (importOriginal) => {
                 return killer as unknown as ReturnType<typeof actual.spawn>;
             }
             return actual.spawn(...args);
-        }) as typeof actual.spawn
+        }) as typeof actual.spawn,
+        spawnSync: ((...args: Parameters<typeof actual.spawnSync>) => {
+            const command = String(args[0]);
+            if (
+                syncTaskkillStall.enabled &&
+                command.toLowerCase().endsWith("taskkill.exe")
+            ) {
+                const options = args[2] as { timeout?: number } | undefined;
+                return actual.spawnSync(
+                    process.execPath,
+                    ["-e", "setTimeout(() => {}, 10_000)"],
+                    {
+                        stdio: "ignore",
+                        windowsHide: true,
+                        timeout: options?.timeout
+                    }
+                );
+            }
+            return actual.spawnSync(...args);
+        }) as typeof actual.spawnSync
     };
 });
 
@@ -98,4 +118,34 @@ test.skipIf(process.platform !== "win32")(
         }
     },
     10_000
+);
+
+test.skipIf(process.platform !== "win32")(
+    "bounds synchronous cleanup when taskkill times out across sessions",
+    async () => {
+        const directory = mkdtempSync(join(tmpdir(), "jarvix-shell-dispose-"));
+        const tool = new ShellTool();
+
+        try {
+            for (let index = 0; index < 2; index += 1) {
+                const result = await tool.execute(call({
+                    command: "Start-Sleep -Seconds 10",
+                    cwd: directory,
+                    timeoutMs: 50
+                }), { onOutput: () => undefined });
+                expect(result.endReason).toBe("background");
+            }
+
+            syncTaskkillStall.enabled = true;
+            const startedAt = Date.now();
+            tool.dispose();
+            expect(Date.now() - startedAt).toBeLessThan(3_500);
+        } finally {
+            syncTaskkillStall.enabled = false;
+            tool.dispose();
+            await new Promise((resolvePromise) => setTimeout(resolvePromise, 300));
+            rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        }
+    },
+    15_000
 );
