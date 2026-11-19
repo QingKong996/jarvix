@@ -1,12 +1,14 @@
 import {
     lstatSync,
     mkdirSync,
+    mkdtempSync,
     readFileSync,
     rmSync,
     statSync,
     writeFileSync
 } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import type {
     ParsedApplyPatch,
     UpdateFileChunk
@@ -47,15 +49,20 @@ type PatchOperation =
         kind: "update";
         path: string;
         displayPath: string;
-        contents: string;
+        preparedPath: string;
     }
     | {
         kind: "move";
         source: string;
         destination: string;
         displayPath: string;
-        contents: string;
+        preparedPath: string;
     };
+
+type PreparedPatch = {
+    operations: PatchOperation[];
+    spoolDirectory: string | null;
+};
 
 export type AffectedPaths = {
     added: string[];
@@ -114,85 +121,146 @@ export async function applyParsedPatch(
         deleted: [],
         aborted: false
     };
-    const operations = prepareOperations(patch, baseDirectory);
+    const prepared = prepareOperations(patch, baseDirectory);
 
-    for (const operation of operations) {
+    try {
+        for (const operation of prepared.operations) {
+            await yieldForCancellation(signal);
+            if (signal?.aborted) {
+                affected.aborted = true;
+                return affected;
+            }
+
+            switch (operation.kind) {
+                case "add": {
+                    createFile(operation.path, operation.contents);
+                    affected.added.push(operation.displayPath);
+                    break;
+                }
+                case "delete": {
+                    deleteFile(operation.path);
+                    affected.deleted.push(operation.displayPath);
+                    break;
+                }
+                case "update": {
+                    writeFile(
+                        operation.path,
+                        readPreparedContents(operation.preparedPath),
+                        "Failed to write file"
+                    );
+                    affected.modified.push(operation.displayPath);
+                    break;
+                }
+                case "move": {
+                    createFile(
+                        operation.destination,
+                        readPreparedContents(operation.preparedPath)
+                    );
+                    deleteFile(operation.source, "Failed to remove original");
+                    affected.modified.push(operation.displayPath);
+                    break;
+                }
+            }
+        }
+
         await yieldForCancellation(signal);
-        if (signal?.aborted) {
-            affected.aborted = true;
-            return affected;
-        }
-
-        switch (operation.kind) {
-            case "add": {
-                createFile(operation.path, operation.contents);
-                affected.added.push(operation.displayPath);
-                break;
-            }
-            case "delete": {
-                deleteFile(operation.path);
-                affected.deleted.push(operation.displayPath);
-                break;
-            }
-            case "update": {
-                writeFile(operation.path, operation.contents, "Failed to write file");
-                affected.modified.push(operation.displayPath);
-                break;
-            }
-            case "move": {
-                createFile(operation.destination, operation.contents);
-                deleteFile(operation.source, "Failed to remove original");
-                affected.modified.push(operation.displayPath);
-                break;
-            }
-        }
+        affected.aborted = signal?.aborted ?? false;
+        return affected;
+    } finally {
+        cleanupPreparedPatch(prepared);
     }
-
-    await yieldForCancellation(signal);
-    affected.aborted = signal?.aborted ?? false;
-    return affected;
 }
 
 function prepareOperations(
     patch: ParsedApplyPatch,
     baseDirectory: string
-): PatchOperation[] {
-    return patch.hunks.map((hunk) => {
-        const target = resolve(baseDirectory, hunk.path);
-        if (hunk.kind === "add") {
-            return {
-                kind: "add",
-                path: target,
-                displayPath: hunk.path,
-                contents: hunk.contents
-            };
-        }
-        if (hunk.kind === "delete") {
-            assertDeleteTargetIsFile(target);
-            return {
-                kind: "delete",
-                path: target,
-                displayPath: hunk.path
-            };
-        }
+): PreparedPatch {
+    const operations: PatchOperation[] = [];
+    let spoolDirectory: string | null = null;
 
-        const applied = applyUpdate(target, hunk.chunks);
-        if (hunk.movePath === null) {
-            return {
-                kind: "update",
-                path: target,
-                displayPath: hunk.path,
-                contents: applied.newContents
-            };
-        }
-        return {
-            kind: "move",
-            source: target,
-            destination: resolve(baseDirectory, hunk.movePath),
-            displayPath: hunk.movePath,
-            contents: applied.newContents
-        };
-    });
+    try {
+        patch.hunks.forEach((hunk, index) => {
+            const target = resolve(baseDirectory, hunk.path);
+            if (hunk.kind === "add") {
+                operations.push({
+                    kind: "add",
+                    path: target,
+                    displayPath: hunk.path,
+                    contents: hunk.contents
+                });
+                return;
+            }
+            if (hunk.kind === "delete") {
+                assertDeleteTargetIsFile(target);
+                operations.push({
+                    kind: "delete",
+                    path: target,
+                    displayPath: hunk.path
+                });
+                return;
+            }
+
+            const applied = applyUpdate(target, hunk.chunks);
+            spoolDirectory ??= mkdtempSync(
+                join(tmpdir(), "jarvix-apply-patch-spool-")
+            );
+            const preparedPath = join(spoolDirectory, `${index}.bin`);
+            try {
+                writeFileSync(preparedPath, applied.newContents, "utf8");
+            } catch (error) {
+                throw new Error(
+                    `Failed to prepare update for ${target}: ${errorMessage(error)}`
+                );
+            }
+
+            if (hunk.movePath === null) {
+                operations.push({
+                    kind: "update",
+                    path: target,
+                    displayPath: hunk.path,
+                    preparedPath
+                });
+                return;
+            }
+            operations.push({
+                kind: "move",
+                source: target,
+                destination: resolve(baseDirectory, hunk.movePath),
+                displayPath: hunk.movePath,
+                preparedPath
+            });
+        });
+        return { operations, spoolDirectory };
+    } catch (error) {
+        cleanupSpoolDirectory(spoolDirectory);
+        throw error;
+    }
+}
+
+function readPreparedContents(path: string): string {
+    try {
+        return readFileSync(path, "utf8");
+    } catch (error) {
+        throw new Error(`Failed to read prepared patch contents: ${errorMessage(error)}`);
+    }
+}
+
+function cleanupPreparedPatch(prepared: PreparedPatch): void {
+    cleanupSpoolDirectory(prepared.spoolDirectory);
+}
+
+function cleanupSpoolDirectory(directory: string | null): void {
+    if (directory === null) {
+        return;
+    }
+    try {
+        rmSync(directory, {
+            recursive: true,
+            force: true,
+            maxRetries: 3,
+            retryDelay: 100
+        });
+    } catch {}
 }
 
 /** Format the git-style summary returned by OpenAI's apply_patch implementation. */
