@@ -1,4 +1,13 @@
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+    appendFileSync,
+    existsSync,
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    utimesSync,
+    writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, expect, test, vi } from "vitest";
@@ -117,6 +126,17 @@ test.each([undefined, "", "   "])("createSession gives %j the default name", (na
 
     expect(session.meta.name).toBe("未命名会话");
     expect(loadSession(session.meta.id, directory)?.meta.name).toBe("未命名会话");
+});
+
+test("createSession rejects headers larger than the read limit without creating the directory", () => {
+    const directory = join(base, "oversized-create");
+
+    expect(() => createSession(
+        { projectId: "x".repeat(1024 * 1024) },
+        SESSION_NAME,
+        directory
+    )).toThrow(/safe size limit/);
+    expect(existsSync(directory)).toBe(false);
 });
 
 test("appendSessionMessage then loadSession round-trips messages and meta", () => {
@@ -334,6 +354,22 @@ test("updateSessionContext switches between a project and a custom working direc
         meta: temporary,
         messages: [userMessage]
     });
+});
+
+test("updateSessionContext rejects oversized headers and preserves the existing session", () => {
+    const directory = join(base, "oversized-update");
+    const created = createSession({}, SESSION_NAME, directory);
+    const file = sessionFile(created.meta.id, directory);
+    const before = readFileSync(file, "utf8");
+
+    expect(() => updateSessionContext(
+        created.meta.id,
+        { projectId: "x".repeat(1024 * 1024) },
+        directory
+    )).toThrow(/safe size limit/);
+
+    expect(readFileSync(file, "utf8")).toBe(before);
+    expect(loadSession(created.meta.id, directory)).toEqual(created);
 });
 
 test("updateSessionName rewrites the header and preserves messages", () => {
