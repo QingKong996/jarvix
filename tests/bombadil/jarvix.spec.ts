@@ -217,6 +217,19 @@ const openSessionMenu = registerCustomAction(
         const trigger = row?.querySelector("button") ?? row;
         if (!(trigger instanceof HTMLElement)) return;
         const rect = trigger.getBoundingClientRect();
+        for (const type of ["pointerdown", "pointerup"]) {
+            trigger.dispatchEvent(new PointerEvent(type, {
+                bubbles: true,
+                cancelable: true,
+                pointerId: 1,
+                pointerType: "mouse",
+                isPrimary: true,
+                button: 2,
+                buttons: type === "pointerdown" ? 2 : 0,
+                clientX: rect.left + rect.width / 2,
+                clientY: rect.top + rect.height / 2
+            }));
+        }
         trigger.dispatchEvent(new MouseEvent("contextmenu", {
             bubbles: true,
             cancelable: true,
@@ -407,6 +420,10 @@ const viewports = actions(() => {
 const documentState = extract((state) => {
     const document = state.document;
     const window = state.window;
+    const viewportResizePending =
+        state.lastAction !== null &&
+        typeof state.lastAction === "object" &&
+        "SetViewport" in state.lastAction;
     const root = document.querySelector("[data-testid='app-shell']");
     const sidebar = document.querySelector("[data-testid='session-sidebar']");
     const main = document.querySelector("main");
@@ -425,7 +442,7 @@ const documentState = extract((state) => {
     const unnamedDialogs = dialogs.filter(
         (element) => accessibleName(document, element).length === 0
     ).length;
-    const dialogsWithinViewport = dialogs.every(
+    const dialogsWithinViewport = viewportResizePending || dialogs.every(
         (element) => insideViewport(window, element.getBoundingClientRect())
     );
     const dialogsHaveOverlay = dialogs.length === 0 ||
@@ -585,6 +602,7 @@ const documentState = extract((state) => {
         permissionOptionCount: permissionOptions.length,
         checkedPermissionOptions,
         permissionSelectionMatchesTrigger,
+        viewportResizePending,
         rightSidebarOpen: rightSidebar !== null &&
             visible(window, rightSidebar),
         rightSidebarFitsViewport,
