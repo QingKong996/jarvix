@@ -16,6 +16,10 @@ import {
     clearBackgroundTasks,
     ingestBackgroundTasks
 } from "./background-tasks/store.ts";
+import {
+    isCurrentPermissionRequest,
+    type ActivePermissionRequest
+} from "./permission-request-state.ts";
 import { RequestEventGate } from "./request-event-gate.ts";
 import {
     beginTurn,
@@ -53,10 +57,7 @@ export function useSessions() {
     const requestInFlightRef = useRef(false);
     const sessionContextRef = useRef<JarvixSessionContext>({});
     const sessionPermissionRef = useRef<PermissionMode>(DEFAULT_PERMISSION_MODE);
-    const permissionRequestRef = useRef<{
-        sessionId: string;
-        request: PermissionRequest;
-    } | null>(null);
+    const permissionRequestRef = useRef<ActivePermissionRequest | null>(null);
     const hasUserMessagesRef = useRef(false);
 
     const updateContextState = useCallback((context: JarvixSessionContext): void => {
@@ -75,9 +76,12 @@ export function useSessions() {
         setSessionPermission(permission);
     }, []);
 
-    const clearPermissionRequest = useCallback((sessionId?: string): void => {
+    const clearPermissionRequest = useCallback((
+        sessionId?: string,
+        requestId?: string
+    ): void => {
         const current = permissionRequestRef.current;
-        if (!current || (sessionId && current.sessionId !== sessionId)) {
+        if (!isCurrentPermissionRequest(current, sessionId, requestId)) {
             return;
         }
         permissionRequestRef.current = null;
@@ -163,11 +167,12 @@ export function useSessions() {
                     setPermissionRequest(event.request);
                 } else if (event.type === "permission.resolved") {
                     const current = permissionRequestRef.current;
-                    if (
-                        current?.sessionId === batch.sessionId &&
-                        current.request.id === event.requestId
-                    ) {
-                        clearPermissionRequest(batch.sessionId);
+                    if (isCurrentPermissionRequest(
+                        current,
+                        batch.sessionId,
+                        event.requestId
+                    )) {
+                        clearPermissionRequest(batch.sessionId, event.requestId);
                     }
                 }
             }
@@ -337,7 +342,7 @@ export function useSessions() {
                 approved
             );
             if (responded) {
-                clearPermissionRequest(current.sessionId);
+                clearPermissionRequest(current.sessionId, current.request.id);
             }
             return responded;
         } catch {
