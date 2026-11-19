@@ -1,4 +1,4 @@
-import { mkdir, open, rename, writeFile } from "node:fs/promises";
+import { mkdir, open, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
 import { parseModelsDevCatalog } from "../../llm/catalog.ts";
@@ -57,15 +57,24 @@ export class ModelCatalogService {
                 fetchedAt: Date.now(),
                 stale: false
             };
-            await mkdir(dirname(this.file), { recursive: true });
-            await writeFile(`${this.file}.tmp`, JSON.stringify({ version: CACHE_VERSION, ...next }), "utf8");
-            await rename(`${this.file}.tmp`, this.file);
+            await persistCatalogCache(this.file, next);
             this.cached = next;
             return next;
         } catch (error) {
             if (this.cached) return { ...this.cached, stale: true };
             throw error;
         }
+    }
+}
+
+async function persistCatalogCache(file: string, catalog: ModelCatalog): Promise<void> {
+    const temporary = `${file}.tmp`;
+    try {
+        await mkdir(dirname(file), { recursive: true });
+        await writeFile(temporary, JSON.stringify({ version: CACHE_VERSION, ...catalog }), "utf8");
+        await rename(temporary, file);
+    } catch {
+        await rm(temporary, { force: true }).catch(() => undefined);
     }
 }
 

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, truncate, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, test, vi } from "vitest";
@@ -76,4 +76,18 @@ test("refreshes an oversized persisted cache without reading it", async () => {
     expect(request).toHaveBeenCalledTimes(1);
     expect(catalog.providers).toEqual(parseModelsDevCatalog(fixture));
     expect(JSON.parse(await readFile(file, "utf8")).providers).toEqual(parseModelsDevCatalog(fixture));
+});
+
+test("serves fetched data when the cache cannot be persisted", async () => {
+    const file = join(directory, "unwritable-cache");
+    await mkdir(file, { recursive: true });
+    const request = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(fixture)));
+    const service = new ModelCatalogService(file, request);
+
+    const catalog = await service.get();
+
+    expect(catalog.providers).toEqual(parseModelsDevCatalog(fixture));
+    expect(await service.get()).toEqual(catalog);
+    expect(request).toHaveBeenCalledTimes(1);
+    await expect(readFile(`${file}.tmp`, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
 });
