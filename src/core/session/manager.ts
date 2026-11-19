@@ -19,12 +19,14 @@ import {
     listArchivedSessionSummaries,
     listSessionSummaries,
     loadSession,
+    readSessionNamingContext,
     updateSessionContext,
     updateSessionName,
     updateSessionNameIfUnchanged,
     updateSessionPermission as updateStoredSessionPermission,
     updateSessionStatus
 } from "./store.ts";
+import type { LlmUserMessage } from "../../llm/types.ts";
 
 /** Owns the session instances currently loaded by the app. */
 export class SessionManager {
@@ -65,6 +67,34 @@ export class SessionManager {
 
     listLoaded(): readonly Session[] {
         return [...this.sessions.values()];
+    }
+
+    namingContext(
+        id: string,
+        firstPrompt?: string
+    ): { currentName: string; prompt: string | undefined } {
+        const prompt = firstPrompt?.trim();
+        const loaded = this.sessions.get(id);
+        if (loaded) {
+            return {
+                currentName: loaded.meta.name,
+                prompt: prompt || loaded.snapshot().messages.find(
+                    (message): message is LlmUserMessage => (
+                        message.role === "user" &&
+                        message.context !== "system-reminder"
+                    )
+                )?.content
+            };
+        }
+
+        const stored = readSessionNamingContext(id);
+        if (!stored) {
+            throw new Error(`Session not found: ${id}`);
+        }
+        return {
+            currentName: stored.name,
+            prompt: prompt || stored.firstPrompt || undefined
+        };
     }
 
     getLoaded(id: string): Session | undefined {
