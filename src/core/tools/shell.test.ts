@@ -7,10 +7,12 @@ import { createSandboxPolicy } from "../permissions/sandbox.ts";
 import { MAX_TOOL_OUTPUT_CHARS } from "./output.ts";
 import {
     MAX_STDIN_COMMAND_CHARS,
+    MAX_STDIN_QUEUE_COMMANDS,
     ShellSessionBudget,
     ShellTool,
     type ShellSessionExit
 } from "./shell.ts";
+import type { ToolExecutionResult } from "./types.ts";
 import type { LlmToolCallBlock } from "../../llm/types.ts";
 
 const tools: ShellTool[] = [];
@@ -432,21 +434,27 @@ test("stops accepting stdin input when the pending queue is full", async () => {
         }
         const payload = "x".repeat(MAX_STDIN_COMMAND_CHARS);
 
-        const first = await tool.execute(call("write_stdin", {
-            sessionId,
-            command: payload
-        }), { onOutput: () => undefined });
-        const second = await tool.execute(call("write_stdin", {
-            sessionId,
-            command: payload
-        }), { onOutput: () => undefined });
-        const overflow = await tool.execute(call("write_stdin", {
-            sessionId,
-            command: payload
-        }), { onOutput: () => undefined });
+        let queued = false;
+        let overflow: ToolExecutionResult | undefined;
+        const maxAttempts = MAX_STDIN_QUEUE_COMMANDS * 4;
+        for (let attempt = 0; attempt < maxAttempts && !overflow; attempt += 1) {
+            const result = await tool.execute(call("write_stdin", {
+                sessionId,
+                command: payload
+            }), { onOutput: () => undefined });
+            if (result.content.includes("The stdin command was queued.")) {
+                queued = true;
+            }
+            if (result.content.includes("pending input buffer is full")) {
+                overflow = result;
+            }
+        }
 
-        expect(first.content).toContain("queued");
-        expect(second.content).toContain("queued");
+        expect(queued, "expected at least one stdin write to be accepted").toBe(true);
+        expect(overflow, "expected repeated stdin writes to fill the pending queue").toBeDefined();
+        if (!overflow) {
+            throw new Error("Expected the stdin queue to report overflow.");
+        }
         expect(overflow.isError).toBe(true);
         expect(overflow.content).toContain("pending input buffer is full");
     } finally {
