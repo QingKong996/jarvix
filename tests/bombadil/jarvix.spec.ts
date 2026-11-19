@@ -542,18 +542,10 @@ const documentState = extract((state) => {
     );
     const rightSidebarFitsViewport = rightSidebar === null ||
         insideViewport(window, rightSidebar.getBoundingClientRect());
-    const overlayVisible = [...document.querySelectorAll("div[aria-hidden='true']")]
-        .some((element) => {
-            if (element.getAttribute("data-slot") === "dialog-overlay") return false;
-            if (!visible(window, element)) return false;
-            const style = window.getComputedStyle(element);
-            const rect = element.getBoundingClientRect();
-            return (
-                style.position === "fixed" &&
-                rect.width >= window.innerWidth - 2 &&
-                rect.height >= window.innerHeight - 2
-            );
-        });
+    const overlayVisible = visibleElements(
+        window,
+        "[data-testid='right-sidebar-overlay']"
+    ).length > 0;
     const settingsDialog = document.querySelector(
         "[data-testid='settings-dialog']"
     );
