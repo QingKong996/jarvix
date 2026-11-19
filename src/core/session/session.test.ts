@@ -1374,6 +1374,26 @@ test("shutdown waits for the request and emits events returned by tool stop", as
     });
 });
 
+test("shutdown resolves when tool cleanup never settles", async () => {
+    const dispose = vi.fn();
+    const tools: ToolExecutor = {
+        definitions: [],
+        handles: () => false,
+        execute: async () => {
+            throw new Error("No tools are available");
+        },
+        stop: () => new Promise(() => undefined),
+        dispose
+    };
+    const session = new Session(meta, [], tools);
+    const startedAt = Date.now();
+
+    await session.shutdown(20);
+
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    expect(dispose).toHaveBeenCalled();
+});
+
 test("routes background task output outside the tool call after timeout", async () => {
     const directory = mkdtempSync(join(tmpdir(), "jarvix-session-task-"));
     const script = join(directory, "task.mjs");
