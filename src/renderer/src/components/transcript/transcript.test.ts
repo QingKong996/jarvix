@@ -326,6 +326,69 @@ test("bounds streamed shell output retained by the transcript", () => {
     expect(block.data.output).toContain(OUTPUT_TRUNCATION_NOTICE);
 });
 
+test("updates repeated tool output without scanning unrelated committed blocks", () => {
+    const toolCall = {
+        type: "toolCall" as const,
+        id: "call-active",
+        name: "exec_command",
+        arguments: { command: "generate output", cwd: "/tmp", timeoutMs: 1_000 }
+    };
+    const history = Array.from({ length: 1_000 }, (_, index) => ({
+        role: "user" as const,
+        content: `earlier message ${index}`,
+        timestamp: index
+    }));
+    const initial = transcriptReducer(initialTranscriptState, {
+        type: "session.loaded",
+        messages: [
+            ...history,
+            {
+                ...message,
+                content: [toolCall],
+                stopReason: "toolUse"
+            }
+        ]
+    });
+    const started = transcriptReducer(initial, {
+        type: "events.batch",
+        events: [{
+            type: "tool.start",
+            toolCallId: toolCall.id,
+            toolName: toolCall.name,
+            data: {
+                kind: "shell.exec_command",
+                command: "generate output",
+                output: "",
+                status: "running"
+            }
+        }]
+    });
+    const unrelatedBlocks = started.committed[0]!.blocks;
+    let unrelatedReads = 0;
+    Object.defineProperty(started.committed[0]!, "blocks", {
+        get() {
+            unrelatedReads += 1;
+            return unrelatedBlocks;
+        }
+    });
+
+    const updated = transcriptReducer(started, {
+        type: "events.batch",
+        events: Array.from({ length: 100 }, () => ({
+            type: "tool.output" as const,
+            toolCallId: toolCall.id,
+            toolName: toolCall.name,
+            data: { kind: "shell.exec_command" as const, output: "tick\n" }
+        }))
+    });
+
+    expect(unrelatedReads).toBe(0);
+    expect(updated.committed.at(-1)?.blocks[0]).toMatchObject({
+        type: "tool",
+        data: { output: "tick\n".repeat(100) }
+    });
+});
+
 test("marks an unfinished shell result as ended after resume", () => {
     const toolCall = {
         type: "toolCall" as const,

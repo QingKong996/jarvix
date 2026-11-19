@@ -338,25 +338,76 @@ function systemTurn(id: string, message: LlmSystemMessage): CommittedTurn {
     };
 }
 
+type ToolBlockLocation = {
+    turnIndex: number;
+    blockIndex: number;
+};
+
+const toolBlockIndexes = new WeakMap<
+    CommittedTurn[],
+    ReadonlyMap<string, readonly ToolBlockLocation[]>
+>();
+
+function toolBlockIndex(
+    committed: CommittedTurn[]
+): ReadonlyMap<string, readonly ToolBlockLocation[]> {
+    const cached = toolBlockIndexes.get(committed);
+    if (cached) {
+        return cached;
+    }
+    const index = new Map<string, ToolBlockLocation[]>();
+    for (const [turnIndex, turn] of committed.entries()) {
+        for (const [blockIndex, block] of turn.blocks.entries()) {
+            if (block.type !== "tool") {
+                continue;
+            }
+            const locations = index.get(block.toolCallId);
+            if (locations) {
+                locations.push({ turnIndex, blockIndex });
+            } else {
+                index.set(block.toolCallId, [{ turnIndex, blockIndex }]);
+            }
+        }
+    }
+    toolBlockIndexes.set(committed, index);
+    return index;
+}
+
 function updateToolBlock(
     state: TranscriptState,
     toolCallId: string,
     update: (block: Extract<CommittedBlock, { type: "tool" }>) => Extract<CommittedBlock, { type: "tool" }>
 ): TranscriptState {
-    let changed = false;
-    const committed = state.committed.map((turn) => {
-        let turnChanged = false;
-        const blocks = turn.blocks.map((block) => {
-            if (block.type !== "tool" || block.toolCallId !== toolCallId) {
-                return block;
+    const index = toolBlockIndex(state.committed);
+    const locations = index.get(toolCallId);
+    if (!locations) {
+        return state;
+    }
+
+    const indexesByTurn = new Map<number, number[]>();
+    for (const location of locations) {
+        const blockIndexes = indexesByTurn.get(location.turnIndex);
+        if (blockIndexes) {
+            blockIndexes.push(location.blockIndex);
+        } else {
+            indexesByTurn.set(location.turnIndex, [location.blockIndex]);
+        }
+    }
+
+    const committed = [...state.committed];
+    for (const [turnIndex, blockIndexes] of indexesByTurn) {
+        const turn = committed[turnIndex]!;
+        const blocks = [...turn.blocks];
+        for (const blockIndex of blockIndexes) {
+            const block = blocks[blockIndex]!;
+            if (block.type === "tool") {
+                blocks[blockIndex] = update(block);
             }
-            changed = true;
-            turnChanged = true;
-            return update(block);
-        });
-        return turnChanged ? { ...turn, blocks } : turn;
-    });
-    return changed ? { ...state, committed } : state;
+        }
+        committed[turnIndex] = { ...turn, blocks };
+    }
+    toolBlockIndexes.set(committed, index);
+    return { ...state, committed };
 }
 
 function upsertLiveBlock(
