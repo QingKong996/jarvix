@@ -1,4 +1,11 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    truncateSync,
+    writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, expect, test } from "vitest";
@@ -60,8 +67,12 @@ test("lists only valid project files", () => {
     const second = createProject("Second", [join(base, "second")], directory);
     mkdirSync(join(directory, "decoy.json"));
     writeFileSync(join(directory, "broken.json"), "{not json", "utf8");
+    const oversized = join(directory, "oversized.json");
+    writeFileSync(oversized, "", "utf8");
+    truncateSync(oversized, 16 * 1024 * 1024);
 
     expect(listProjects(directory).map((project) => project.id).sort()).toEqual([first.id, second.id].sort());
+    expect(loadProject("oversized", directory)).toBeNull();
     expect(listProjects(join(base, "missing"))).toEqual([]);
 });
 
