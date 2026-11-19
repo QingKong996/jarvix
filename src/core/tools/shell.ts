@@ -264,11 +264,12 @@ export class ShellTool implements ToolExecutor {
             ...this.children,
             ...this.addressableSessions.values()
         ]);
+        const terminationDeadline = Date.now() + STOP_GRACE_MS;
         for (const session of sessions) {
             session.listener = null;
             session.exitListener = null;
             if (!session.ended) {
-                terminateProcessTreeSync(session);
+                terminateProcessTreeSync(session, terminationDeadline);
             }
         }
         for (const session of sessions) {
@@ -961,7 +962,10 @@ async function forceTerminateProcessTree(session: ShellSession): Promise<void> {
     }
 }
 
-function terminateProcessTreeSync(session: ShellSession): void {
+function terminateProcessTreeSync(
+    session: ShellSession,
+    deadline = Date.now() + STOP_GRACE_MS
+): void {
     const pid = session.child.pid;
     if (pid === undefined) {
         session.child.kill("SIGKILL");
@@ -969,13 +973,18 @@ function terminateProcessTreeSync(session: ShellSession): void {
     }
 
     if (process.platform === "win32") {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+            session.child.kill("SIGKILL");
+            return;
+        }
         const result = spawnSync(
             windowsTaskkillPath(),
             taskkillArguments(pid),
             {
                 stdio: "ignore",
                 windowsHide: true,
-                timeout: STOP_GRACE_MS
+                timeout: remaining
             }
         );
         if (result.error || result.status !== 0) {
