@@ -2,6 +2,7 @@ import {
     existsSync,
     mkdtempSync,
     readFileSync,
+    readdirSync,
     rmSync,
     truncateSync,
     writeFileSync
@@ -182,6 +183,62 @@ test("validates every hunk before changing any file", async () => {
         expect(readFileSync(first, "utf8")).toBe("old first\n");
         expect(readFileSync(second, "utf8")).toBe("untouched\n");
     } finally {
+        tool.dispose();
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
+test("spools prepared updates instead of retaining every file body", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-apply-patch-spooled-"));
+    const tool = new ApplyPatchTool();
+    const controller = new AbortController();
+    const existingSpools = new Set(applyPatchSpoolDirectories());
+    let pending: ReturnType<ApplyPatchTool["execute"]> | undefined;
+    try {
+        const first = join(directory, "first.txt");
+        const second = join(directory, "second.txt");
+        writeFileSync(first, "old first\n", "utf8");
+        writeFileSync(second, "old second\n", "utf8");
+
+        pending = tool.execute(call(directory, [
+            "*** Begin Patch",
+            "*** Update File: first.txt",
+            "@@",
+            "-old first",
+            "+new first",
+            "*** Update File: second.txt",
+            "@@",
+            "-old second",
+            "+new second",
+            "*** End Patch"
+        ]), { onOutput: () => undefined }, controller.signal);
+
+        const createdSpools = applyPatchSpoolDirectories()
+            .filter((path) => !existingSpools.has(path));
+        expect(createdSpools).toHaveLength(1);
+        const spoolDirectory = createdSpools[0]!;
+        expect(readdirSync(spoolDirectory).sort()).toEqual(["0.bin", "1.bin"]);
+        const preparedContents = readdirSync(spoolDirectory)
+            .map((name) => readFileSync(join(spoolDirectory, name), "utf8"))
+            .sort();
+        expect(preparedContents).toEqual(["new first\n", "new second\n"]);
+        expect(readFileSync(first, "utf8")).toBe("old first\n");
+        expect(readFileSync(second, "utf8")).toBe("old second\n");
+
+        controller.abort();
+        const result = await pending;
+        pending = undefined;
+
+        expect(result.isError).toBe(true);
+        expect(result.content).toContain("No changes were applied");
+        expect(readFileSync(first, "utf8")).toBe("old first\n");
+        expect(readFileSync(second, "utf8")).toBe("old second\n");
+        expect(existsSync(spoolDirectory)).toBe(false);
+    } finally {
+        controller.abort();
+        if (pending) {
+            await pending.catch(() => undefined);
+        }
         tool.dispose();
         rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
@@ -452,4 +509,10 @@ function call(cwd: string, patchLines: string[]): LlmToolCallBlock {
             cwd
         }
     };
+}
+
+function applyPatchSpoolDirectories(): string[] {
+    return readdirSync(tmpdir())
+        .filter((name) => name.startsWith("jarvix-apply-patch-spool-"))
+        .map((name) => join(tmpdir(), name));
 }
