@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import {
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    readdirSync,
+    rmSync,
+    truncateSync,
+    writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, test } from "vitest";
@@ -144,6 +152,30 @@ test("saveConfig removes its temporary file when replacement fails", () => {
     mkdirSync(paths.file, { recursive: true });
 
     expect(() => saveConfig({ language: "en" }, paths, defaults)).toThrow();
+    expect(readdirSync(paths.directory)).toEqual(["config.json"]);
+});
+
+test("saveConfig rejects data that would be ignored on the next launch", () => {
+    const paths = configPaths(join(base, "oversized-save"));
+    saveConfig({ language: "en", theme: "light" }, paths, defaults);
+    const previous = readFileSync(paths.file, "utf8");
+    const provider = providerConfigSchema.parse({
+        id: "large-provider",
+        name: "Large provider",
+        protocol: "openai-completions",
+        baseUrl: "https://example.com/v1",
+        env: [],
+        models: [{
+            id: "large-model",
+            name: "x".repeat(1024 * 1024)
+        }]
+    });
+
+    expect(() => saveConfig({
+        providers: [provider],
+        selectedModel: { provider: provider.id, id: provider.models[0]!.id }
+    }, paths, defaults)).toThrow(/safe size limit/);
+    expect(readFileSync(paths.file, "utf8")).toBe(previous);
     expect(readdirSync(paths.directory)).toEqual(["config.json"]);
 });
 

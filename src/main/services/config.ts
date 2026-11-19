@@ -100,11 +100,17 @@ export function saveConfig(
     paths: ConfigPaths = configPaths(),
     defaults: ConfigDefaults = systemDefaults()
 ): void {
-    mkdirSync(dirname(paths.file), { recursive: true });
     const payload = serializeConfig(config, defaults);
+    const contents = `${JSON.stringify(payload, null, 2)}\n`;
+    if (Buffer.byteLength(contents, "utf8") > MAX_CONFIG_FILE_BYTES) {
+        throw new Error(
+            `Config file exceeds the safe size limit of ${MAX_CONFIG_FILE_BYTES} bytes`
+        );
+    }
+    mkdirSync(dirname(paths.file), { recursive: true });
     const temporary = `${paths.file}.${process.pid}.${randomUUID()}.tmp`;
     try {
-        writeFileSync(temporary, `${JSON.stringify(payload, null, 2)}\n`, {
+        writeFileSync(temporary, contents, {
             encoding: "utf8",
             mode: 0o600
         });
