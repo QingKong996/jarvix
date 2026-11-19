@@ -43,6 +43,7 @@ import { appendSessionMessage } from "./store.ts";
 
 const PERSIST_ATTEMPTS = 2;
 export const MAX_TOOL_ROUNDS = 32;
+export const SHUTDOWN_TIMEOUT_MS = 10_000;
 
 type PendingPrompt = {
     type: "prompt";
@@ -390,8 +391,8 @@ export class Session {
         return true;
     }
 
-    shutdown(): Promise<void> {
-        this.shutdownPromise ??= this.shutdownInternal();
+    shutdown(timeoutMs = SHUTDOWN_TIMEOUT_MS): Promise<void> {
+        this.shutdownPromise ??= this.shutdownWithinDeadline(timeoutMs);
         return this.shutdownPromise;
     }
 
@@ -399,6 +400,26 @@ export class Session {
         this.abort();
         this.permissions.dispose();
         this.tools.dispose();
+    }
+
+    private async shutdownWithinDeadline(timeoutMs: number): Promise<void> {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const deadline = new Promise<false>((resolvePromise) => {
+            timer = setTimeout(() => resolvePromise(false), timeoutMs);
+        });
+        try {
+            const completed = await Promise.race([
+                this.shutdownInternal().then(() => true as const),
+                deadline
+            ]);
+            if (completed) {
+                return;
+            }
+            this.tools.dispose();
+            this.lastRuntime = null;
+        } finally {
+            clearTimeout(timer);
+        }
     }
 
     private async shutdownInternal(): Promise<void> {
