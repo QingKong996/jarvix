@@ -2,6 +2,4 @@
 export type JarvixContextUsage = {
     estimatedTokens: number;
     contextWindow: number;
-    /** Number of older messages omitted from the next provider request. */
-    omittedMessages?: number;
 };

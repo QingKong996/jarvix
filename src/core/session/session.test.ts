@@ -391,7 +391,7 @@ test("estimates context from the exact message sequence sent to the model", asyn
     }));
 });
 
-test("trims complete old turns before sending an over-budget request", async () => {
+test("sends complete history even when it exceeds the model context window", async () => {
     let sent: LlmMessage[] | undefined;
     const history = Array.from({ length: 24 }, (_, index): LlmMessage[] => [
         {
@@ -424,104 +424,15 @@ test("trims complete old turns before sending an over-budget request", async () 
         role: "system",
         context: "environment"
     });
-    expect(sent?.[1]).toMatchObject({
-        role: "user",
-        context: "system-reminder",
-        content: expect.stringContaining("omitted")
-    });
+    expect(sent).toHaveLength(history.length + 2);
+    for (let index = 0; index < 24; index += 1) {
+        expect(JSON.stringify(sent)).toContain(`old-${index} `);
+    }
     expect(sent?.at(-1)).toMatchObject({
         role: "user",
         content: "latest question"
     });
-    expect(JSON.stringify(sent)).not.toContain("old-0 ");
-});
-
-test("retains the latest environment reminder when trimming old turns", async () => {
-    const requests: LlmMessage[][] = [];
-    const history: LlmMessage[] = Array.from({ length: 24 }, (_, index): LlmMessage[] => [
-        {
-            role: "user",
-            content: `old-${index} ${"a".repeat(500)}`,
-            timestamp: index * 2 + 1
-        },
-        assistantMessage()
-    ]).flat();
-    const llm: LlmAdapter = {
-        getModel: () => MODEL,
-        stream(request) {
-            requests.push([...request.messages]);
-            return (async function* (): AsyncIterable<LlmStreamEvent> {
-                yield { type: "done", message: assistantMessage() };
-            })();
-        }
-    };
-    const session = new Session(meta, history);
-
-    await session.request("first", {
-        llm,
-        config: SMALL_CONTEXT_CONFIG,
-        workingDirectories: ["C:\\workspace-a"],
-        emit: () => undefined
-    });
-    await session.request("switch workspace", {
-        llm,
-        config: SMALL_CONTEXT_CONFIG,
-        workingDirectories: ["C:\\workspace-b"],
-        emit: () => undefined
-    });
-    await session.request("latest question", {
-        llm,
-        config: SMALL_CONTEXT_CONFIG,
-        workingDirectories: ["C:\\workspace-b"],
-        emit: () => undefined
-    });
-
-    const latestRequest = requests.at(-1) ?? [];
-    expect(latestRequest[0]).toMatchObject({
-        role: "system",
-        content: expect.stringContaining("C:\\workspace-a")
-    });
-    expect(latestRequest).toContainEqual(expect.objectContaining({
-        role: "user",
-        context: "system-reminder",
-        content: expect.stringContaining("C:\\workspace-b")
-    }));
-    expect(latestRequest.at(-1)).toMatchObject({
-        role: "user",
-        content: "latest question"
-    });
-});
-
-test("rejects a turn that cannot fit after trimming", async () => {
-    const stream = vi.fn(() => (async function* (): AsyncIterable<LlmStreamEvent> {
-        yield { type: "done", message: assistantMessage() };
-    })());
-    const session = new Session(meta, [], NO_TOOLS);
-
-    await expect(session.request("x".repeat(2_000), {
-        llm: {
-            getModel: () => MODEL,
-            stream
-        },
-        config: {
-            providers: [providerConfigSchema.parse({
-                id: "test",
-                name: "Test",
-                protocol: "openai-completions",
-                baseUrl: "http://localhost:8080/v1",
-                models: [{
-                    id: "test-model",
-                    name: "Test",
-                    contextWindow: 300,
-                    maxTokens: 50
-                }]
-            })],
-            selectedModel: { provider: "test", id: "test-model" }
-        },
-        emit: () => undefined
-    })).rejects.toThrow("Context window exceeded");
-
-    expect(stream).not.toHaveBeenCalled();
+    expect(JSON.stringify(sent)).not.toContain("Earlier conversation history was omitted");
 });
 
 test("retries persistence once and dequeues the message on success", async () => {

@@ -30,12 +30,6 @@ export function ContextUsageRing({ usage }: ContextUsageRingProps) {
         limit: numberFormat.format(limit),
         percent: titlePercent
     });
-    const omitted = usage.omittedMessages && usage.omittedMessages > 0
-        ? t("composer.contextUsage.omitted", {
-            count: numberFormat.format(usage.omittedMessages)
-        })
-        : "";
-    const fullLabel = omitted ? `${label} · ${omitted}` : label;
     const percentLabel = ratio > 1
         ? "100"
         : titlePercent;
@@ -48,8 +42,8 @@ export function ContextUsageRing({ usage }: ContextUsageRingProps) {
     return (
         <span
             role="img"
-            aria-label={fullLabel}
-            title={fullLabel}
+            aria-label={label}
+            title={label}
             className="inline-flex size-7 shrink-0 items-center justify-center"
         >
             <svg aria-hidden="true" viewBox="0 0 24 24" className="size-7">
