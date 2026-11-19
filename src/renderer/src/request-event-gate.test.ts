@@ -106,6 +106,38 @@ test("waits for the next request start before forwarding ordinary events", () =>
     expect(gate.filter("session-1", events)).toEqual(events);
 });
 
+test("forwards terminal failures before the next request emits a start", () => {
+    const gate = new RequestEventGate();
+    gate.pause("session-1");
+    gate.resume("session-1");
+    const terminal: JarvixEvent[] = [
+        {
+            type: "error",
+            message: {
+                role: "assistant",
+                content: [],
+                provider: "test",
+                model: "test",
+                api: "test",
+                usage: {
+                    inputTokens: 0,
+                    outputTokens: 0,
+                    cacheReadTokens: 0,
+                    cacheWriteTokens: 0,
+                    totalTokens: 0,
+                    cost: 0
+                },
+                stopReason: "error",
+                timestamp: 1,
+                errorMessage: "provider failed"
+            }
+        },
+        { type: "request.error", error: "request failed" }
+    ];
+
+    expect(gate.filter("session-1", terminal)).toEqual(terminal);
+});
+
 test("does not gate a session without a paused request", () => {
     const gate = new RequestEventGate();
 

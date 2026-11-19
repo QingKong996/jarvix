@@ -28,11 +28,11 @@ export class RequestEventGate {
         if (this.awaitingStart.has(sessionId)) {
             const startIndex = events.findIndex((event) => event.type === "start");
             if (startIndex === -1) {
-                return events.filter(isRetainedWhileStopped);
+                return events.filter(isRetainedBeforeRequestStart);
             }
             this.awaitingStart.delete(sessionId);
             return [
-                ...events.slice(0, startIndex).filter(isRetainedWhileStopped),
+                ...events.slice(0, startIndex).filter(isRetainedBeforeRequestStart),
                 ...events.slice(startIndex)
             ];
         }
@@ -41,6 +41,12 @@ export class RequestEventGate {
         }
         return [...events];
     }
+}
+
+function isRetainedBeforeRequestStart(event: JarvixEvent): boolean {
+    return event.type === "error"
+        || event.type === "request.error"
+        || isRetainedWhileStopped(event);
 }
 
 function isRetainedWhileStopped(event: JarvixEvent): boolean {

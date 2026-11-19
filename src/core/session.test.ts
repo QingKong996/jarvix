@@ -414,6 +414,18 @@ test("times out session auto-naming when the provider stream stalls", async () =
     expect(jarvix.loadSession(session.meta.id)?.meta.name).toBe(SESSION_NAME);
 });
 
+test("bounds automatic naming output when a provider ignores max tokens", async () => {
+    home.path = join(base, "naming-output-bound-home");
+    const jarvix = new Jarvix({
+        llm: fakeLlm("x".repeat(100_000), []),
+        config: TEST_CONFIG
+    });
+    const session = jarvix.createSession({}, SESSION_NAME);
+
+    expect(await jarvix.autoNameSession(session.meta.id, "Name this session"))
+        .toBe("x".repeat(80));
+});
+
 test("creates temporary sessions by default and validates explicit project context", () => {
     home.path = join(base, "project-required-home");
     const jarvix = new Jarvix({ llm: fakeLlm("ok", []), config: TEST_CONFIG });
