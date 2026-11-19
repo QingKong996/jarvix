@@ -48,6 +48,7 @@ const DEFAULT_CWD = process.cwd();
 const WINDOWS_POWERSHELL = findWindowsPowerShell();
 const STOP_GRACE_MS = 2_000;
 const STOP_FORCE_MS = 2_000;
+const TASKKILL_TIMEOUT_MS = 2_000;
 const MAX_TIMEOUT_MS = 2_147_483_647;
 export const MAX_STDIN_COMMAND_CHARS = 128 * 1024;
 export const MAX_STDIN_QUEUE_CHARS = MAX_STDIN_COMMAND_CHARS * 2;
@@ -992,16 +993,45 @@ function terminateProcessTreeSync(session: ShellSession): void {
 
 async function taskkill(pid: number, session: ShellSession): Promise<void> {
     await new Promise<void>((resolvePromise) => {
-        const killer = spawn(
-            windowsTaskkillPath(),
-            taskkillArguments(pid),
-            { stdio: "ignore", windowsHide: true }
-        );
-        killer.once("error", () => {
-            session.child.kill();
+        let killer: ReturnType<typeof spawn> | undefined;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        let settled = false;
+        const finish = (fallback: boolean): void => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            if (timer !== undefined) {
+                clearTimeout(timer);
+            }
+            if (fallback) {
+                try {
+                    killer?.kill();
+                } catch {
+                    // The termination helper may have already exited.
+                }
+                try {
+                    session.child.kill();
+                } catch {
+                    // The shell may already be gone.
+                }
+            }
             resolvePromise();
-        });
-        killer.once("close", () => resolvePromise());
+        };
+
+        try {
+            killer = spawn(
+                windowsTaskkillPath(),
+                taskkillArguments(pid),
+                { stdio: "ignore", windowsHide: true }
+            );
+        } catch {
+            finish(true);
+            return;
+        }
+        timer = setTimeout(() => finish(true), TASKKILL_TIMEOUT_MS);
+        killer.once("error", () => finish(true));
+        killer.once("close", () => finish(false));
     });
 }
 
