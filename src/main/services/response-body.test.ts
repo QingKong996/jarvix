@@ -46,3 +46,31 @@ test("decodes a fragmented stream once instead of once per chunk", async () => {
         decode.mockRestore();
     }
 });
+
+test("coalesces fragmented chunks instead of retaining one entry per fragment", async () => {
+    const text = "fragment ".repeat(512);
+    const payload = JSON.stringify({ text });
+    const encoded = new TextEncoder().encode(payload);
+    const response = new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+            for (const byte of encoded) {
+                controller.enqueue(new Uint8Array([byte]));
+            }
+            controller.close();
+        }
+    }));
+    const originalPush = Array.prototype.push;
+    let pushCalls = 0;
+    Array.prototype.push = function (this: unknown[], ...items: unknown[]): number {
+        pushCalls += 1;
+        return Reflect.apply(originalPush, this, items);
+    } as typeof Array.prototype.push;
+
+    try {
+        await expect(readJsonResponse(response, 16 * 1024, "test")).resolves.toEqual({ text });
+    } finally {
+        Array.prototype.push = originalPush;
+    }
+
+    expect(pushCalls).toBeLessThan(20);
+});
