@@ -13,6 +13,7 @@ export const PROJECT_FORMAT_VERSION = 1;
 
 const PROJECT_FILE_EXTENSION = ".json";
 const PROJECT_FILE_MODE = 0o600;
+const MAX_PROJECT_FILE_BYTES = 1024 * 1024;
 
 export function projectFile(id: string, directory = defaultProjectDirectory()): string {
     return join(
@@ -47,6 +48,10 @@ export function createProject(
 export function loadProject(id: string, directory = defaultProjectDirectory()): JarvixProject | null {
     const file = projectFile(id, directory);
     try {
+        const stats = statSync(file);
+        if (!stats.isFile() || stats.size > MAX_PROJECT_FILE_BYTES) {
+            return null;
+        }
         const project = parseProject(JSON.parse(readFileSync(file, "utf8")));
         return project?.id === id ? project : null;
     } catch {
@@ -69,7 +74,8 @@ export function listProjects(directory = defaultProjectDirectory()): JarvixProje
         }
         const file = join(directory, entry);
         try {
-            if (!statSync(file).isFile()) {
+            const stats = statSync(file);
+            if (!stats.isFile() || stats.size > MAX_PROJECT_FILE_BYTES) {
                 continue;
             }
             const project = parseProject(JSON.parse(readFileSync(file, "utf8")));
