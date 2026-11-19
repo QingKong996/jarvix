@@ -78,9 +78,11 @@ export function createSession(
         permission: permissionModeSchema.parse(permission),
         ...normalizedContext
     };
+    const contents = serializeRecord(meta);
+    assertSessionMetaFits(contents);
 
     mkdirSync(directory, { recursive: true });
-    writeFileSync(sessionFile(meta.id, directory), serializeRecord(meta), {
+    writeFileSync(sessionFile(meta.id, directory), contents, {
         encoding: "utf8",
         mode: SESSION_FILE_MODE
     });
@@ -219,6 +221,8 @@ export function deleteSession(id: string, directory = defaultSessionDirectory())
 }
 
 function writeSessionMeta(file: string, meta: JarvixSessionMeta): void {
+    const contents = serializeRecord(meta);
+    assertSessionMetaFits(contents);
     const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
     try {
         const source = openSync(file, "r");
@@ -226,7 +230,7 @@ function writeSessionMeta(file: string, meta: JarvixSessionMeta): void {
             const sourceMode = fstatSync(source).mode & 0o777;
             const target = openSync(temporary, "wx", sourceMode || SESSION_FILE_MODE);
             try {
-                writeAll(target, Buffer.from(serializeRecord(meta), "utf8"));
+                writeAll(target, Buffer.from(contents, "utf8"));
                 copySessionBody(source, target);
             } finally {
                 closeSync(target);
@@ -651,6 +655,14 @@ function readSessionMeta(file: string): JarvixSessionMeta | null {
 
 function serializeRecord(record: SessionRecord): string {
     return `${JSON.stringify(record)}\n`;
+}
+
+function assertSessionMetaFits(contents: string): void {
+    if (Buffer.byteLength(contents, "utf8") > SESSION_HEADER_MAX_BYTES) {
+        throw new Error(
+            `Session metadata exceeds the safe size limit of ${SESSION_HEADER_MAX_BYTES} bytes`
+        );
+    }
 }
 
 function trailingRecordSeparator(file: string): string {
