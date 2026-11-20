@@ -1,5 +1,4 @@
 import type {
-    LlmAdapter,
     LlmAssistantMessage,
     LlmMessage,
     LlmRequest,
@@ -9,13 +8,10 @@ import type {
     LlmToolResultMessage,
     LlmUserMessage
 } from "../../../llm/index.ts";
-import type { JarvixConfig } from "../../../protocol/config.ts";
 import type { JarvixContextUsage } from "../../../protocol/context-usage.ts";
-import type { JarvixEvent } from "../../../protocol/event.ts";
 import type { JarvixProviderContext } from "../../../protocol/provider-context.ts";
 import type {
     PermissionDecision,
-    PermissionGrantInput,
     PermissionMode
 } from "../../../protocol/permission.ts";
 import type { JarvixSession, JarvixSessionMeta } from "../../../protocol/session.ts";
@@ -25,45 +21,24 @@ import {
 } from "../../../protocol/providers.ts";
 import {
     createDefaultTools,
-    type ToolExecutionResult,
     type ToolExecutor
 } from "../../tools/index.ts";
-import {
-    createToolCallViewData,
-    toToolResultDetails,
-    type ToolCallViewData
-} from "../../tools/view.ts";
 import { SessionPermissions } from "../../permissions/session-permissions.ts";
 import { estimateContextUsage } from "./context-usage.ts";
+import { SYSTEM_PROMPT, isEnvironmentContextMessage } from "./environment.ts";
+import { SessionEnvironmentContext } from "./environment-context.ts";
 import {
-    SYSTEM_PROMPT,
-    environmentContextFor,
-    environmentKeyFor,
-    environmentReminderFor,
-    isEnvironmentContextMessage
-} from "./environment.ts";
-import { appendSessionMessage } from "../persistence/store.ts";
+    PendingMessageQueue,
+    type PendingPrompt,
+    type PendingSystemMessage
+} from "./pending-messages.ts";
+import { SessionPersistenceQueue } from "./persistence-queue.ts";
+import { ToolCallRunner } from "./tool-runner.ts";
+import type { SessionRuntime } from "./types.ts";
 
-const PERSIST_ATTEMPTS = 2;
 export const MAX_TOOL_ROUNDS = 32;
 export const SHUTDOWN_TIMEOUT_MS = 10_000;
-
-type PendingPrompt = {
-    type: "prompt";
-    id: string;
-    text: string;
-};
-
-type PendingSystemMessage = {
-    type: "system";
-    message: LlmSystemMessage;
-};
-
-type PendingEnvironmentReminder = {
-    type: "environment";
-};
-
-type PendingTurnMessage = PendingPrompt | PendingSystemMessage | PendingEnvironmentReminder;
+export type { SessionRuntime } from "./types.ts";
 
 type TurnDecision = "continue" | "complete" | "failed";
 
@@ -74,21 +49,14 @@ type TurnContext = {
     request: Omit<LlmRequest, "messages" | "signal" | "tools">;
 };
 
-export type SessionRuntime = {
-    llm: LlmAdapter;
-    config: JarvixConfig;
-    workingDirectories?: readonly string[];
-    emit(event: JarvixEvent): void;
-};
-
 /** In-memory state for one conversation. */
 export class Session {
     readonly meta: JarvixSessionMeta;
     private readonly history: LlmMessage[];
-    private readonly pendingPersistence: LlmMessage[] = [];
-    private pendingTurnMessages: PendingTurnMessage[] = [];
-    private readonly backgroundExitNotices = new Set<string>();
-    private readonly tools: ToolExecutor;
+    private readonly persistence: SessionPersistenceQueue;
+    private readonly pendingMessages = new PendingMessageQueue();
+    private readonly environment: SessionEnvironmentContext;
+    private readonly toolRunner: ToolCallRunner;
     private readonly permissions: SessionPermissions;
     private readonly idleWaiters = new Set<() => void>();
     private running = false;
@@ -97,8 +65,6 @@ export class Session {
     private requestController: AbortController | null = null;
     private lastRuntime: SessionRuntime | null = null;
     private contextWindow: number | null = null;
-    private environmentContextMessage: LlmSystemMessage | null = null;
-    private environmentKey: string | null = null;
     private shutdownPromise: Promise<void> | null = null;
 
     constructor(
@@ -108,18 +74,24 @@ export class Session {
         permissions: SessionPermissions = new SessionPermissions()
     ) {
         this.meta = meta;
-        this.history = [...messages];
-        const environmentContext = this.history.find(isEnvironmentContextMessage);
-        if (environmentContext) {
-            this.environmentContextMessage = environmentContext;
-            this.environmentKey = environmentContext.environmentKey ?? null;
-            this.history = [
-                environmentContext,
-                ...this.history.filter((message) => message !== environmentContext)
-            ];
-        }
-        this.tools = tools;
+        this.environment = new SessionEnvironmentContext(() => this.meta.permission);
+        this.history = this.environment.initialize(messages);
         this.permissions = permissions;
+        this.persistence = new SessionPersistenceQueue(meta.id);
+        this.toolRunner = new ToolCallRunner({
+            tools,
+            permissions,
+            append: (message) => this.append(message),
+            queueBackgroundExitNotice: (runtime, sessionId, exitCode, error, unreadCharacters) => {
+                this.queueBackgroundExitNotice(
+                    runtime,
+                    sessionId,
+                    exitCode,
+                    error,
+                    unreadCharacters
+                );
+            }
+        });
     }
 
     async request(question: string, runtime: SessionRuntime): Promise<void> {
@@ -202,7 +174,7 @@ export class Session {
         } finally {
             this.toolUseOpen = false;
             this.streamOpen = false;
-            this.discardPendingPrompts();
+            this.pendingMessages.discardPrompts();
             this.flushPendingSystemMessages(runtime);
             this.running = false;
             if (this.requestController === controller) {
@@ -213,7 +185,7 @@ export class Session {
     }
 
     abort(): void {
-        this.discardPendingPrompts();
+        this.pendingMessages.discardPrompts();
         this.requestController?.abort();
     }
 
@@ -228,7 +200,7 @@ export class Session {
         ) {
             return false;
         }
-        this.pendingTurnMessages.push({ type: "prompt", id, text });
+        this.pendingMessages.addPrompt(id, text);
         return true;
     }
 
@@ -242,8 +214,8 @@ export class Session {
         if (!this.running || this.requestController?.signal.aborted) {
             return;
         }
-        if (!this.pendingTurnMessages.some((pending) => pending.type === "environment")) {
-            this.pendingTurnMessages.push({ type: "environment" });
+        if (!this.pendingMessages.hasEnvironmentReminder()) {
+            this.pendingMessages.addEnvironmentReminder();
         }
     }
 
@@ -307,7 +279,7 @@ export class Session {
                 for (const [index, toolCall] of toolCalls.entries()) {
                     if (signal.aborted) {
                         for (const remaining of toolCalls.slice(index)) {
-                            this.finishCancelledToolCall(remaining, runtime);
+                            this.toolRunner.cancel(remaining, runtime);
                         }
                         break;
                     }
@@ -359,17 +331,17 @@ export class Session {
             && !this.streamOpen
             && !this.toolUseOpen
             && this.requestController === null
-            && this.pendingTurnMessages.length === 0
-            && this.pendingPersistence.length === 0
+            && this.pendingMessages.length === 0
+            && this.persistence.pendingCount === 0
             && !this.permissions.hasPending()
-            && this.tools.hasActiveWork?.() !== true;
+            && !this.toolRunner.hasActiveWork;
     }
 
     release(): boolean {
         if (!this.canRelease()) {
             return false;
         }
-        this.tools.dispose();
+        this.toolRunner.dispose();
         this.lastRuntime = null;
         return true;
     }
@@ -382,7 +354,7 @@ export class Session {
     dispose(): void {
         this.abort();
         this.permissions.dispose();
-        this.tools.dispose();
+        this.toolRunner.dispose();
     }
 
     private async shutdownWithinDeadline(timeoutMs: number): Promise<void> {
@@ -398,7 +370,7 @@ export class Session {
             if (completed) {
                 return;
             }
-            this.tools.dispose();
+            this.toolRunner.dispose();
             this.lastRuntime = null;
         } finally {
             clearTimeout(timer);
@@ -409,14 +381,14 @@ export class Session {
         this.abort();
         await this.waitForIdle();
         try {
-            const events = await this.tools.stop();
+            const events = await this.toolRunner.stop();
             if (this.lastRuntime) {
                 for (const event of events) {
                     this.lastRuntime.emit(event);
                 }
             }
         } finally {
-            this.tools.dispose();
+            this.toolRunner.dispose();
             this.lastRuntime = null;
         }
     }
@@ -442,140 +414,31 @@ export class Session {
         runtime: SessionRuntime,
         signal: AbortSignal
     ): Promise<void> {
-        if (signal.aborted) {
-            this.finishCancelledToolCall(toolCall, runtime);
-            return;
-        }
-
-        runtime.emit({
-            type: "tool.start",
-            toolCallId: toolCall.id,
-            toolName: toolCall.name,
-            data: createToolCallViewData(toolCall.name, toolCall.arguments, "running")
-        });
-
-        let result: ToolExecutionResult;
-        if (!this.tools.handles(toolCall.name)) {
-            result = failedToolResult(toolCall, `Unknown tool: ${toolCall.name}`);
-        } else {
-            try {
-                result = await this.tools.execute(
-                    toolCall,
-                    {
-                        onOutput: (data) => {
-                            if (signal.aborted) {
-                                return;
-                            }
-                            runtime.emit({
-                                type: "tool.output",
-                                toolCallId: toolCall.id,
-                                toolName: toolCall.name,
-                                data
-                            });
-                        },
-                        onBackgroundEnd: ({ taskId, exitCode, error, unreadOutput, data, isError }) => {
-                            runtime.emit({
-                                type: "tool.end",
-                                toolCallId: toolCall.id,
-                                toolName: toolCall.name,
-                                data,
-                                isError,
-                                endReason: "exited"
-                            });
-                            if (
-                                unreadOutput.length > 0 &&
-                                !this.backgroundExitNotices.has(taskId)
-                            ) {
-                                this.backgroundExitNotices.add(taskId);
-                                this.queueBackgroundExitNotice(
-                                    runtime,
-                                    taskId,
-                                    exitCode,
-                                    error,
-                                    unreadOutput.length
-                                );
-                            }
-                        },
-                        onTaskEvent: (event) => {
-                            runtime.emit(event);
-                        },
-                        requestPermission: (request) =>
-                            this.requestSandboxPermission(request, runtime, signal)
-                    },
-                    signal
-                );
-            } catch (error) {
-                result = failedToolResult(toolCall, error instanceof Error ? error.message : String(error));
-            }
-        }
-
-        this.completeToolCall(toolCall, result, runtime);
+        await this.toolRunner.execute(toolCall, runtime, signal);
     }
 
     private registeredTools() {
-        return this.tools.getRegisteredTools?.(this.meta.permission) ?? this.tools.definitions;
+        return this.toolRunner.registeredTools(this.meta.permission);
     }
 
     private ensureEnvironmentContext(runtime: SessionRuntime): void {
-        if (this.environmentContextMessage) {
-            return;
+        const message = this.environment.ensure(runtime.workingDirectories);
+        if (message) {
+            this.history.unshift(message);
         }
-        const key = environmentKeyFor(
-            this.meta.permission,
-            runtime.workingDirectories
-        );
-        const message = this.createEnvironmentContext(runtime.workingDirectories ?? [], key);
-        this.history.unshift(message);
-        this.environmentContextMessage = message;
-        this.environmentKey = key;
     }
 
     private messagesForRequest(workingDirectories: readonly string[]): LlmMessage[] {
-        return this.assembleMessagesForRequest(workingDirectories);
-    }
-
-    private assembleMessagesForRequest(workingDirectories: readonly string[]): LlmMessage[] {
-        const key = environmentKeyFor(this.meta.permission, workingDirectories);
-        return !this.environmentContextMessage
-            ? [
-                this.createEnvironmentContext(workingDirectories, key),
-                ...this.history
-            ]
-            : (() => {
-                const next = [...this.history];
-                if (this.environmentKey !== key) {
-                    next.push(
-                        environmentReminderFor(this.meta.permission, workingDirectories).persisted
-                    );
-                }
-                return next;
-            })();
-    }
-
-    private createEnvironmentContext(
-        workingDirectories: readonly string[],
-        key: string
-    ): LlmSystemMessage {
-        return {
-            ...environmentContextFor(this.meta.permission, workingDirectories),
-            context: "environment",
-            environmentKey: key
-        };
+        return this.environment.messagesFor(this.history, workingDirectories);
     }
 
     private appendEnvironmentReminderIfChanged(
         runtime: SessionRuntime
     ): LlmSystemMessage | null {
-        const key = environmentKeyFor(this.meta.permission, runtime.workingDirectories);
-        if (key === this.environmentKey) {
+        const reminder = this.environment.reminderIfChanged(runtime.workingDirectories);
+        if (!reminder) {
             return null;
         }
-
-        const reminder = environmentReminderFor(
-            this.meta.permission,
-            runtime.workingDirectories
-        );
-        this.environmentKey = key;
         this.append(reminder.persisted);
         return reminder.display;
     }
@@ -595,62 +458,6 @@ export class Session {
             type: "context.usage",
             usage: this.contextUsage(contextWindow, runtime.workingDirectories)
         });
-    }
-
-    private async requestSandboxPermission(
-        input: PermissionGrantInput,
-        runtime: SessionRuntime,
-        signal: AbortSignal
-    ): Promise<PermissionDecision> {
-        if (signal.aborted) {
-            return "cancelled";
-        }
-        const handle = this.permissions.begin(input, signal);
-        runtime.emit({
-            type: "permission.request",
-            request: handle.request
-        });
-        const decision = await handle.decision;
-        runtime.emit({
-            type: "permission.resolved",
-            requestId: handle.request.id,
-            decision
-        });
-        return decision;
-    }
-
-    private finishCancelledToolCall(toolCall: LlmToolCallBlock, runtime: SessionRuntime): void {
-        this.completeToolCall(
-            toolCall,
-            failedToolResult(toolCall, "Tool execution stopped."),
-            runtime
-        );
-    }
-
-    private completeToolCall(
-        toolCall: LlmToolCallBlock,
-        result: ToolExecutionResult,
-        runtime: SessionRuntime
-    ): void {
-        runtime.emit({
-            type: "tool.end",
-            toolCallId: toolCall.id,
-            toolName: toolCall.name,
-            data: result.data,
-            isError: result.isError,
-            endReason: result.endReason
-        });
-
-        const message: LlmToolResultMessage = {
-            role: "toolResult",
-            toolCallId: toolCall.id,
-            toolName: toolCall.name,
-            content: result.content,
-            details: toToolResultDetails(result.data),
-            isError: result.isError,
-            timestamp: Date.now()
-        };
-        this.append(message);
     }
 
     private queueBackgroundExitNotice(
@@ -678,24 +485,16 @@ export class Session {
             timestamp: Date.now(),
             notice
         };
-        this.pendingTurnMessages.push({ type: "system", message });
+        this.pendingMessages.addSystemMessage(message);
         this.flushPendingSystemMessages(runtime);
     }
 
     private flushPendingTurnMessages(runtime: SessionRuntime): boolean {
-        let injectedPrompt = false;
-        while (this.pendingTurnMessages.length > 0) {
-            const pending = this.pendingTurnMessages.shift()!;
-            if (pending.type === "prompt") {
-                injectedPrompt = true;
-                this.insertPrompt(pending, runtime);
-            } else if (pending.type === "environment") {
-                this.insertEnvironmentReminder(runtime);
-            } else {
-                this.insertSystemMessage(pending, runtime);
-            }
-        }
-        return injectedPrompt;
+        return this.pendingMessages.flush({
+            insertPrompt: (pending) => this.insertPrompt(pending, runtime),
+            insertEnvironment: () => this.insertEnvironmentReminder(runtime),
+            insertSystem: (pending) => this.insertSystemMessage(pending, runtime)
+        });
     }
 
     private insertPrompt(pending: PendingPrompt, runtime: SessionRuntime): void {
@@ -740,72 +539,17 @@ export class Session {
         runtime.emit({ type: "system.message", message: reminder });
     }
 
-    private discardPendingPrompts(): void {
-        this.pendingTurnMessages = this.pendingTurnMessages.filter(
-            (pending) => pending.type !== "prompt"
-        );
-    }
-
     private flushPendingSystemMessages(runtime: SessionRuntime): void {
-        if (this.streamOpen || this.toolUseOpen) {
-            return;
-        }
-        while (true) {
-            const pending = this.pendingTurnMessages[0];
-            if (!pending || pending.type === "prompt") {
-                break;
-            }
-            this.pendingTurnMessages.shift();
-            if (pending.type === "environment") {
-                this.insertEnvironmentReminder(runtime);
-            } else {
-                this.insertSystemMessage(pending, runtime);
-            }
-        }
+        this.pendingMessages.flushSystemMessages({
+            insertPrompt: (pending) => this.insertPrompt(pending, runtime),
+            insertEnvironment: () => this.insertEnvironmentReminder(runtime),
+            insertSystem: (pending) => this.insertSystemMessage(pending, runtime)
+        }, this.streamOpen || this.toolUseOpen);
     }
 
     /** Update memory first, then flush the pending write queue in order. */
     private append(message: LlmMessage): void {
         this.history.push(message);
-        this.pendingPersistence.push(message);
-        this.flushPendingPersistence();
+        this.persistence.enqueue(message);
     }
-
-    private flushPendingPersistence(): void {
-        while (this.pendingPersistence.length > 0) {
-            this.persist(this.pendingPersistence[0]!);
-            this.pendingPersistence.shift();
-        }
-    }
-
-    private persist(message: LlmMessage): void {
-        let lastError: unknown;
-        for (let attempt = 0; attempt < PERSIST_ATTEMPTS; attempt += 1) {
-            try {
-                appendSessionMessage(this.meta.id, message);
-                return;
-            } catch (error) {
-                lastError = error;
-            }
-        }
-
-        const reason = lastError instanceof Error ? lastError.message : String(lastError);
-        throw new Error(
-            `Failed to persist session ${this.meta.id} after ${PERSIST_ATTEMPTS} attempts: ${reason}`,
-            { cause: lastError }
-        );
-    }
-}
-
-function failedToolResult(toolCall: LlmToolCallBlock, output: string): ToolExecutionResult {
-    const data: ToolCallViewData = {
-        ...createToolCallViewData(toolCall.name, toolCall.arguments, "failed"),
-        output
-    };
-    return {
-        content: output,
-        data,
-        isError: true,
-        endReason: "exited"
-    };
 }
