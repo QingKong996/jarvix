@@ -1,9 +1,9 @@
 import { memo, useLayoutEffect, useRef, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
-import { useCommitted, useInjected, useLive } from "./transcript-hooks.ts";
-import { subscribeCommitted, subscribeInjected, subscribeLive } from "./transcript-store.ts";
-import type { CommittedTurn, LiveTurn } from "./types.ts";
+import { useCommitted, useInjected, useLive } from "./state/transcript-hooks.ts";
+import { subscribeCommitted, subscribeInjected, subscribeLive } from "./state/transcript-store.ts";
+import type { CommittedTurn, LiveTurn } from "./state/types.ts";
 import { CHAT_COLUMN, CONTENT_GUTTER } from "../../layout.ts";
 import { Markdown } from "./Markdown.tsx";
 import { ThinkingBlock } from "./ThinkingBlock.tsx";

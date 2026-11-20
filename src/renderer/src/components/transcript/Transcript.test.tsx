@@ -15,7 +15,7 @@ const { committed } = vi.hoisted(() => ({
     }))
 }));
 
-vi.mock("./transcript-hooks.ts", () => ({
+vi.mock("./state/transcript-hooks.ts", () => ({
     useCommitted: () => committed,
     useLive: () => null,
     useInjected: () => []

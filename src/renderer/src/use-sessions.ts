@@ -30,7 +30,7 @@ import {
     ingest,
     injectUserPrompt,
     stopTurn
-} from "./components/transcript/transcript-store.ts";
+} from "./components/transcript/state/transcript-store.ts";
 
 const bridge = window.jarvix;
 

@@ -1,7 +1,10 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
-import type { ShellExecCommandView, ShellWriteStdinView } from "../../../../../core/tools/view.ts";
+import type {
+    ShellExecCommandView,
+    ShellWriteStdinView
+} from "../../../../../core/tools/view.ts";
 
 type ShellToolCallProps = {
     data: ShellExecCommandView | ShellWriteStdinView;

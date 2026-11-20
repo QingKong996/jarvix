@@ -24,7 +24,7 @@ import {
 } from "../project/store.ts";
 import { workingDirectoriesFor } from "./session/directories.ts";
 import { SessionManager } from "./session/manager.ts";
-import type { Session } from "./session/session.ts";
+import type { Session } from "./session/runtime/session.ts";
 import { generateSessionName } from "./session/naming.ts";
 
 export type JarvixOptions = {
