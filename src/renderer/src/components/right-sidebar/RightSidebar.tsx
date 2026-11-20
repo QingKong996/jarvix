@@ -1,82 +1,64 @@
-import { useEffect, useReducer, useRef } from "react";
+import { useEffect } from "react";
 import { Globe, PanelRightClose, Plus, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
 import { ContextInspector } from "../context-inspector/ContextInspector.tsx";
 import { BackgroundTasksPanel } from "./BackgroundTasksPanel.tsx";
-import { rightSidebarPanel, type RightSidebarPanel } from "./panel-registry.ts";
+import { rightSidebarPanel } from "./panel-registry.ts";
 import { RightSidebarNewTab } from "./RightSidebarNewTab.tsx";
 import { shouldDismissRightSidebar } from "./right-sidebar-escape.ts";
-import {
-    activeSidebarTab,
-    createSidebarTabsState,
-    sidebarTabsReducer
-} from "./sidebar-tabs.ts";
+import { activeSidebarTab } from "./sidebar-tabs.ts";
+import type { RightSidebarTabs } from "./use-right-sidebar-tabs.ts";
 import { Button } from "@/components/ui/button";
 
 type RightSidebarProps = {
-    open: boolean;
+    variant: "panel" | "overlay";
+    tabs: RightSidebarTabs;
     sessionId: string | null;
     providerContextRevision: number;
-    onToggle(): void;
+    onClose(): void;
 };
 
 export function RightSidebar({
-    open,
+    variant,
+    tabs,
     sessionId,
     providerContextRevision,
-    onToggle
+    onClose
 }: RightSidebarProps) {
     const { t } = useTranslation();
-    const [tabState, dispatch] = useReducer(
-        sidebarTabsReducer,
-        undefined,
-        createSidebarTabsState
-    );
-    const tabIdRef = useRef(0);
 
     useEffect(() => {
-        if (!open) return;
         const handleKeyDown = (event: KeyboardEvent): void => {
             if (shouldDismissRightSidebar(event, document)) {
-                onToggle();
+                onClose();
             }
         };
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [open, onToggle]);
+    }, [onClose]);
 
-    if (!open) {
-        return null;
-    }
-
-    const activeTab = activeSidebarTab(tabState);
-    const nextTabId = (): string => `right-sidebar-tab-${++tabIdRef.current}`;
-
-    const addTab = (): void => {
-        dispatch({ type: "new", id: nextTabId() });
-    };
-
-    const openPanel = (panel: RightSidebarPanel): void => {
-        dispatch({ type: "open", panel, newTabId: nextTabId() });
-    };
-
-    const closeTab = (tabId: string): void => {
-        dispatch({ type: "close", id: tabId, fallbackId: nextTabId() });
-    };
+    const activeTab = activeSidebarTab(tabs.state);
 
     return (
         <>
-            <div
-                aria-hidden="true"
-                data-testid="right-sidebar-overlay"
-                onClick={onToggle}
-                className="fixed inset-0 z-20 bg-background/70 xl:hidden"
-            />
+            {variant === "overlay" ? (
+                <div
+                    aria-hidden="true"
+                    data-testid="right-sidebar-overlay"
+                    onClick={onClose}
+                    className="fixed inset-0 z-20 bg-background/70"
+                />
+            ) : null}
             <aside
                 aria-labelledby="right-sidebar-title"
                 data-testid="right-sidebar"
-                className="fixed inset-y-0 right-0 z-30 flex h-full w-[min(30rem,calc(100vw-2rem))] shrink-0 flex-col border-l border-border bg-popover shadow-xl xl:static xl:z-auto xl:w-[30rem] xl:shadow-none 2xl:w-[34rem]"
+                className={cn(
+                    "flex h-full min-h-0 w-full flex-col bg-popover",
+                    variant === "overlay"
+                        ? "fixed inset-y-0 right-0 z-30 w-[min(30rem,calc(100vw-2rem))] border-l border-border shadow-xl"
+                        : "shrink-0"
+                )}
             >
                 <h2 id="right-sidebar-title" className="sr-only">
                     {t("rightSidebar.title")}
@@ -87,7 +69,7 @@ export function RightSidebar({
                         aria-label={t("rightSidebar.title")}
                         className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                     >
-                        {tabState.tabs.map((tab) => {
+                        {tabs.state.tabs.map((tab) => {
                             const active = tab.id === activeTab.id;
                             const definition = tab.panel
                                 ? rightSidebarPanel(tab.panel)
@@ -111,10 +93,7 @@ export function RightSidebar({
                                         type="button"
                                         role="tab"
                                         aria-selected={active}
-                                        onClick={() => dispatch({
-                                            type: "activate",
-                                            id: tab.id
-                                        })}
+                                        onClick={() => tabs.activateTab(tab.id)}
                                         data-testid={tab.panel
                                             ? `right-sidebar-tab-${tab.panel}`
                                             : "right-sidebar-tab-new"}
@@ -127,7 +106,7 @@ export function RightSidebar({
                                     </button>
                                     <button
                                         type="button"
-                                        onClick={() => closeTab(tab.id)}
+                                        onClick={() => tabs.closeTab(tab.id)}
                                         aria-label={t("rightSidebar.closeTab", { name: label })}
                                         title={t("rightSidebar.closeTab", { name: label })}
                                         className="ml-1 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-background/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
@@ -139,7 +118,7 @@ export function RightSidebar({
                         })}
                         <button
                             type="button"
-                            onClick={addTab}
+                            onClick={tabs.addTab}
                             aria-label={t("rightSidebar.newTab")}
                             title={t("rightSidebar.newTab")}
                             data-testid="right-sidebar-add-tab"
@@ -154,7 +133,7 @@ export function RightSidebar({
                         size="icon-sm"
                         aria-label={t("rightSidebar.close")}
                         title={t("rightSidebar.close")}
-                        onClick={onToggle}
+                        onClick={onClose}
                         data-testid="right-sidebar-close"
                         className="shrink-0 text-muted-foreground"
                     >
@@ -164,7 +143,7 @@ export function RightSidebar({
 
                 <div className="flex min-h-0 flex-1 flex-col">
                     {activeTab.panel === null ? (
-                        <RightSidebarNewTab onOpenPanel={openPanel} />
+                        <RightSidebarNewTab onOpenPanel={tabs.openPanel} />
                     ) : activeTab.panel === "context" ? (
                         <ContextInspector
                             sessionId={sessionId}
