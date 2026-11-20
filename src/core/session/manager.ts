@@ -9,10 +9,9 @@ import type { PermissionMode } from "../../protocol/permission.ts";
 import type { SandboxPreflight } from "../permissions/sandbox-launch.ts";
 import { SessionPermissions } from "../permissions/session-permissions.ts";
 import { createSandboxPolicy } from "../permissions/sandbox.ts";
-import { createDefaultTools } from "../tools/index.ts";
-import { ShellSessionBudget } from "../tools/shell.ts";
+import { createDefaultTools, ShellSessionBudget } from "../tools/index.ts";
 import { workingDirectoriesFor } from "./directories.ts";
-import { Session } from "./session.ts";
+import { Session } from "./runtime/session.ts";
 import {
     createSession,
     deleteSession,
@@ -25,7 +24,7 @@ import {
     updateSessionNameIfUnchanged,
     updateSessionPermission as updateStoredSessionPermission,
     updateSessionStatus
-} from "./store.ts";
+} from "./persistence/store.ts";
 import type { LlmUserMessage } from "../../llm/types.ts";
 
 /** Owns the session instances currently loaded by the app. */

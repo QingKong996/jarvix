@@ -1,22 +1,30 @@
-import { ApplyPatchTool, type ApplyPatchToolOptions } from "./apply-patch.ts";
-import { BackgroundTaskManager } from "./background-task-manager.ts";
-import { ShellTool, type ShellToolOptions } from "./shell.ts";
-import { LocalTimeTool, SleepTool } from "./time.ts";
+import { ApplyPatchTool, type ApplyPatchToolOptions } from "./apply-patch/apply-patch.ts";
+import { BackgroundTaskManager } from "./shell/background-task-manager.ts";
+import { ShellTool, type ShellToolOptions } from "./shell/shell.ts";
+import { LocalTimeTool, SleepTool } from "./time/time.ts";
 import {
     RequestPermissionTool,
     type RequestPermissionToolOptions
-} from "./request-permission.ts";
-import { ToolRegistry } from "./tool-registry.ts";
-import type { ToolExecutor } from "./types.ts";
+} from "./request-permission/request-permission.ts";
+import { ToolRegistry } from "./shared/tool-registry.ts";
+import type { ToolExecutor } from "./shared/types.ts";
 
-export { ApplyPatchTool, APPLY_PATCH_TOOL, APPLY_PATCH_TOOL_DEFINITIONS } from "./apply-patch.ts";
-export { BackgroundTaskManager } from "./background-task-manager.ts";
-export { ShellTool, SHELL_TOOL_DEFINITIONS } from "./shell.ts";
+export {
+    ApplyPatchTool,
+    APPLY_PATCH_TOOL,
+    APPLY_PATCH_TOOL_DEFINITIONS
+} from "./apply-patch/apply-patch.ts";
+export { BackgroundTaskManager } from "./shell/background-task-manager.ts";
+export {
+    SHELL_TOOL_DEFINITIONS,
+    ShellSessionBudget,
+    ShellTool
+} from "./shell/shell.ts";
 export {
     REQUEST_PERMISSION_TOOL,
     REQUEST_PERMISSION_TOOL_DEFINITIONS,
     RequestPermissionTool
-} from "./request-permission.ts";
+} from "./request-permission/request-permission.ts";
 export {
     LOCAL_TIME_TOOL,
     LOCAL_TIME_TOOL_DEFINITIONS,
@@ -24,8 +32,8 @@ export {
     SLEEP_TOOL,
     SLEEP_TOOL_DEFINITIONS,
     SleepTool
-} from "./time.ts";
-export { ToolRegistry } from "./tool-registry.ts";
+} from "./time/time.ts";
+export { ToolRegistry } from "./shared/tool-registry.ts";
 export type {
     ToolBackgroundEnd,
     ToolBackgroundEndHandler,
@@ -40,7 +48,7 @@ export type {
     ToolTaskEventHandler,
     ToolTaskState,
     ToolTaskSnapshot
-} from "./types.ts";
+} from "./shared/types.ts";
 export type {
     ApplyPatchView,
     GenericToolView,
