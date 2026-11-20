@@ -1,0 +1,390 @@
+import {
+    closeSync,
+    fstatSync,
+    openSync,
+    readdirSync,
+    readSync,
+    statSync
+} from "node:fs";
+import { join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
+import type { LlmMessage } from "../../../llm/types.ts";
+import type {
+    JarvixSession,
+    JarvixSessionMeta,
+    JarvixSessionSummary
+} from "../../../protocol/session.ts";
+import { isStorageId } from "../../storage-id.ts";
+import {
+    defaultSessionDirectory,
+    sessionFile,
+    SESSION_FILE_EXTENSION
+} from "./paths.ts";
+import {
+    SESSION_HEADER_MAX_BYTES,
+    isSessionMessage,
+    parseRecord,
+    parseSessionMeta
+} from "./records.ts";
+
+const SESSION_HEADER_CHUNK_SIZE = 4 * 1024;
+const SESSION_LOAD_CHUNK_SIZE = 64 * 1024;
+const SESSION_TAIL_CHUNK_SIZE = 64 * 1024;
+
+/** Load a session, or null when the file is unreadable or has no valid session header. */
+export function loadSession(
+    id: string,
+    directory = defaultSessionDirectory()
+): JarvixSession | null {
+    const file = sessionFile(id, directory);
+    let descriptor: number;
+    try {
+        descriptor = openSync(file, "r");
+    } catch {
+        return null;
+    }
+
+    const state: { meta: JarvixSessionMeta | null } = { meta: null };
+    const messages: LlmMessage[] = [];
+    const pending: Buffer[] = [];
+    const consume = (line: Buffer): void => {
+        const record = parseRecord(line.toString("utf8"));
+        if (record === undefined) {
+            return;
+        }
+        if (!state.meta) {
+            state.meta = parseSessionMeta(record);
+            return;
+        }
+        if (isSessionMessage(record)) {
+            messages.push(record.message);
+        }
+    };
+
+    try {
+        while (true) {
+            const buffer = Buffer.allocUnsafe(SESSION_LOAD_CHUNK_SIZE);
+            const bytesRead = readSync(descriptor, buffer, 0, buffer.length, null);
+            if (bytesRead === 0) {
+                break;
+            }
+            const chunk = buffer.subarray(0, bytesRead);
+            let start = 0;
+            while (start < bytesRead) {
+                const newline = chunk.indexOf(0x0a, start);
+                if (newline === -1) {
+                    pending.push(chunk.subarray(start));
+                    break;
+                }
+                if (pending.length === 0) {
+                    consume(chunk.subarray(start, newline));
+                } else {
+                    pending.push(chunk.subarray(start, newline));
+                    consume(Buffer.concat(pending));
+                    pending.length = 0;
+                }
+                start = newline + 1;
+            }
+        }
+        if (pending.length > 0) {
+            consume(Buffer.concat(pending));
+        }
+    } catch {
+        return null;
+    } finally {
+        closeSync(descriptor);
+    }
+
+    return state.meta?.id === id ? { meta: state.meta, messages } : null;
+}
+
+/** List session summaries newest first by their last message timestamp. */
+export function listSessionSummaries(
+    directory = defaultSessionDirectory()
+): JarvixSessionSummary[] {
+    let entries: string[];
+    try {
+        entries = readdirSync(directory);
+    } catch {
+        return [];
+    }
+
+    const candidates: { id: string; file: string }[] = [];
+    for (const entry of entries) {
+        if (!entry.endsWith(SESSION_FILE_EXTENSION)) {
+            continue;
+        }
+        const file = join(directory, entry);
+        let stats;
+        try {
+            stats = statSync(file);
+        } catch {
+            continue;
+        }
+        if (!stats.isFile()) {
+            continue;
+        }
+        const id = entry.slice(0, -SESSION_FILE_EXTENSION.length);
+        if (!isStorageId(id)) {
+            continue;
+        }
+        candidates.push({ id, file });
+    }
+
+    const summaries: JarvixSessionSummary[] = [];
+    for (const candidate of candidates) {
+        const summary = readSessionSummary(candidate.file, candidate.id);
+        if (summary) {
+            summaries.push(summary);
+        }
+    }
+    return summaries.sort(
+        (left, right) =>
+            right.updatedAt - left.updatedAt ||
+            right.createdAt - left.createdAt
+    );
+}
+
+/** List archived session summaries newest archive first. */
+export function listArchivedSessionSummaries(
+    directory = defaultSessionDirectory()
+): JarvixSessionSummary[] {
+    return listSessionSummaries(directory)
+        .filter((session) => session.status === "archived")
+        .sort(
+            (left, right) =>
+                (right.archivedAt ?? 0) - (left.archivedAt ?? 0) ||
+                right.createdAt - left.createdAt
+        );
+}
+
+/** Read the stored name and first user prompt without loading the full history. */
+export function readSessionNamingContext(
+    id: string,
+    directory = defaultSessionDirectory()
+): { name: string; firstPrompt: string | null } | null {
+    const file = sessionFile(id, directory);
+    const meta = readSessionMeta(file);
+    if (!meta || meta.id !== id) {
+        return null;
+    }
+    return {
+        name: meta.name,
+        firstPrompt: readFirstUserPrompt(file)
+    };
+}
+
+/** Read only the first JSONL record, which holds the session meta. */
+export function readSessionMeta(file: string): JarvixSessionMeta | null {
+    let descriptor: number;
+    try {
+        descriptor = openSync(file, "r");
+    } catch {
+        return null;
+    }
+
+    try {
+        const buffer = Buffer.allocUnsafe(SESSION_HEADER_CHUNK_SIZE);
+        const decoder = new StringDecoder("utf8");
+        let header = "";
+        let headerBytes = 0;
+        while (true) {
+            const remaining = SESSION_HEADER_MAX_BYTES - headerBytes;
+            if (remaining === 0) {
+                if (fstatSync(descriptor).size <= headerBytes) {
+                    header += decoder.end();
+                    break;
+                }
+                return null;
+            }
+            const bytes = readSync(
+                descriptor,
+                buffer,
+                0,
+                Math.min(buffer.length, remaining),
+                null
+            );
+            if (bytes === 0) {
+                header += decoder.end();
+                break;
+            }
+            headerBytes += bytes;
+            header += decoder.write(buffer.subarray(0, bytes));
+            const newline = header.indexOf("\n");
+            if (newline !== -1) {
+                header = header.slice(0, newline);
+                break;
+            }
+        }
+        return parseSessionMeta(parseRecord(header));
+    } catch {
+        return null;
+    } finally {
+        closeSync(descriptor);
+    }
+}
+
+function readSessionSummary(
+    file: string,
+    id: string
+): JarvixSessionSummary | null {
+    const meta = readSessionMeta(file);
+    if (!meta || meta.id !== id) {
+        return null;
+    }
+    return {
+        id: meta.id,
+        name: meta.name,
+        createdAt: meta.createdAt,
+        updatedAt: readLastMessageTimestamp(file) ?? meta.createdAt,
+        status: meta.status,
+        ...(meta.archivedAt !== undefined ? { archivedAt: meta.archivedAt } : {}),
+        ...(meta.projectId ? { projectId: meta.projectId } : {}),
+        ...(meta.workingDirectory ? { workingDirectory: meta.workingDirectory } : {})
+    };
+}
+
+function readLastMessageTimestamp(file: string): number | null {
+    let descriptor: number;
+    try {
+        descriptor = openSync(file, "r");
+    } catch {
+        return null;
+    }
+
+    try {
+        const size = fstatSync(descriptor).size;
+        const chunks: Array<{ start: number; buffer: Buffer }> = [];
+        let loadedStart = size;
+        let lineEnd = size;
+        while (true) {
+            let separator = findPreviousNewline(chunks, lineEnd);
+            while (separator === null && loadedStart > 0) {
+                const length = Math.min(SESSION_TAIL_CHUNK_SIZE, loadedStart);
+                loadedStart -= length;
+                const chunk = Buffer.allocUnsafe(length);
+                readSync(descriptor, chunk, 0, length, loadedStart);
+                chunks.unshift({ start: loadedStart, buffer: chunk });
+                separator = findPreviousNewline([chunks[0]!], lineEnd);
+            }
+
+            const lineStart = separator === null ? 0 : separator + 1;
+            if (lineEnd > lineStart) {
+                const record = parseRecord(
+                    bufferRange(chunks, lineStart, lineEnd).toString("utf8")
+                );
+                if (isSessionMessage(record)) {
+                    return record.message.timestamp;
+                }
+            }
+            if (separator === null) {
+                return null;
+            }
+            lineEnd = separator;
+        }
+    } catch {
+        return null;
+    } finally {
+        closeSync(descriptor);
+    }
+}
+
+function readFirstUserPrompt(file: string): string | null {
+    let descriptor: number;
+    try {
+        descriptor = openSync(file, "r");
+    } catch {
+        return null;
+    }
+
+    const pending: Buffer[] = [];
+    const consume = (line: Buffer): string | null => {
+        const record = parseRecord(line.toString("utf8"));
+        if (!isSessionMessage(record) || record.message.role !== "user") {
+            return null;
+        }
+        return record.message.context === "system-reminder"
+            ? null
+            : record.message.content;
+    };
+
+    try {
+        while (true) {
+            const buffer = Buffer.allocUnsafe(SESSION_LOAD_CHUNK_SIZE);
+            const bytesRead = readSync(descriptor, buffer, 0, buffer.length, null);
+            if (bytesRead === 0) {
+                break;
+            }
+            const chunk = buffer.subarray(0, bytesRead);
+            let start = 0;
+            while (start < bytesRead) {
+                const newline = chunk.indexOf(0x0a, start);
+                if (newline === -1) {
+                    pending.push(chunk.subarray(start));
+                    break;
+                }
+                let prompt: string | null;
+                if (pending.length === 0) {
+                    prompt = consume(chunk.subarray(start, newline));
+                } else {
+                    pending.push(chunk.subarray(start, newline));
+                    prompt = consume(Buffer.concat(pending));
+                    pending.length = 0;
+                }
+                if (prompt !== null) {
+                    return prompt;
+                }
+                start = newline + 1;
+            }
+        }
+        return pending.length > 0 ? consume(Buffer.concat(pending)) : null;
+    } catch {
+        return null;
+    } finally {
+        closeSync(descriptor);
+    }
+}
+
+function findPreviousNewline(
+    chunks: ReadonlyArray<{ start: number; buffer: Buffer }>,
+    before: number
+): number | null {
+    for (let index = chunks.length - 1; index >= 0; index -= 1) {
+        const chunk = chunks[index]!;
+        const end = Math.min(chunk.start + chunk.buffer.length, before);
+        if (end <= chunk.start) {
+            continue;
+        }
+        const newline = chunk.buffer.lastIndexOf(0x0a, end - chunk.start - 1);
+        if (newline >= 0) {
+            return chunk.start + newline;
+        }
+    }
+    return null;
+}
+
+function bufferRange(
+    chunks: ReadonlyArray<{ start: number; buffer: Buffer }>,
+    start: number,
+    end: number
+): Buffer {
+    const result = Buffer.allocUnsafe(end - start);
+    let offset = 0;
+    for (const chunk of chunks) {
+        const chunkEnd = chunk.start + chunk.buffer.length;
+        const overlapStart = Math.max(start, chunk.start);
+        const overlapEnd = Math.min(end, chunkEnd);
+        if (overlapStart >= overlapEnd) {
+            continue;
+        }
+        const length = overlapEnd - overlapStart;
+        chunk.buffer.copy(
+            result,
+            offset,
+            overlapStart - chunk.start,
+            overlapEnd - chunk.start
+        );
+        offset += length;
+    }
+    return result;
+}

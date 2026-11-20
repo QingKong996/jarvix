@@ -1,19 +1,11 @@
-import { randomUUID } from "node:crypto";
-import {
-    spawn,
-    type ChildProcessWithoutNullStreams,
-    type StdioOptions
-} from "node:child_process";
 import { resolve } from "node:path";
-import { z } from "zod";
-import type { LlmToolCallBlock, LlmToolDefinition } from "../../../llm/types.ts";
+import type { LlmToolCallBlock } from "../../../llm/types.ts";
 import {
     createSandboxLaunch,
     preflightSandbox,
     type SandboxLaunch,
     type SandboxPreflight
 } from "../../permissions/sandbox-launch.ts";
-import { isSandboxRunnerMessage } from "../../permissions/sandbox-protocol.ts";
 import type { SandboxPolicy } from "../../permissions/sandbox.ts";
 import { appendSandboxViolations } from "../../permissions/violations.ts";
 import { formatTruncatedOutput } from "../shared/output.ts";
@@ -24,18 +16,16 @@ import type {
     ToolStopEvent
 } from "../shared/types.ts";
 import { createGenericToolCallViewData } from "../shared/view.ts";
+import { ShellSessionBudget } from "./budget.ts";
 import {
-    sandboxBinShell,
-    shellDisplayName,
-    shellLaunch
+    execCommandArguments,
+    writeStdinArguments,
+    SHELL_TOOL_DEFINITIONS
+} from "./definitions.ts";
+import {
+    sandboxBinShell
 } from "./launch.ts";
-import {
-    DEFAULT_MAX_APP_SHELL_SESSIONS,
-    DEFAULT_MAX_SHELL_SESSIONS,
-    MAX_STDIN_COMMAND_CHARS,
-    MAX_STDIN_QUEUE_CHARS,
-    MAX_STDIN_QUEUE_COMMANDS
-} from "./limits.ts";
+import { DEFAULT_MAX_SHELL_SESSIONS } from "./limits.ts";
 import {
     STOP_GRACE_MS,
     terminateProcessTreeSync
@@ -50,8 +40,6 @@ import {
     writeResultContent
 } from "./results.ts";
 import {
-    addSandboxViolations,
-    appendOutput,
     appendViolationContent,
     enqueueCommand,
     interruptSession,
@@ -65,6 +53,7 @@ import {
     type ShellSessionExit,
     type WriteCommandState
 } from "./session.ts";
+import { startShellSession } from "./session-runner.ts";
 import {
     EXEC_COMMAND_TOOL,
     WRITE_STDIN_TOOL,
@@ -73,119 +62,17 @@ import {
 } from "./view.ts";
 
 export type { ShellSessionExit } from "./session.ts";
+export { ShellSessionBudget } from "./budget.ts";
+export { SHELL_TOOL_DEFINITIONS } from "./definitions.ts";
 export {
     DEFAULT_MAX_APP_SHELL_SESSIONS,
     DEFAULT_MAX_SHELL_SESSIONS,
     MAX_STDIN_COMMAND_CHARS,
     MAX_STDIN_QUEUE_CHARS,
     MAX_STDIN_QUEUE_COMMANDS
-};
+} from "./limits.ts";
 
 const DEFAULT_CWD = process.cwd();
-const MAX_TIMEOUT_MS = 2_147_483_647;
-
-/** Shares a bounded number of active or retained shell sessions across conversations. */
-export class ShellSessionBudget {
-    readonly capacity: number;
-    private readonly reclaimable = new Map<string, () => void>();
-    private used = 0;
-
-    constructor(capacity = DEFAULT_MAX_APP_SHELL_SESSIONS) {
-        if (!Number.isSafeInteger(capacity) || capacity < 1) {
-            throw new RangeError("capacity must be a positive safe integer.");
-        }
-        this.capacity = capacity;
-    }
-
-    get inUse(): number {
-        return this.used;
-    }
-
-    tryAcquire(): boolean {
-        while (this.used >= this.capacity) {
-            const oldest = this.reclaimable.entries().next().value;
-            if (!oldest) {
-                return false;
-            }
-            this.reclaimable.delete(oldest[0]);
-            oldest[1]();
-        }
-        this.used += 1;
-        return true;
-    }
-
-    release(): void {
-        if (this.used > 0) {
-            this.used -= 1;
-        }
-    }
-
-    /** Register a completed unread session that may free its slot under pressure. */
-    registerReclaimable(sessionId: string, reclaim: () => void): void {
-        this.reclaimable.set(sessionId, reclaim);
-    }
-
-    unregisterReclaimable(sessionId: string): void {
-        this.reclaimable.delete(sessionId);
-    }
-}
-
-const execCommandArguments = z.object({
-    command: z.string().trim().min(1),
-    cwd: z.string().trim().min(1),
-    timeoutMs: z.number().int().positive().max(MAX_TIMEOUT_MS)
-});
-
-const writeStdinArguments = z.object({
-    sessionId: z.string().trim().min(1),
-    command: z.string().max(MAX_STDIN_COMMAND_CHARS)
-});
-
-export const SHELL_TOOL_DEFINITIONS: readonly LlmToolDefinition[] = [{
-    name: EXEC_COMMAND_TOOL,
-    description: [
-        `Run a command with ${shellDisplayName()} in an independent process and return its combined output.`,
-        `Use syntax supported by ${shellDisplayName()}.`,
-        "If the command is still running when timeoutMs elapses, keep it alive and return a sessionId.",
-        "Use write_stdin to send more input to that session."
-    ].join(" "),
-    parameters: {
-        type: "object",
-        properties: {
-            command: { type: "string", description: "Shell command to execute." },
-            cwd: { type: "string", description: "Working directory for the command." },
-            timeoutMs: {
-                type: "integer",
-                minimum: 1,
-                maximum: MAX_TIMEOUT_MS,
-                description: "Maximum wait time in milliseconds."
-            }
-        },
-        required: ["command", "cwd", "timeoutMs"],
-        additionalProperties: false
-    }
-}, {
-    name: WRITE_STDIN_TOOL,
-    description: [
-        "Return all output buffered since the previous tool result for this session.",
-        "Then enqueue the provided command and write it to stdin when the session is still running.",
-        "A newline is appended when the command does not already end with one.",
-        "Pass an empty command to only retrieve buffered output."
-    ].join(" "),
-    parameters: {
-        type: "object",
-        properties: {
-            sessionId: { type: "string", description: "Session id returned by exec_command." },
-            command: {
-                type: "string",
-                maxLength: MAX_STDIN_COMMAND_CHARS,
-                description: "Text to write to stdin, or empty to poll."
-            }
-        },
-        required: ["sessionId", "command"],
-        additionalProperties: false
-    }
-}];
 
 export type ShellToolOptions = {
     defaultCwd?: string | (() => string | undefined);
@@ -549,145 +436,22 @@ export class ShellTool implements ToolExecutor {
         sharedSlotHeld: boolean
     ): ShellSession {
         const sandboxed = this.sandboxLaunch(command, cwd, toolCallId);
-        const launch = sandboxed?.launch ?? shellLaunch(command);
-        let child: ChildProcessWithoutNullStreams;
-        try {
-            const stdio: StdioOptions = sandboxed
-                ? ["pipe", "pipe", "pipe", "ipc"]
-                : ["pipe", "pipe", "pipe"];
-            child = spawn(launch.command, launch.args, {
-                cwd,
-                env: sandboxed?.env ?? process.env,
-                stdio,
-                windowsHide: true,
-                detached: process.platform !== "win32"
-            }) as ChildProcessWithoutNullStreams;
-        } catch (error) {
-            sandboxed?.cleanup();
-            throw error;
-        }
-        let resolveDone!: () => void;
-        const done = new Promise<void>((resolvePromise) => {
-            resolveDone = resolvePromise;
-        });
-        const session: ShellSession = {
-            id: randomUUID(),
+        return startShellSession({
             command,
             cwd,
-            child,
-            output: "",
-            truncatedCharacters: 0,
-            truncationNoticeSent: false,
-            broadcastOffset: 0,
-            readOffset: 0,
-            commandQueue: [],
-            commandQueueChars: 0,
-            writing: false,
-            retained: false,
+            listener,
+            sandboxed,
             sharedSlotHeld,
-            ended: false,
-            exitCode: null,
-            error: null,
-            sandbox: sandboxed
-                ? {
-                    commandId: sandboxed.commandId,
-                    violations: [],
-                    seenViolations: new Set(),
-                    omittedViolations: 0,
-                    intercepted: false,
-                    done: false
-                }
-                : null,
-            done,
-            finish: () => {
-                if (session.ended) {
-                    return;
-                }
-                session.ended = true;
-                session.listener = null;
-                session.commandQueue.length = 0;
-                session.commandQueueChars = 0;
-                session.writing = false;
-                const exitListener = session.exitListener;
-                session.exitListener = null;
-                session.cleanup?.();
-                session.cleanup = undefined;
+            register: (session) => {
+                this.children.add(session);
+            },
+            onFinished: (session) => {
                 this.children.delete(session);
                 if (!session.retained) {
                     this.releaseSharedSlot(session);
                 }
-                resolveDone();
-                exitListener?.();
-            },
-            cleanup: sandboxed?.cleanup,
-            listener,
-            exitListener: null
-        };
-        this.children.add(session);
-
-        child.stdout.setEncoding("utf8");
-        child.stderr.setEncoding("utf8");
-        child.stdout.on("data", (chunk: string) => appendOutput(session, chunk));
-        child.stderr.on("data", (chunk: string) => appendOutput(session, chunk));
-        let closeReceived = false;
-        let completionTimer: NodeJS.Timeout | undefined;
-        const finishWhenReady = (): void => {
-            if (!closeReceived || (session.sandbox !== null && !session.sandbox.done)) {
-                return;
             }
-            if (completionTimer !== undefined) {
-                clearTimeout(completionTimer);
-                completionTimer = undefined;
-            }
-            session.finish();
-        };
-        child.on("message", (message: unknown) => {
-            const sandbox = session.sandbox;
-            if (
-                !sandboxed ||
-                !sandbox ||
-                !isSandboxRunnerMessage(message) ||
-                message.commandId !== sandboxed.commandId
-            ) {
-                return;
-            }
-            if (message.type === "violations") {
-                addSandboxViolations(sandbox, message.violations);
-                return;
-            }
-            sandbox.done = true;
-            session.exitCode = message.exitCode;
-            finishWhenReady();
         });
-        child.once("error", (error) => {
-            session.error = error.message;
-            if (completionTimer !== undefined) {
-                clearTimeout(completionTimer);
-            }
-            session.finish();
-        });
-        child.once("close", (code) => {
-            closeReceived = true;
-            session.exitCode = code;
-            if (session.sandbox !== null) {
-                completionTimer = setTimeout(() => {
-                    completionTimer = undefined;
-                    if (session.sandbox !== null) {
-                        session.sandbox.done = true;
-                    }
-                    finishWhenReady();
-                }, 75);
-            }
-            finishWhenReady();
-        });
-        child.stdin.on("error", (error) => {
-            session.error = error.message;
-            if (completionTimer !== undefined) {
-                clearTimeout(completionTimer);
-            }
-            session.finish();
-        });
-        return session;
     }
 
     private sandboxLaunch(

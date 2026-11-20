@@ -1,18 +1,16 @@
 import type {
     LlmAssistantMessage,
-    LlmContentBlock,
     LlmMessage,
     LlmSystemMessage
 } from "../../../../../llm/types.ts";
 import type { JarvixEvent } from "../../../../../protocol/event.ts";
-import type { ToolCallEndReason } from "../../../../../core/tools/shared/types.ts";
-import {
-    appendToolOutput,
-    createToolCallViewData,
-    isToolCallViewData,
-    type ToolCallViewData
-} from "../../../../../core/tools/view.ts";
-import type { CommittedBlock, CommittedTurn, LiveBlock, TranscriptState } from "./types.ts";
+import { appendToolOutput } from "../../../../../core/tools/view.ts";
+import { hydrateSession, systemTurn, toHistoryBlock } from "./history.ts";
+import { updateToolBlock } from "./tool-blocks.ts";
+import type {
+    LiveBlock,
+    TranscriptState
+} from "./types.ts";
 
 export type TranscriptAction =
     | {
@@ -95,139 +93,12 @@ export function transcriptReducer(state: TranscriptState, action: TranscriptActi
         case "events.batch":
             return action.events.reduce(applyEvent, state);
         case "session.loaded":
-            return { committed: hydrateSession(action.messages), live: null, injected: [] };
+            return {
+                committed: hydrateSession(action.messages),
+                live: null,
+                injected: []
+            };
     }
-}
-
-/** Restore persisted messages as committed turns, in file order. */
-function hydrateSession(messages: LlmMessage[]): CommittedTurn[] {
-    const turns: CommittedTurn[] = [];
-    const toolCalls = new Map<string, HistoryToolCallLocation>();
-    for (const [index, message] of messages.entries()) {
-        const id = `history-${index}`;
-        if (message.role === "system" && message.context === "environment") {
-            continue;
-        }
-        if (message.role === "user") {
-            if (message.context === "system-reminder") {
-                turns.push({
-                    id,
-                    role: "system",
-                    text: systemReminderText(message.content),
-                    blocks: [],
-                    error: null,
-                    reason: null
-                });
-                continue;
-            }
-            turns.push({
-                id,
-                role: "user",
-                text: message.content,
-                blocks: [],
-                error: null,
-                reason: null
-            });
-            continue;
-        }
-        if (message.role === "assistant") {
-            const turnIndex = turns.length;
-            const blocks = message.content.flatMap(toHistoryBlock);
-            turns.push({
-                id,
-                role: "assistant",
-                text: "",
-                blocks,
-                error: message.errorMessage ?? null,
-                reason: message.stopReason
-            });
-            indexHistoryToolCalls(toolCalls, turnIndex, blocks);
-            continue;
-        }
-        if (message.role === "system") {
-            turns.push(systemTurn(id, message));
-            continue;
-        }
-        applyHistoryToolResult(turns, toolCalls, message.toolCallId, message.content, message.details, message.isError);
-    }
-    return turns;
-}
-
-type HistoryToolCallLocation = {
-    turnIndex: number;
-    blockIndex: number;
-};
-
-function indexHistoryToolCalls(
-    locations: Map<string, HistoryToolCallLocation>,
-    turnIndex: number,
-    blocks: CommittedBlock[]
-): void {
-    const seen = new Set<string>();
-    for (const [blockIndex, block] of blocks.entries()) {
-        if (block.type !== "tool" || seen.has(block.toolCallId)) {
-            continue;
-        }
-        seen.add(block.toolCallId);
-        locations.set(block.toolCallId, { turnIndex, blockIndex });
-    }
-}
-
-function systemReminderText(content: string): string {
-    const match = /^<system-reminder>\n?([\s\S]*?)\n?<\/system-reminder>$/.exec(content);
-    return match?.[1] ?? content;
-}
-
-function toHistoryBlock(block: LlmContentBlock): CommittedBlock[] {
-    switch (block.type) {
-        case "text":
-            return [{ type: "text", text: block.text }];
-        case "thinking":
-            return [{ type: "thinking", thinking: block.thinking }];
-        case "toolCall":
-            return [{
-                type: "tool",
-                toolCallId: block.id,
-                toolName: block.name,
-                data: createToolCallViewData(block.name, block.arguments),
-                isError: false,
-                endReason: null
-            }];
-    }
-}
-
-function applyHistoryToolResult(
-    turns: CommittedTurn[],
-    toolCalls: ReadonlyMap<string, HistoryToolCallLocation>,
-    toolCallId: string,
-    content: string,
-    details: unknown,
-    isError: boolean
-): void {
-    const location = toolCalls.get(toolCallId);
-    if (!location) {
-        return;
-    }
-    const turn = turns[location.turnIndex];
-    const block = turn?.blocks[location.blockIndex];
-    if (!turn || block?.type !== "tool") {
-        return;
-    }
-    const data: ToolCallViewData = isToolCallViewData(details)
-        ? details
-        : {
-            ...block.data,
-            output: content,
-            status: isError ? "failed" : "completed"
-        };
-    const blocks = [...turn.blocks];
-    blocks[location.blockIndex] = {
-        ...block,
-        data,
-        isError,
-        endReason: historyToolEndReason(data)
-    };
-    turns[location.turnIndex] = { ...turn, blocks };
 }
 
 function applyEvent(state: TranscriptState, event: JarvixEvent): TranscriptState {
@@ -302,13 +173,11 @@ function appendSystemMessage(state: TranscriptState, message: LlmSystemMessage):
     };
 }
 
-function historyToolEndReason(data: ToolCallViewData): ToolCallEndReason {
-    return data.status === "running" || data.status === "timed_out"
-        ? "terminated"
-        : "exited";
-}
-
-function commitInjectedPrompt(state: TranscriptState, promptId: string, text: string): TranscriptState {
+function commitInjectedPrompt(
+    state: TranscriptState,
+    promptId: string,
+    text: string
+): TranscriptState {
     if (state.committed.some((turn) => turn.id === promptId)) {
         return state.injected.some((turn) => turn.id === promptId)
             ? { ...state, injected: state.injected.filter((turn) => turn.id !== promptId) }
@@ -326,89 +195,6 @@ function commitInjectedPrompt(state: TranscriptState, promptId: string, text: st
         }],
         injected: state.injected.filter((turn) => turn.id !== promptId)
     };
-}
-
-function systemTurn(id: string, message: LlmSystemMessage): CommittedTurn {
-    return {
-        id,
-        role: "system",
-        text: message.content,
-        blocks: [],
-        error: null,
-        reason: null
-    };
-}
-
-type ToolBlockLocation = {
-    turnIndex: number;
-    blockIndex: number;
-};
-
-const toolBlockIndexes = new WeakMap<
-    CommittedTurn[],
-    ReadonlyMap<string, readonly ToolBlockLocation[]>
->();
-
-function toolBlockIndex(
-    committed: CommittedTurn[]
-): ReadonlyMap<string, readonly ToolBlockLocation[]> {
-    const cached = toolBlockIndexes.get(committed);
-    if (cached) {
-        return cached;
-    }
-    const index = new Map<string, ToolBlockLocation[]>();
-    for (const [turnIndex, turn] of committed.entries()) {
-        for (const [blockIndex, block] of turn.blocks.entries()) {
-            if (block.type !== "tool") {
-                continue;
-            }
-            const locations = index.get(block.toolCallId);
-            if (locations) {
-                locations.push({ turnIndex, blockIndex });
-            } else {
-                index.set(block.toolCallId, [{ turnIndex, blockIndex }]);
-            }
-        }
-    }
-    toolBlockIndexes.set(committed, index);
-    return index;
-}
-
-function updateToolBlock(
-    state: TranscriptState,
-    toolCallId: string,
-    update: (block: Extract<CommittedBlock, { type: "tool" }>) => Extract<CommittedBlock, { type: "tool" }>
-): TranscriptState {
-    const index = toolBlockIndex(state.committed);
-    const locations = index.get(toolCallId);
-    if (!locations) {
-        return state;
-    }
-
-    const indexesByTurn = new Map<number, number[]>();
-    for (const location of locations) {
-        const blockIndexes = indexesByTurn.get(location.turnIndex);
-        if (blockIndexes) {
-            blockIndexes.push(location.blockIndex);
-        } else {
-            indexesByTurn.set(location.turnIndex, [location.blockIndex]);
-        }
-    }
-
-    const committed = [...state.committed];
-    for (const [turnIndex, blockIndexes] of indexesByTurn) {
-        const turn = committed[turnIndex]!;
-        const blocks = [...turn.blocks];
-        for (const blockIndex of blockIndexes) {
-            const block = blocks[blockIndex]!;
-            if (block.type === "tool") {
-                blocks[blockIndex] = update(block);
-            }
-        }
-        committed[turnIndex] = { ...turn, blocks };
-    }
-    toolBlockIndexes.set(committed, index);
-    return { ...state, committed };
 }
 
 function upsertLiveBlock(
@@ -430,7 +216,10 @@ function upsertLiveBlock(
     return { ...state, live: { ...live, blocks } };
 }
 
-function commitMessage(state: TranscriptState, message: LlmAssistantMessage): TranscriptState {
+function commitMessage(
+    state: TranscriptState,
+    message: LlmAssistantMessage
+): TranscriptState {
     const live = state.live;
     if (!live) {
         return state;
