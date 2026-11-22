@@ -24,13 +24,24 @@ import {
 } from "../project/store.ts";
 import { workingDirectoriesFor } from "./session/directories.ts";
 import { SessionManager } from "./session/manager.ts";
+import type { ContextManagerFactory } from "./session/runtime/context-manager.ts";
 import type { Session } from "./session/runtime/session.ts";
 import { generateSessionName } from "./session/naming.ts";
+
+export {
+    createDefaultContextManager,
+    DefaultContextManager
+} from "./session/runtime/context-manager.ts";
+export type {
+    ContextManager,
+    ContextManagerFactory
+} from "./session/runtime/context-manager.ts";
 
 export type JarvixOptions = {
     llm?: LlmAdapter;
     config?: JarvixConfig;
     sandboxPreflight?: SandboxPreflight;
+    contextManagerFactory?: ContextManagerFactory;
 };
 
 export class Jarvix {
@@ -42,7 +53,10 @@ export class Jarvix {
     constructor(options: JarvixOptions = {}) {
         this.config = options.config ?? {};
         this.llm = options.llm ?? createLlm(() => this.config.providers);
-        this.sessions = new SessionManager(options.sandboxPreflight);
+        this.sessions = new SessionManager(
+            options.sandboxPreflight,
+            options.contextManagerFactory
+        );
     }
 
     setConfig(config: JarvixConfig): void {

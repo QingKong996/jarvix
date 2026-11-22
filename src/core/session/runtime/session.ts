@@ -24,9 +24,11 @@ import {
     type ToolExecutor
 } from "../../tools/index.ts";
 import { SessionPermissions } from "../../permissions/session-permissions.ts";
-import { estimateContextUsage } from "./context-usage.ts";
-import { SYSTEM_PROMPT, isEnvironmentContextMessage } from "./environment.ts";
-import { SessionEnvironmentContext } from "./environment-context.ts";
+import {
+    createDefaultContextManager,
+    type ContextManager,
+    type ContextManagerFactory
+} from "./context-manager.ts";
 import {
     PendingMessageQueue,
     type PendingPrompt,
@@ -55,7 +57,7 @@ export class Session {
     private readonly history: LlmMessage[];
     private readonly persistence: SessionPersistenceQueue;
     private readonly pendingMessages = new PendingMessageQueue();
-    private readonly environment: SessionEnvironmentContext;
+    private readonly contextManager: ContextManager;
     private readonly toolRunner: ToolCallRunner;
     private readonly permissions: SessionPermissions;
     private readonly idleWaiters = new Set<() => void>();
@@ -71,11 +73,12 @@ export class Session {
         meta: JarvixSessionMeta,
         messages: readonly LlmMessage[] = [],
         tools: ToolExecutor = createDefaultTools(),
-        permissions: SessionPermissions = new SessionPermissions()
+        permissions: SessionPermissions = new SessionPermissions(),
+        contextManagerFactory: ContextManagerFactory = createDefaultContextManager
     ) {
         this.meta = meta;
-        this.environment = new SessionEnvironmentContext(() => this.meta.permission);
-        this.history = this.environment.initialize(messages);
+        this.contextManager = contextManagerFactory(() => this.meta.permission);
+        this.history = this.contextManager.initializeHistory(messages);
         this.permissions = permissions;
         this.persistence = new SessionPersistenceQueue(meta.id);
         this.toolRunner = new ToolCallRunner({
@@ -134,7 +137,7 @@ export class Session {
                 contextWindow: definition.contextWindow,
                 request: {
                     model,
-                    systemPrompt: SYSTEM_PROMPT,
+                    systemPrompt: this.contextManager.systemPrompt,
                     reasoning: resolveReasoningLevel(definition, runtime.config.reasoning),
                     apiKey: provider?.apiKey,
                     maxTokens: definition.maxTokens
@@ -303,25 +306,22 @@ export class Session {
     snapshot(): JarvixSession {
         return {
             meta: this.meta,
-            messages: this.history.filter((message) => !isEnvironmentContextMessage(message))
+            messages: this.contextManager.visibleHistory(this.history)
         };
     }
 
     providerContext(workingDirectories: readonly string[] = []): JarvixProviderContext {
-        return {
-            systemPrompt: SYSTEM_PROMPT,
-            messages: this.messagesForRequest(workingDirectories)
-        };
+        return this.contextManager.prepareRequest(this.history, workingDirectories);
     }
 
     contextUsage(
         contextWindow: number,
         workingDirectories: readonly string[] = []
     ): JarvixContextUsage {
-        return estimateContextUsage({
+        return this.contextManager.estimateUsage({
             contextWindow,
-            systemPrompt: SYSTEM_PROMPT,
-            messages: this.messagesForRequest(workingDirectories),
+            history: this.history,
+            workingDirectories,
             tools: this.registeredTools()
         });
     }
@@ -422,20 +422,27 @@ export class Session {
     }
 
     private ensureEnvironmentContext(runtime: SessionRuntime): void {
-        const message = this.environment.ensure(runtime.workingDirectories);
+        const message = this.contextManager.ensureEnvironmentContext(
+            runtime.workingDirectories
+        );
         if (message) {
             this.history.unshift(message);
         }
     }
 
     private messagesForRequest(workingDirectories: readonly string[]): LlmMessage[] {
-        return this.environment.messagesFor(this.history, workingDirectories);
+        return this.contextManager.prepareRequest(
+            this.history,
+            workingDirectories
+        ).messages;
     }
 
     private appendEnvironmentReminderIfChanged(
         runtime: SessionRuntime
     ): LlmSystemMessage | null {
-        const reminder = this.environment.reminderIfChanged(runtime.workingDirectories);
+        const reminder = this.contextManager.environmentReminderIfChanged(
+            runtime.workingDirectories
+        );
         if (!reminder) {
             return null;
         }

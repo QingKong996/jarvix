@@ -22,6 +22,7 @@ import {
 } from "../../tools/index.ts";
 import { SessionPermissions } from "../../permissions/session-permissions.ts";
 import { estimateContextUsage } from "./context-usage.ts";
+import { createDefaultContextManager } from "./context-manager.ts";
 
 vi.mock("../persistence/store.ts", () => ({
     appendSessionMessage: vi.fn()
@@ -117,6 +118,15 @@ test("assembles the final provider context without mutating the session", () => 
         content: expect.stringContaining("- C:\\workspace-a")
     });
     expect(session.snapshot().messages).toEqual([]);
+});
+
+test("creates one context manager per session", () => {
+    const factory = vi.fn(createDefaultContextManager);
+
+    new Session(meta, [], NO_TOOLS, undefined, factory);
+    new Session(meta, [], NO_TOOLS, undefined, factory);
+
+    expect(factory).toHaveBeenCalledTimes(2);
 });
 
 test("keeps working directories out of the system prompt and in the leading environment context", async () => {
