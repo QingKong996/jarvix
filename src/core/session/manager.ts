@@ -10,6 +10,10 @@ import type { SandboxPreflight } from "../permissions/sandbox-launch.ts";
 import { SessionPermissions } from "../permissions/session-permissions.ts";
 import { createSandboxPolicy } from "../permissions/sandbox.ts";
 import { createDefaultTools, ShellSessionBudget } from "../tools/index.ts";
+import {
+    createDefaultContextManager,
+    type ContextManagerFactory
+} from "./runtime/context-manager.ts";
 import { workingDirectoriesFor } from "./directories.ts";
 import { Session } from "./runtime/session.ts";
 import {
@@ -32,10 +36,15 @@ export class SessionManager {
     private readonly sessions = new Map<string, Session>();
     private readonly permissions = new Map<string, SessionPermissions>();
     private readonly sandboxPreflight?: SandboxPreflight;
+    private readonly contextManagerFactory: ContextManagerFactory;
     private readonly shellSessionBudget = new ShellSessionBudget();
 
-    constructor(sandboxPreflight?: SandboxPreflight) {
+    constructor(
+        sandboxPreflight?: SandboxPreflight,
+        contextManagerFactory: ContextManagerFactory = createDefaultContextManager
+    ) {
         this.sandboxPreflight = sandboxPreflight;
+        this.contextManagerFactory = contextManagerFactory;
     }
 
     create(
@@ -244,7 +253,8 @@ export class SessionManager {
                     sandboxPolicy
                 }
             }),
-            permissions
+            permissions,
+            this.contextManagerFactory
         );
         this.sessions.set(instance.meta.id, instance);
         return instance;
