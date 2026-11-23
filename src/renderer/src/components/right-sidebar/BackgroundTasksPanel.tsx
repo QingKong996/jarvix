@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronRight, Terminal } from "lucide-react";
+import { motion } from "motion/react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import type { ToolTaskSnapshot } from "../../../../runtime/tools/types.ts";
 import { useBackgroundTasks } from "../../background-tasks/store.ts";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { AnimatedCollapsibleContent, Collapsible, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { quickTransition } from "../../motion.ts";
 
 export function BackgroundTasksPanel({ sessionId }: { sessionId: string | null }) {
     const { t } = useTranslation();
@@ -50,7 +52,14 @@ function BackgroundTaskItem({ task }: { task: ToolTaskSnapshot }) {
                 title={task.command}
                 className="group flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             >
-                <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
+                <motion.span
+                    aria-hidden="true"
+                    animate={{ rotate: open ? 90 : 0 }}
+                    transition={quickTransition}
+                    className="inline-flex shrink-0 text-muted-foreground"
+                >
+                    <ChevronRight className="size-3.5" />
+                </motion.span>
                 <code className="min-w-0 flex-1 truncate font-mono text-xs">
                     {task.command}
                 </code>
@@ -58,14 +67,14 @@ function BackgroundTaskItem({ task }: { task: ToolTaskSnapshot }) {
                     {taskStatus(task, t)}
                 </span>
             </CollapsibleTrigger>
-            <CollapsibleContent>
+            <AnimatedCollapsibleContent>
                 <TaskOutput
                     text={task.output}
                     truncatedCharacters={task.truncatedCharacters}
                     streaming={streaming}
                     open={open}
                 />
-            </CollapsibleContent>
+            </AnimatedCollapsibleContent>
         </Collapsible>
     );
 }

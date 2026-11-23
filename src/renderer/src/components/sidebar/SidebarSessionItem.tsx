@@ -1,8 +1,10 @@
 import { useDraggable } from "@dnd-kit/core";
 import { Archive, Pencil, Sparkles, Trash2 } from "lucide-react";
+import { motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
 import type { JarvixSessionSummary } from "../../../../protocol/session.ts";
+import { layoutSpring } from "../../motion.ts";
 import { Button } from "../ui/button.tsx";
 import {
     ContextMenu,
@@ -50,19 +52,27 @@ export function SidebarSessionItem({
                     data-session-working-directory={session.workingDirectory}
                     style={{ opacity: isDragging ? 0.35 : undefined }}
                     className={cn(
-                        "group flex w-full items-center rounded-md text-sm transition-colors",
+                        "group relative flex w-full items-center overflow-hidden rounded-md text-sm transition-colors",
                         active
-                            ? "bg-accent text-accent-foreground"
+                            ? "text-accent-foreground"
                             : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
                     )}
                 >
+                    {active ? (
+                        <motion.span
+                            aria-hidden="true"
+                            layoutId="active-session-highlight"
+                            className="absolute inset-0 rounded-md bg-accent"
+                            transition={layoutSpring}
+                        />
+                    ) : null}
                     <button
                         type="button"
                         aria-current={active ? "page" : undefined}
                         title={isDragging ? undefined : session.name}
                         onClick={() => onSelect(session.id)}
                         disabled={busy}
-                        className="flex min-w-0 flex-1 cursor-grab items-center rounded-md py-2 pl-9 text-left text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring/50 active:cursor-grabbing"
+                        className="relative z-10 flex min-w-0 flex-1 cursor-grab items-center rounded-md py-2 pl-9 text-left text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring/50 active:cursor-grabbing"
                         {...attributes}
                         {...listeners}
                     >
@@ -76,7 +86,7 @@ export function SidebarSessionItem({
                         title={t("sessions.archive")}
                         disabled={busy}
                         onClick={() => onArchive(session.id)}
-                        className="mr-1 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                        className="relative z-10 mr-1 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
                     >
                         <Archive />
                     </Button>

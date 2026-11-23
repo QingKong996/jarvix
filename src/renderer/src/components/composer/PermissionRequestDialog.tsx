@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { LoaderCircle, ShieldAlert, ShieldCheck, X } from "lucide-react";
+import { motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import type { PermissionRequest } from "../../../../protocol/permission.ts";
 import { PermissionResourceList } from "../permissions/PermissionResourceList.tsx";
 import { Button } from "../ui/button.tsx";
+import { smoothTransition } from "../../motion.ts";
 
 type PermissionRequestDialogProps = {
     request: PermissionRequest;
@@ -41,12 +43,16 @@ export function PermissionRequestDialog({
     }
 
     return (
-        <section
+        <motion.section
             role="dialog"
             aria-modal="false"
             aria-labelledby={`permission-request-${request.id}`}
             data-slot="permission-request-dialog"
-            className="mb-1 flex flex-col gap-3 rounded-lg border bg-muted/40 p-3 shadow-sm"
+            initial={{ opacity: 0, height: 0, y: 8 }}
+            animate={{ opacity: 1, height: "auto", y: 0 }}
+            exit={{ opacity: 0, height: 0, y: -4 }}
+            transition={smoothTransition}
+            className="mb-1 flex flex-col gap-3 overflow-hidden rounded-lg border bg-muted/40 p-3 shadow-sm"
         >
             <div className="flex items-start gap-2">
                 <ShieldAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-amber-600" />
@@ -98,6 +104,6 @@ export function PermissionRequestDialog({
                     {t("permissionRequest.approve")}
                 </Button>
             </div>
-        </section>
+        </motion.section>
     );
 }

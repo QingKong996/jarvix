@@ -114,6 +114,12 @@ function visibleElements(window: Window, selector: string): Element[] {
     );
 }
 
+function accessiblyVisibleElements(window: Window, selector: string): Element[] {
+    return visibleElements(window, selector).filter(
+        (element) => element.closest("[aria-hidden='true']") === null
+    );
+}
+
 function visibleDialogs(window: Window): Element[] {
     return visibleElements(window, "[role='dialog']");
 }
@@ -439,11 +445,11 @@ const documentState = extract((state) => {
     const root = document.querySelector("[data-testid='app-shell']");
     const sidebar = document.querySelector("[data-testid='session-sidebar']");
     const main = document.querySelector("main");
-    const visibleButtons = visibleElements(window, "button");
+    const visibleButtons = accessiblyVisibleElements(window, "button");
     const unnamedButtons = visibleButtons.filter(
         (element) => accessibleName(document, element).length === 0
     ).length;
-    const fields = visibleElements(
+    const fields = accessiblyVisibleElements(
         window,
         "input:not([type='hidden']), textarea, select"
     );
@@ -459,18 +465,21 @@ const documentState = extract((state) => {
     );
     const dialogsHaveOverlay = dialogs.length === 0 ||
         visibleElements(window, "[data-slot='dialog-overlay']").length > 0;
-    const menuContents = visibleElements(
+    const menuContents = accessiblyVisibleElements(
         window,
         "[data-slot='dropdown-menu-content'], [data-slot='context-menu-content']"
     );
-    const menuItems = visibleElements(
+    const menuItems = accessiblyVisibleElements(
         window,
         "[role='menuitem'], [role='menuitemradio']"
     );
     const unnamedMenuItems = menuItems.filter(
         (element) => accessibleName(document, element).length === 0
     ).length;
-    const permissionOptions = visibleElements(window, "[role='menuitemradio']");
+    const permissionOptions = accessiblyVisibleElements(
+        window,
+        "[role='menuitemradio']"
+    );
     const checkedPermissionOptions = permissionOptions.filter(
         (element) => element.getAttribute("aria-checked") === "true"
     ).length;
@@ -720,6 +729,9 @@ export const menusAreBoundedAndDescribed = always(() =>
 export const rightSidebarMatchesViewport = always(() => {
     if (!documentState.current.rightSidebarFitsViewport) {
         return false;
+    }
+    if (documentState.current.viewportResizePending) {
+        return true;
     }
     if (!documentState.current.rightSidebarOpen) {
         return !documentState.current.overlayVisible;
