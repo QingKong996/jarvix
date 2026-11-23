@@ -143,8 +143,7 @@ test("keeps streaming a timed-out task and isolates it from other managers", asy
     } finally {
         first.dispose();
         second.dispose();
-        await new Promise((resolvePromise) => setTimeout(resolvePromise, 200));
-        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        await removeTemporaryDirectory(directory);
     }
 });
 
@@ -206,7 +205,7 @@ test("stops active tasks and returns their end events", async () => {
         expect(afterStop.content).toContain("Shell session not found");
     } finally {
         manager.dispose();
-        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        await removeTemporaryDirectory(directory);
     }
 }, 15_000);
 
@@ -259,7 +258,7 @@ test("bounds subscriptions accumulated by polling a long-running task", async ()
         expect(manager.hasActiveWork()).toBe(false);
     } finally {
         manager.dispose();
-        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        await removeTemporaryDirectory(directory);
     }
 }, 20_000);
 
@@ -379,8 +378,7 @@ test("evicts only the oldest completed unread task when the shared budget is ful
         first.dispose();
         second.dispose();
         third.dispose();
-        await new Promise((resolvePromise) => setTimeout(resolvePromise, 200));
-        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        await removeTemporaryDirectory(directory);
     }
 }, 15_000);
 
@@ -433,9 +431,32 @@ test("keeps a timed-out task failed without repeating reported violations", asyn
         expect(result.data.output.match(/blocked before timeout/g)).toHaveLength(1);
     } finally {
         manager.dispose();
-        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        await removeTemporaryDirectory(directory);
     }
 });
+
+async function removeTemporaryDirectory(directory: string): Promise<void> {
+    const deadline = Date.now() + 5_000;
+    while (true) {
+        try {
+            rmSync(directory, { recursive: true, force: true });
+            return;
+        } catch (error) {
+            if (!isRetryableDirectoryRemovalError(error) || Date.now() >= deadline) {
+                throw error;
+            }
+            await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+        }
+    }
+}
+
+function isRetryableDirectoryRemovalError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+        return false;
+    }
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === "EBUSY" || code === "ENOTEMPTY" || code === "EPERM";
+}
 
 function call(
     name: string,
