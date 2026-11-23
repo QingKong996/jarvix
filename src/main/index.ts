@@ -1,7 +1,7 @@
 import { app } from "electron";
 import { join } from "node:path";
 import { Jarvix } from "../core/index.ts";
-import { createLlm } from "../llm/index.ts";
+import { createPiAdapter } from "../llm/pi.ts";
 import { IPC_CHANNELS } from "../protocol/ipc.ts";
 import { attachEventBridge } from "./event-bridge.ts";
 import { registerIpc } from "./ipc.ts";
@@ -33,7 +33,7 @@ if (!app.requestSingleInstanceLock()) {
             windowAvailable: () => windows.current !== null
         });
         const jarvix = new Jarvix({
-            llm: createLlm(() => config.providers),
+            llm: createPiAdapter({ providers: () => config.providers }),
             config,
             sandboxPreflight: () => sandboxSetup.preflight()
         });

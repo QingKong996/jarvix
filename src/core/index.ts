@@ -29,21 +29,6 @@ import type { ContextManagerFactory } from "./session/runtime/context-manager.ts
 import type { Session } from "./session/runtime/session.ts";
 import { generateSessionName } from "./session/naming.ts";
 
-export {
-    createDefaultContextManager,
-    DefaultContextManager
-} from "./session/runtime/context-manager.ts";
-export type {
-    ContextManager,
-    ContextManagerFactory
-} from "./session/runtime/context-manager.ts";
-export type {
-    Tool,
-    ToolExecutionContext,
-    ToolManager,
-    ToolManagerContext
-} from "../runtime/tools/tool-manager.ts";
-
 export type JarvixOptions = {
     llm: LlmAdapter;
     config?: JarvixConfig;

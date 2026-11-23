@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
 import { afterEach, expect, test, vi } from "vitest";
 import { i18n } from "../../../../../i18n/index.ts";
+import type { ToolCallEndReason } from "../../../../../runtime/tools/types.ts";
 import type { ToolCallViewData } from "../../../../../runtime/tools/view.ts";
 import { ToolCallBlock } from "./ToolCallBlock.tsx";
 
@@ -9,14 +10,18 @@ afterEach(() => {
     vi.restoreAllMocks();
 });
 
-function renderTool(data: Extract<ToolCallViewData, { kind: "generic" }>): string {
+function renderTool(
+    data: Extract<ToolCallViewData, { kind: "generic" }>,
+    isError = false,
+    endReason: ToolCallEndReason | null = null
+): string {
     return renderToStaticMarkup(
         <I18nextProvider i18n={i18n}>
             <ToolCallBlock
                 toolName="write_file"
                 data={data}
-                isError={false}
-                endReason={data.status === "completed" ? "exited" : null}
+                isError={isError}
+                endReason={endReason}
             />
         </I18nextProvider>
     );
@@ -54,3 +59,24 @@ test("renders active generic tool arguments while the call is expanded", () => {
     expect(html).toContain("notes.txt");
     expect(html).toContain("hello");
 });
+
+test.each([
+    ["failed status", false, "failed", null, "失败"],
+    ["error flag", true, "running", "terminated", "失败"],
+    ["termination", false, "completed", "terminated", "已结束"],
+    ["background completion", false, "completed", "background", "后台运行中"],
+    ["timed out", false, "timed_out", null, "后台运行中"]
+] as const)(
+    "shows the highest-priority status for %s",
+    (_label, isError, status, endReason, expected) => {
+        const html = renderTool({
+            kind: "generic",
+            name: "write_file",
+            arguments: {},
+            output: "",
+            status
+        }, isError, endReason);
+
+        expect(html).toContain(expected);
+    }
+);

@@ -6,10 +6,10 @@ import type {
     PermissionDecision,
     PermissionRequest
 } from "./permission.ts";
-export const LOG_LEVELS = ["log", "info", "warn", "error", "debug"] as const;
-export type LogLevel = typeof LOG_LEVELS[number];
 
-export type JarvixToolEvent =
+type LogLevel = "log" | "info" | "warn" | "error" | "debug";
+
+type JarvixToolEvent =
   | {
     type: "tool.start";
     toolCallId: string;
