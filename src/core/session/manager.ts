@@ -6,6 +6,7 @@ import type {
 } from "../../protocol/session.ts";
 import { sessionContextFrom } from "../../protocol/session.ts";
 import type { PermissionMode } from "../../protocol/permission.ts";
+import { type JarvixLogger, noopLogger } from "../logger.ts";
 import type { SandboxPreflight } from "../permissions/sandbox-launch.ts";
 import { SessionPermissions } from "../permissions/session-permissions.ts";
 import {
@@ -46,14 +47,17 @@ export class SessionManager {
     private readonly contextManagerFactory: ContextManagerFactory;
     private readonly toolManagers = new Map<string, ToolManager>();
     private readonly shellSessionBudget = new ShellSessionBudget();
+    private readonly logger: JarvixLogger;
 
     constructor(
         sandboxPreflight?: SandboxPreflight,
         contextManagerFactory: ContextManagerFactory = createDefaultContextManager,
-        toolManagers: readonly ToolManager[] = []
+        toolManagers: readonly ToolManager[] = [],
+        logger: JarvixLogger = noopLogger
     ) {
         this.sandboxPreflight = sandboxPreflight;
         this.contextManagerFactory = contextManagerFactory;
+        this.logger = logger;
         for (const manager of toolManagers) {
             this.assertToolManagerAvailable(manager.id);
             this.toolManagers.set(manager.id, manager);
@@ -65,17 +69,31 @@ export class SessionManager {
         name?: string,
         permission?: PermissionMode
     ): Session {
-        return this.track(createSession(context, name, undefined, permission));
+        const session = this.track(createSession(context, name, undefined, permission));
+        this.logger.info("Session created", {
+            sessionId: session.meta.id,
+            permission: session.meta.permission,
+            projectId: session.meta.projectId,
+            hasWorkingDirectory: session.meta.workingDirectory !== undefined
+        });
+        return session;
     }
 
     load(id: string): Session | null {
         const cached = this.sessions.get(id);
         if (cached) {
+            this.logger.debug("Returning cached session", { sessionId: id });
             return cached;
         }
 
         const stored = loadSession(id);
-        return stored ? this.track(stored) : null;
+        if (!stored) {
+            this.logger.warn("Session could not be loaded", { sessionId: id });
+            return null;
+        }
+        const session = this.track(stored);
+        this.logger.info("Session loaded", { sessionId: id });
+        return session;
     }
 
     listSummaries(): JarvixSessionSummary[] {
@@ -126,9 +144,11 @@ export class SessionManager {
     releaseIfIdle(id: string): boolean {
         const session = this.sessions.get(id);
         if (!session || !session.release()) {
+            this.logger.debug("Session could not be released", { sessionId: id });
             return false;
         }
         this.sessions.delete(id);
+        this.logger.info("Session released from memory", { sessionId: id });
         return true;
     }
 
@@ -139,6 +159,11 @@ export class SessionManager {
         if (session) {
             this.applyContext(session, updated);
         }
+        this.logger.info("Session context updated", {
+            sessionId: id,
+            projectId: updated.projectId,
+            hasWorkingDirectory: updated.workingDirectory !== undefined
+        });
         return updated;
     }
 
@@ -153,6 +178,10 @@ export class SessionManager {
         } else {
             this.permissions.get(id)?.reset();
         }
+        this.logger.info("Session permission updated", {
+            sessionId: id,
+            permission: meta.permission
+        });
         return meta.permission;
     }
 
@@ -164,6 +193,9 @@ export class SessionManager {
     }
 
     async registerToolManager(manager: ToolManager): Promise<void> {
+        this.logger.info("Registering tool manager", {
+            toolManagerId: manager.id
+        });
         this.assertToolManagerAvailable(manager.id);
         this.toolManagers.set(manager.id, manager);
 
@@ -179,6 +211,9 @@ export class SessionManager {
                 registered.map((session) => session.unregisterToolManager(manager.id))
             );
             manager.dispose?.();
+            this.logger.error("Failed to register tool manager", error, {
+                toolManagerId: manager.id
+            });
             throw error;
         }
     }
@@ -186,6 +221,9 @@ export class SessionManager {
     async unregisterToolManager(managerId: string): Promise<boolean> {
         const manager = this.toolManagers.get(managerId);
         if (!manager) {
+            this.logger.warn("Tool manager is not registered", {
+                toolManagerId: managerId
+            });
             return false;
         }
         this.toolManagers.delete(managerId);
@@ -201,8 +239,14 @@ export class SessionManager {
             (result): result is PromiseRejectedResult => result.status === "rejected"
         );
         if (failed) {
+            this.logger.error("Failed to unregister tool manager", failed.reason, {
+                toolManagerId: managerId
+            });
             throw failed.reason;
         }
+        this.logger.info("Tool manager unregistered", {
+            toolManagerId: managerId
+        });
         return true;
     }
 
@@ -212,6 +256,7 @@ export class SessionManager {
         if (session) {
             session.meta.name = meta.name;
         }
+        this.logger.info("Session renamed", { sessionId: id });
         return meta.name;
     }
 
@@ -226,6 +271,7 @@ export class SessionManager {
             if (session) {
                 session.meta.name = update.meta.name;
             }
+            this.logger.info("Session auto-renamed", { sessionId: id });
         }
         return { name: update.meta.name, renamed: update.updated };
     }
@@ -241,6 +287,7 @@ export class SessionManager {
                 session.meta.archivedAt = meta.archivedAt;
             }
         }
+        this.logger.info("Session status updated", { sessionId: id, status });
     }
 
     delete(id: string): void {
@@ -251,6 +298,7 @@ export class SessionManager {
         permissions?.dispose();
         this.permissions.delete(id);
         this.sessions.delete(id);
+        this.logger.info("Session deleted", { sessionId: id });
     }
 
     require(id: string): Session {
@@ -263,6 +311,9 @@ export class SessionManager {
 
     async shutdown(): Promise<void> {
         const sessions = [...this.sessions.values()];
+        this.logger.info("Shutting down loaded sessions", {
+            sessionCount: sessions.length
+        });
         const results = await Promise.allSettled(
             sessions.map((session) => session.shutdown())
         );
@@ -273,8 +324,12 @@ export class SessionManager {
             (result): result is PromiseRejectedResult => result.status === "rejected"
         );
         if (failed) {
+            this.logger.error("Failed to shut down a session", failed.reason);
             throw failed.reason;
         }
+        this.logger.info("Loaded sessions shut down", {
+            sessionCount: sessions.length
+        });
     }
 
     dispose(): void {
@@ -311,7 +366,8 @@ export class SessionManager {
                 session.messages,
                 tools,
                 permissions,
-                this.contextManagerFactory
+                this.contextManagerFactory,
+                this.logger
             );
         } catch (error) {
             tools.dispose();

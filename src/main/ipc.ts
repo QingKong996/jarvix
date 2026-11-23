@@ -15,10 +15,15 @@ import {
     sessionNameSchema,
     type JarvixSessionContext
 } from "../protocol/session.ts";
+import { mainLogger } from "./logger.ts";
 import type { ModelCatalogService } from "./services/model-catalog.ts";
 import { syncProviderModels } from "./services/provider-model-sync.ts";
 import type { SandboxSetupService } from "./services/sandbox-setup.ts";
 import type { MainWindowController } from "./window.ts";
+
+const SLOW_IPC_MS = 1_000;
+const log = mainLogger("ipc");
+const providerLog = mainLogger("provider");
 
 export type IpcDependencies = {
     jarvix: Jarvix;
@@ -28,6 +33,42 @@ export type IpcDependencies = {
     getConfig(): JarvixConfig;
     updateConfig(payload: unknown): JarvixConfig;
 };
+
+type IpcHandler = (
+    event: IpcMainInvokeEvent,
+    ...args: unknown[]
+) => unknown;
+
+function handle(channel: string, handler: IpcHandler): void {
+    ipcMain.handle(channel, async (event, ...args: unknown[]) => {
+        const startedAt = performance.now();
+        const details = {
+            channel,
+            webContentsId: event.sender.id
+        };
+        log.debug("IPC handler started", details);
+        try {
+            const result = await handler(event, ...args);
+            const durationMs = elapsedMs(startedAt);
+            if (durationMs >= SLOW_IPC_MS) {
+                log.warn("IPC handler completed slowly", { ...details, durationMs });
+            } else {
+                log.debug("IPC handler completed", { ...details, durationMs });
+            }
+            return result;
+        } catch (error) {
+            log.error("IPC handler failed", error, {
+                ...details,
+                durationMs: elapsedMs(startedAt)
+            });
+            throw error;
+        }
+    });
+}
+
+function elapsedMs(startedAt: number): number {
+    return Math.round((performance.now() - startedAt) * 10) / 10;
+}
 
 function requirePayload(value: unknown, message: string): Record<string, unknown> {
     if (typeof value !== "object" || value === null) {
@@ -71,7 +112,7 @@ export function registerIpc(dependencies: IpcDependencies): void {
     const { jarvix, windows, catalog, sandboxSetup, getConfig, updateConfig } = dependencies;
     const assertSender = (event: IpcMainInvokeEvent): void => windows.assertSender(event);
 
-    ipcMain.handle(IPC_CHANNELS.request, async (event, payload: unknown) => {
+    handle(IPC_CHANNELS.request, async (event, payload: unknown) => {
         assertSender(event);
         const request = requirePayload(payload, "Invalid request payload");
         const { question, sessionId } = request;
@@ -81,12 +122,12 @@ export function registerIpc(dependencies: IpcDependencies): void {
         return jarvix.request(question, requireSessionId(sessionId));
     });
 
-    ipcMain.handle(IPC_CHANNELS.requestStop, (event, sessionId: unknown) => {
+    handle(IPC_CHANNELS.requestStop, (event, sessionId: unknown) => {
         assertSender(event);
         jarvix.stopRequest(requireSessionId(sessionId));
     });
 
-    ipcMain.handle(IPC_CHANNELS.requestInject, (event, payload: unknown) => {
+    handle(IPC_CHANNELS.requestInject, (event, payload: unknown) => {
         assertSender(event);
         const request = requirePayload(payload, "Invalid request payload");
         const { question, sessionId, promptId } = request;
@@ -103,27 +144,27 @@ export function registerIpc(dependencies: IpcDependencies): void {
         );
     });
 
-    ipcMain.handle(IPC_CHANNELS.configGet, (event) => {
+    handle(IPC_CHANNELS.configGet, (event) => {
         assertSender(event);
         return getConfig();
     });
 
-    ipcMain.handle(IPC_CHANNELS.catalogGet, (event, force: unknown) => {
+    handle(IPC_CHANNELS.catalogGet, (event, force: unknown) => {
         assertSender(event);
         return catalog.get(force === true);
     });
 
-    ipcMain.handle(IPC_CHANNELS.providerModelsSync, (event, provider: unknown) => {
+    handle(IPC_CHANNELS.providerModelsSync, (event, provider: unknown) => {
         assertSender(event);
-        return syncProviderModels(provider);
+        return syncProviderModels(provider, fetch, providerLog);
     });
 
-    ipcMain.handle(IPC_CHANNELS.configSet, (event, payload: unknown) => {
+    handle(IPC_CHANNELS.configSet, (event, payload: unknown) => {
         assertSender(event);
         return updateConfig(payload);
     });
 
-    ipcMain.handle(IPC_CHANNELS.projectCreate, (event, payload: unknown) => {
+    handle(IPC_CHANNELS.projectCreate, (event, payload: unknown) => {
         assertSender(event);
         const parsed = createProjectInputSchema.safeParse(payload);
         if (!parsed.success) {
@@ -132,12 +173,12 @@ export function registerIpc(dependencies: IpcDependencies): void {
         return jarvix.createProject(parsed.data.name, parsed.data.workingDirectories);
     });
 
-    ipcMain.handle(IPC_CHANNELS.projectsList, (event) => {
+    handle(IPC_CHANNELS.projectsList, (event) => {
         assertSender(event);
         return jarvix.listProjects();
     });
 
-    ipcMain.handle(IPC_CHANNELS.pickWorkingDirectories, async (event) => {
+    handle(IPC_CHANNELS.pickWorkingDirectories, async (event) => {
         assertSender(event);
         const window = windows.current;
         if (!window) {
@@ -149,7 +190,7 @@ export function registerIpc(dependencies: IpcDependencies): void {
         return result.canceled ? [] : result.filePaths;
     });
 
-    ipcMain.handle(IPC_CHANNELS.pickWorkingDirectory, async (event) => {
+    handle(IPC_CHANNELS.pickWorkingDirectory, async (event) => {
         assertSender(event);
         const window = windows.current;
         if (!window) {
@@ -161,7 +202,7 @@ export function registerIpc(dependencies: IpcDependencies): void {
         return result.canceled ? null : result.filePaths[0] ?? null;
     });
 
-    ipcMain.handle(IPC_CHANNELS.sessionCreate, (event, payload: unknown) => {
+    handle(IPC_CHANNELS.sessionCreate, (event, payload: unknown) => {
         assertSender(event);
         const session = requirePayload(payload, "Invalid session payload");
         return jarvix.createSession(
@@ -173,7 +214,7 @@ export function registerIpc(dependencies: IpcDependencies): void {
         );
     });
 
-    ipcMain.handle(IPC_CHANNELS.permissionSet, (event, payload: unknown) => {
+    handle(IPC_CHANNELS.permissionSet, (event, payload: unknown) => {
         assertSender(event);
         const request = requirePayload(payload, "Invalid permission payload");
         return jarvix.setPermission(
@@ -182,7 +223,7 @@ export function registerIpc(dependencies: IpcDependencies): void {
         );
     });
 
-    ipcMain.handle(IPC_CHANNELS.permissionRespond, (event, payload: unknown) => {
+    handle(IPC_CHANNELS.permissionRespond, (event, payload: unknown) => {
         assertSender(event);
         const request = requirePayload(payload, "Invalid permission response payload");
         const { requestId, approved } = request;
@@ -199,7 +240,7 @@ export function registerIpc(dependencies: IpcDependencies): void {
         );
     });
 
-    ipcMain.handle(IPC_CHANNELS.sessionUpdateContext, (event, payload: unknown) => {
+    handle(IPC_CHANNELS.sessionUpdateContext, (event, payload: unknown) => {
         assertSender(event);
         const session = requirePayload(payload, "Invalid session context payload");
         return jarvix.updateSessionContext(
@@ -208,7 +249,7 @@ export function registerIpc(dependencies: IpcDependencies): void {
         );
     });
 
-    ipcMain.handle(IPC_CHANNELS.sessionRename, (event, payload: unknown) => {
+    handle(IPC_CHANNELS.sessionRename, (event, payload: unknown) => {
         assertSender(event);
         const session = requirePayload(payload, "Invalid session rename payload");
         return jarvix.renameSession(
@@ -217,7 +258,7 @@ export function registerIpc(dependencies: IpcDependencies): void {
         );
     });
 
-    ipcMain.handle(IPC_CHANNELS.sessionAutoName, (event, payload: unknown) => {
+    handle(IPC_CHANNELS.sessionAutoName, (event, payload: unknown) => {
         assertSender(event);
         const session = requirePayload(payload, "Invalid session auto-name payload");
         const { sessionId, firstPrompt } = session;
@@ -227,57 +268,57 @@ export function registerIpc(dependencies: IpcDependencies): void {
         return jarvix.autoNameSession(requireSessionId(sessionId), firstPrompt);
     });
 
-    ipcMain.handle(IPC_CHANNELS.sessionArchive, (event, sessionId: unknown) => {
+    handle(IPC_CHANNELS.sessionArchive, (event, sessionId: unknown) => {
         assertSender(event);
         jarvix.archiveSession(requireSessionId(sessionId));
     });
 
-    ipcMain.handle(IPC_CHANNELS.sessionUnarchive, (event, sessionId: unknown) => {
+    handle(IPC_CHANNELS.sessionUnarchive, (event, sessionId: unknown) => {
         assertSender(event);
         jarvix.unarchiveSession(requireSessionId(sessionId));
     });
 
-    ipcMain.handle(IPC_CHANNELS.sessionDelete, (event, sessionId: unknown) => {
+    handle(IPC_CHANNELS.sessionDelete, (event, sessionId: unknown) => {
         assertSender(event);
         jarvix.deleteSession(requireSessionId(sessionId));
     });
 
-    ipcMain.handle(IPC_CHANNELS.sessionOpen, (event, sessionId: unknown) => {
+    handle(IPC_CHANNELS.sessionOpen, (event, sessionId: unknown) => {
         assertSender(event);
         return jarvix.loadSession(requireSessionId(sessionId));
     });
 
-    ipcMain.handle(IPC_CHANNELS.sessionRelease, (event, sessionId: unknown) => {
+    handle(IPC_CHANNELS.sessionRelease, (event, sessionId: unknown) => {
         assertSender(event);
         return jarvix.releaseSession(requireSessionId(sessionId));
     });
 
-    ipcMain.handle(IPC_CHANNELS.sessionProviderContext, (event, sessionId: unknown) => {
+    handle(IPC_CHANNELS.sessionProviderContext, (event, sessionId: unknown) => {
         assertSender(event);
         return jarvix.getProviderContext(requireSessionId(sessionId));
     });
 
-    ipcMain.handle(IPC_CHANNELS.sessionsList, (event) => {
+    handle(IPC_CHANNELS.sessionsList, (event) => {
         assertSender(event);
         return jarvix.listSessions();
     });
 
-    ipcMain.handle(IPC_CHANNELS.sessionsListArchived, (event) => {
+    handle(IPC_CHANNELS.sessionsListArchived, (event) => {
         assertSender(event);
         return jarvix.listArchivedSessions();
     });
 
-    ipcMain.handle(IPC_CHANNELS.sandboxStatus, async (event) => {
+    handle(IPC_CHANNELS.sandboxStatus, async (event) => {
         assertSender(event);
         return sandboxSetup.status();
     });
 
-    ipcMain.handle(IPC_CHANNELS.sandboxInstall, async (event) => {
+    handle(IPC_CHANNELS.sandboxInstall, async (event) => {
         assertSender(event);
         return sandboxSetup.install();
     });
 
-    ipcMain.handle(IPC_CHANNELS.sandboxDismiss, (event) => {
+    handle(IPC_CHANNELS.sandboxDismiss, (event) => {
         assertSender(event);
         sandboxSetup.dismiss();
     });

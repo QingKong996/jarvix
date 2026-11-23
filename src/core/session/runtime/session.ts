@@ -14,6 +14,7 @@ import type {
     PermissionMode
 } from "../../../protocol/permission.ts";
 import type { JarvixSession, JarvixSessionMeta } from "../../../protocol/session.ts";
+import { type JarvixLogger, noopLogger } from "../../logger.ts";
 import {
     resolveConfiguredModel,
     resolveReasoningLevel
@@ -69,6 +70,7 @@ export class Session {
     private readonly contextManager: ContextManager;
     private readonly toolRunner: ToolCallRunner;
     private readonly permissions: SessionPermissions;
+    private readonly logger: JarvixLogger;
     private readonly idleWaiters = new Set<() => void>();
     private running = false;
     private streamOpen = false;
@@ -83,9 +85,11 @@ export class Session {
         messages: readonly LlmMessage[] = [],
         tools: ToolExecutor = createDefaultTools(),
         permissions: SessionPermissions = new SessionPermissions(),
-        contextManagerFactory: ContextManagerFactory = createDefaultContextManager
+        contextManagerFactory: ContextManagerFactory = createDefaultContextManager,
+        logger: JarvixLogger = noopLogger
     ) {
         this.meta = meta;
+        this.logger = logger;
         this.contextManager = contextManagerFactory(() => this.meta.permission);
         this.history = this.contextManager.initializeHistory(messages);
         this.permissions = permissions;
@@ -102,19 +106,31 @@ export class Session {
                     error,
                     unreadCharacters
                 );
-            }
+            },
+            sessionId: meta.id,
+            logger
         });
     }
 
     async request(question: string, runtime: SessionRuntime): Promise<void> {
         if (this.running) {
+            this.logger.warn("Rejected request because the session is busy", {
+                sessionId: this.meta.id
+            });
             throw new Error(`Session is busy: ${this.meta.id}`);
         }
+        const startedAt = performance.now();
+        let failed = false;
         this.running = true;
         this.lastRuntime = runtime;
         const controller = new AbortController();
         const { signal } = controller;
         this.requestController = controller;
+        this.logger.info("Session request started", {
+            sessionId: this.meta.id,
+            promptLength: question.length,
+            permission: this.meta.permission
+        });
 
         try {
             this.ensureEnvironmentContext(runtime);
@@ -140,6 +156,13 @@ export class Session {
                 throw new Error(`Model not found: ${selection.provider}/${selection.id}`);
             }
             this.contextWindow = definition.contextWindow;
+            this.logger.debug("Session request resolved model", {
+                sessionId: this.meta.id,
+                provider: selection.provider,
+                model: selection.id,
+                reasoning: runtime.config.reasoning,
+                messageCount: this.history.length
+            });
             const turn: TurnContext = {
                 runtime,
                 signal,
@@ -182,7 +205,12 @@ export class Session {
             if (signal.aborted) {
                 return;
             }
+            failed = true;
             const reason = error instanceof Error ? error.message : String(error);
+            this.logger.error("Session request failed", error, {
+                sessionId: this.meta.id,
+                durationMs: elapsedMs(startedAt)
+            });
             runtime.emit({ type: "request.error", error: reason });
             throw error;
         } finally {
@@ -195,11 +223,21 @@ export class Session {
                 this.requestController = null;
             }
             this.notifyIdle();
+            this.logger.info("Session request finished", {
+                sessionId: this.meta.id,
+                durationMs: elapsedMs(startedAt),
+                outcome: signal.aborted ? "aborted" : failed ? "failed" : "completed"
+            });
         }
     }
 
     abort(): void {
         this.pendingMessages.discardPrompts();
+        if (this.running) {
+            this.logger.info("Aborting session request", {
+                sessionId: this.meta.id
+            });
+        }
         this.requestController?.abort();
     }
 
@@ -212,9 +250,18 @@ export class Session {
             text.length === 0 ||
             id.length === 0
         ) {
+            this.logger.debug("Ignored prompt injection", {
+                sessionId: this.meta.id,
+                promptId
+            });
             return false;
         }
         this.pendingMessages.addPrompt(id, text);
+        this.logger.debug("Queued injected prompt", {
+            sessionId: this.meta.id,
+            promptId: id,
+            promptLength: text.length
+        });
         return true;
     }
 
@@ -224,6 +271,11 @@ export class Session {
         if (previous === permission) {
             return;
         }
+        this.logger.info("Session permission changed", {
+            sessionId: this.meta.id,
+            previous,
+            permission
+        });
         this.permissions.reset();
         if (!this.running || this.requestController?.signal.aborted) {
             return;
@@ -234,7 +286,14 @@ export class Session {
     }
 
     respondPermission(requestId: string, decision: PermissionDecision): boolean {
-        return this.permissions.respond(requestId, decision);
+        const accepted = this.permissions.respond(requestId, decision);
+        this.logger.info("Permission response received", {
+            sessionId: this.meta.id,
+            requestId,
+            decision,
+            accepted
+        });
+        return accepted;
     }
 
     registerToolManager(manager: ToolManager): void {
@@ -253,6 +312,7 @@ export class Session {
             return "failed";
         }
 
+        const streamStartedAt = performance.now();
         let completed: LlmAssistantMessage | undefined;
         let streamErrorReported = false;
         this.streamOpen = true;
@@ -275,6 +335,12 @@ export class Session {
                 } else if (event.type === "error") {
                     completed = undefined;
                     streamErrorReported = true;
+                    this.logger.warn("Model stream returned an error", {
+                        sessionId: this.meta.id,
+                        provider: event.message.provider,
+                        model: event.message.model,
+                        error: event.message.errorMessage
+                    });
                 }
             }
         } finally {
@@ -296,6 +362,17 @@ export class Session {
                 (block): block is LlmToolCallBlock => block.type === "toolCall"
             )
             : [];
+        this.logger.debug("Model response received", {
+            sessionId: this.meta.id,
+            provider: completed.provider,
+            model: completed.model,
+            stopReason: completed.stopReason,
+            toolCallCount: toolCalls.length,
+            inputTokens: completed.usage.inputTokens,
+            outputTokens: completed.usage.outputTokens,
+            cacheReadTokens: completed.usage.cacheReadTokens,
+            durationMs: elapsedMs(streamStartedAt)
+        });
         if (toolCalls.length > 0) {
             try {
                 for (const [index, toolCall] of toolCalls.entries()) {
@@ -377,6 +454,10 @@ export class Session {
     }
 
     private async shutdownWithinDeadline(timeoutMs: number): Promise<void> {
+        this.logger.info("Session shutdown started", {
+            sessionId: this.meta.id,
+            timeoutMs
+        });
         let timer: ReturnType<typeof setTimeout> | undefined;
         const deadline = new Promise<false>((resolvePromise) => {
             timer = setTimeout(() => resolvePromise(false), timeoutMs);
@@ -387,8 +468,15 @@ export class Session {
                 deadline
             ]);
             if (completed) {
+                this.logger.info("Session shutdown finished", {
+                    sessionId: this.meta.id
+                });
                 return;
             }
+            this.logger.warn("Session shutdown timed out", {
+                sessionId: this.meta.id,
+                timeoutMs
+            });
             this.toolRunner.dispose();
             this.lastRuntime = null;
         } finally {
@@ -503,6 +591,13 @@ export class Session {
             }
 
             const selected = this.history.slice(selection.start, selection.end);
+            const startedAt = performance.now();
+            this.logger.info("Context compaction started", {
+                sessionId: this.meta.id,
+                selectedMessageCount: selected.length,
+                estimatedTokens: usage.estimatedTokens,
+                triggerTokens
+            });
             const summary = await this.generateCompactionSummary(selected, turn);
             if (turn.signal.aborted) {
                 return;
@@ -520,6 +615,11 @@ export class Session {
             );
             this.persistence.enqueueCompaction(message, selected);
             this.emitContextUsageFor(turn.runtime, turn.contextWindow);
+            this.logger.info("Context compaction completed", {
+                sessionId: this.meta.id,
+                compactedMessageCount: selected.length,
+                durationMs: elapsedMs(startedAt)
+            });
         }
     }
 
@@ -591,6 +691,13 @@ export class Session {
         error: string | null,
         unreadCharacters: number
     ): void {
+        this.logger.info("Background shell task exited", {
+            sessionId: this.meta.id,
+            taskId: sessionId,
+            exitCode,
+            hasError: error !== null,
+            unreadCharacters
+        });
         const notice: LlmSystemNotice = {
             kind: "background.task_exit",
             sessionId,
@@ -644,6 +751,9 @@ export class Session {
             this.append(pending.message);
         } catch (error) {
             const reason = error instanceof Error ? error.message : String(error);
+            this.logger.error("Failed to persist a pending system message", error, {
+                sessionId: this.meta.id
+            });
             runtime.emit({
                 type: "request.error",
                 error: `Failed to persist system message: ${reason}`
@@ -676,4 +786,8 @@ export class Session {
         this.history.push(message);
         this.persistence.enqueue(message);
     }
+}
+
+function elapsedMs(startedAt: number): number {
+    return Math.round((performance.now() - startedAt) * 10) / 10;
 }

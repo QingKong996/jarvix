@@ -10,6 +10,7 @@ import type {
     PermissionGrantInput,
     PermissionMode
 } from "../../../protocol/permission.ts";
+import { type JarvixLogger, noopLogger } from "../../logger.ts";
 import type { SessionPermissions } from "../../permissions/session-permissions.ts";
 import {
     ToolManagerRegistry,
@@ -36,6 +37,8 @@ type ToolCallRunnerOptions = {
         unreadCharacters: number
     ): void;
     tools?: ToolExecutor;
+    sessionId?: string;
+    logger?: JarvixLogger;
 };
 
 export class ToolCallRunner {
@@ -45,6 +48,8 @@ export class ToolCallRunner {
     private readonly append: (message: LlmMessage) => void;
     private readonly queueBackgroundExitNotice: ToolCallRunnerOptions["queueBackgroundExitNotice"];
     private readonly backgroundExitNotices = new Set<string>();
+    private readonly sessionId: string | undefined;
+    private readonly logger: JarvixLogger;
 
     constructor(options: ToolCallRunnerOptions) {
         this.tools = options.tools ?? createDefaultTools();
@@ -54,6 +59,8 @@ export class ToolCallRunner {
         this.permissions = options.permissions;
         this.append = options.append;
         this.queueBackgroundExitNotice = options.queueBackgroundExitNotice;
+        this.sessionId = options.sessionId;
+        this.logger = options.logger ?? noopLogger;
     }
 
     get hasActiveWork(): boolean {
@@ -73,6 +80,12 @@ export class ToolCallRunner {
             this.finishCancelled(toolCall, runtime);
             return;
         }
+        const startedAt = performance.now();
+        this.logger.debug("Tool call started", {
+            sessionId: this.sessionId,
+            toolCallId: toolCall.id,
+            toolName: toolCall.name
+        });
 
         runtime.emit({
             type: "tool.start",
@@ -83,6 +96,11 @@ export class ToolCallRunner {
 
         let result: ToolExecutionResult;
         if (!this.tools.handles(toolCall.name)) {
+            this.logger.warn("Tool call used an unknown tool", {
+                sessionId: this.sessionId,
+                toolCallId: toolCall.id,
+                toolName: toolCall.name
+            });
             result = failedToolResult(toolCall, `Unknown tool: ${toolCall.name}`);
         } else {
             try {
@@ -132,6 +150,12 @@ export class ToolCallRunner {
                     signal
                 );
             } catch (error) {
+                this.logger.error("Tool call failed", error, {
+                    sessionId: this.sessionId,
+                    toolCallId: toolCall.id,
+                    toolName: toolCall.name,
+                    durationMs: elapsedMs(startedAt)
+                });
                 result = failedToolResult(
                     toolCall,
                     error instanceof Error ? error.message : String(error)
@@ -140,6 +164,14 @@ export class ToolCallRunner {
         }
 
         this.complete(toolCall, result, runtime);
+        this.logger.info("Tool call finished", {
+            sessionId: this.sessionId,
+            toolCallId: toolCall.id,
+            toolName: toolCall.name,
+            isError: result.isError,
+            endReason: result.endReason,
+            durationMs: elapsedMs(startedAt)
+        });
     }
 
     cancel(toolCall: LlmToolCallBlock, runtime: SessionRuntime): void {
@@ -169,6 +201,11 @@ export class ToolCallRunner {
     }
 
     private finishCancelled(toolCall: LlmToolCallBlock, runtime: SessionRuntime): void {
+        this.logger.warn("Tool call was cancelled", {
+            sessionId: this.sessionId,
+            toolCallId: toolCall.id,
+            toolName: toolCall.name
+        });
         this.complete(
             toolCall,
             failedToolResult(toolCall, "Tool execution stopped."),
@@ -211,11 +248,22 @@ export class ToolCallRunner {
             return "cancelled";
         }
         const handle = this.permissions.begin(input, signal);
+        this.logger.info("Tool permission requested", {
+            sessionId: this.sessionId,
+            requestId: handle.request.id,
+            domainChangeCount: input.domains.length,
+            directoryChangeCount: input.directories.length
+        });
         runtime.emit({
             type: "permission.request",
             request: handle.request
         });
         const decision = await handle.decision;
+        this.logger.info("Tool permission resolved", {
+            sessionId: this.sessionId,
+            requestId: handle.request.id,
+            decision
+        });
         runtime.emit({
             type: "permission.resolved",
             requestId: handle.request.id,
@@ -223,6 +271,10 @@ export class ToolCallRunner {
         });
         return decision;
     }
+}
+
+function elapsedMs(startedAt: number): number {
+    return Math.round((performance.now() - startedAt) * 10) / 10;
 }
 
 function toolResultContent(
