@@ -3,6 +3,7 @@ import type {
     LlmMessage,
     LlmToolCallBlock
 } from "../../../../protocol/llm.ts";
+import { toolResultContentText } from "../../../../protocol/llm.ts";
 import type { JarvixProviderContext } from "../../../../protocol/provider-context.ts";
 
 export type ContextMessageKind =
@@ -42,10 +43,11 @@ function messageEntries(message: LlmMessage): ContextMessageEntry[] {
         }];
     }
     if (message.role === "toolResult") {
+        const content = toolResultContentText(message.content);
         return [{
             kind: "toolResult",
-            text: () => message.content,
-            preview: detailPreview(message.toolName, message.content)
+            text: () => content,
+            preview: detailPreview(message.toolName, content)
         }];
     }
     return assistantEntries(message.content);

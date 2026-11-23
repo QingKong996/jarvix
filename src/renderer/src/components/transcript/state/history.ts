@@ -1,7 +1,12 @@
 import type {
     LlmContentBlock,
     LlmMessage,
-    LlmSystemMessage
+    LlmSystemMessage,
+    LlmToolResultMessage
+} from "../../../../../protocol/llm.ts";
+import {
+    toolResultContentText,
+    type LlmToolResultContent
 } from "../../../../../protocol/llm.ts";
 import type { ToolCallEndReason } from "../../../../../runtime/tools/types.ts";
 import {
@@ -123,7 +128,7 @@ function applyHistoryToolResult(
     turns: CommittedTurn[],
     toolCalls: ReadonlyMap<string, HistoryToolCallLocation>,
     toolCallId: string,
-    content: string,
+    content: LlmToolResultMessage["content"],
     details: unknown,
     isError: boolean
 ): void {
@@ -137,10 +142,10 @@ function applyHistoryToolResult(
         return;
     }
     const data: ToolCallViewData = isToolCallViewData(details)
-        ? details
+        ? withToolResultImages(details, content)
         : {
             ...block.data,
-            output: content,
+            output: toolResultContentText(content),
             status: isError ? "failed" : "completed"
         };
     const blocks = [...turn.blocks];
@@ -151,6 +156,30 @@ function applyHistoryToolResult(
         endReason: historyToolEndReason(data)
     };
     turns[location.turnIndex] = { ...turn, blocks };
+}
+
+function withToolResultImages(
+    data: ToolCallViewData,
+    content: LlmToolResultMessage["content"]
+): ToolCallViewData {
+    if (
+        data.kind !== "image.view_image" ||
+        data.imageUrl.length > 0 ||
+        typeof content === "string"
+    ) {
+        return data;
+    }
+    const image = content.find(
+        (block): block is Extract<LlmToolResultContent, { type: "image" }> =>
+            block.type === "image"
+    );
+    return image
+        ? {
+            ...data,
+            mimeType: image.mimeType,
+            imageUrl: `data:${image.mimeType};base64,${image.data}`
+        }
+        : data;
 }
 
 function historyToolEndReason(data: ToolCallViewData): ToolCallEndReason {

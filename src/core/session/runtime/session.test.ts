@@ -9,6 +9,7 @@ import type {
     LlmModelInfo,
     LlmStreamEvent
 } from "../../../protocol/llm.ts";
+import { toolResultContentText } from "../../../protocol/llm.ts";
 import type { JarvixEvent } from "../../../protocol/event.ts";
 import { DEFAULT_PERMISSION_MODE } from "../../../protocol/permission.ts";
 import type { JarvixSessionMeta } from "../../../protocol/session.ts";
@@ -1346,7 +1347,9 @@ test("routes background task output outside the tool call after timeout", async 
             if (response === 1) {
                 const result = request.messages.findLast((message) => message.role === "toolResult");
                 shellSessionId = result?.role === "toolResult"
-                    ? /sessionId: ([0-9a-f-]+)/.exec(result.content)?.[1]
+                    ? /sessionId: ([0-9a-f-]+)/.exec(
+                        toolResultContentText(result.content)
+                    )?.[1]
                     : undefined;
                 expect(shellSessionId).toBeTruthy();
             }

@@ -1,6 +1,8 @@
 import type {
+    LlmImageContent,
     LlmMessage,
     LlmToolCallBlock,
+    LlmToolResultContent,
     LlmToolResultMessage
 } from "../../../protocol/llm.ts";
 import type {
@@ -192,7 +194,7 @@ export class ToolCallRunner {
             role: "toolResult",
             toolCallId: toolCall.id,
             toolName: toolCall.name,
-            content: result.content,
+            content: toolResultContent(result.content, result.images),
             details: toToolResultDetails(result.data),
             isError: result.isError,
             timestamp: Date.now()
@@ -221,6 +223,19 @@ export class ToolCallRunner {
         });
         return decision;
     }
+}
+
+function toolResultContent(
+    text: string,
+    images: readonly LlmImageContent[] | undefined
+): string | LlmToolResultContent[] {
+    if (!images || images.length === 0) {
+        return text;
+    }
+    return [
+        ...(text.length > 0 ? [{ type: "text" as const, text }] : []),
+        ...images
+    ];
 }
 
 function failedToolResult(toolCall: LlmToolCallBlock, output: string): ToolExecutionResult {

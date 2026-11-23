@@ -166,6 +166,7 @@
         "execCommand": "执行命令",
         "writeStdin": "写入 Shell",
         "applyPatch": "修改文件",
+        "viewImage": "查看图片",
         "localTime": "本地时间",
         "sleep": "等待",
         "localTimeDetails": {

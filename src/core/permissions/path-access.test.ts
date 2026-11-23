@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, expect, test } from "vitest";
-import { authorizeSandboxWrite } from "./path-access.ts";
+import { authorizeSandboxRead, authorizeSandboxWrite } from "./path-access.ts";
 import { createSandboxPolicy } from "./sandbox.ts";
 
 const directories: string[] = [];
@@ -66,6 +66,23 @@ test("missing files are checked through their nearest existing ancestor", () => 
 test("full access bypasses sandbox path restrictions", () => {
     expect(authorizeSandboxWrite(null, join(tmpdir(), "anywhere.txt")))
         .toMatchObject({ allowed: true });
+});
+
+test("read access allows a more specific allowRead root", () => {
+    const directory = workspace();
+    const publicDirectory = join(directory, "public");
+    mkdirSync(publicDirectory);
+    const policy = createSandboxPolicy("read-only", [directory])!;
+    policy.filesystem.denyRead.push({ path: directory, literal: true });
+    policy.filesystem.allowRead = [{ path: publicDirectory, literal: true }];
+
+    expect(authorizeSandboxRead(policy, join(publicDirectory, "photo.png")))
+        .toMatchObject({ allowed: true });
+    expect(authorizeSandboxRead(policy, join(directory, "private.png")))
+        .toMatchObject({
+            allowed: false,
+            reason: expect.stringContaining("denyRead root")
+        });
 });
 
 function workspace(): string {

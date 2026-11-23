@@ -98,6 +98,29 @@ test("ignores usage from aborted or failed assistant messages", () => {
     expect(usage.estimatedTokens).toBe(12);
 });
 
+test("estimates images with pi-ai's context heuristic", () => {
+    const usage = estimateContextUsage({
+        contextWindow: 10_000,
+        messages: [{
+            role: "toolResult",
+            toolCallId: "call-image",
+            toolName: "view_image",
+            content: [{
+                type: "image",
+                data: "aW1hZ2U=",
+                mimeType: "image/png"
+            }, {
+                type: "text",
+                text: "abcd"
+            }],
+            isError: false,
+            timestamp: 1
+        }]
+    });
+
+    expect(usage.estimatedTokens).toBe(1_373);
+});
+
 test("reuses message token estimates across context usage checks", () => {
     let contentReads = 0;
     const message: LlmMessage = {

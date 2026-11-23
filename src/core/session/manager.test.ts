@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { afterAll, expect, test, vi } from "vitest";
 import type { LlmAdapter } from "../llm/index.ts";
 import type { LlmAssistantMessage, LlmModelInfo, LlmStreamEvent } from "../../protocol/llm.ts";
+import { toolResultContentText } from "../../protocol/llm.ts";
 import { providerConfigSchema } from "../../protocol/providers.ts";
 import { APPLY_PATCH_TOOL } from "../../runtime/tools/index.ts";
 import { SessionManager } from "./manager.ts";
@@ -263,7 +264,10 @@ test("uses an updated working directory for relative shell commands", async () =
     const toolResult = session.snapshot().messages.find(
         (message) => message.role === "toolResult"
     );
-    expect(toolResult?.isError, toolResult?.content).toBe(false);
+    expect(
+        toolResult?.isError,
+        toolResult ? toolResultContentText(toolResult.content) : ""
+    ).toBe(false);
     expect(realpathSync.native(
         readFileSync(join(secondDirectory, "marker.txt"), "utf8").trim()
     )).toBe(realpathSync.native(secondDirectory));
@@ -312,7 +316,10 @@ test("uses an updated working directory for relative apply_patch paths", async (
     const toolResult = session.snapshot().messages.find(
         (message) => message.role === "toolResult"
     );
-    expect(toolResult?.isError, toolResult?.content).toBe(false);
+    expect(
+        toolResult?.isError,
+        toolResult ? toolResultContentText(toolResult.content) : ""
+    ).toBe(false);
     expect(readFileSync(join(secondDirectory, "nested", "marker.txt"), "utf8"))
         .toBe("created\n");
     expect(existsSync(join(firstDirectory, "nested", "marker.txt"))).toBe(false);

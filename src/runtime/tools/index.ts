@@ -27,6 +27,12 @@ export {
     SLEEP_TOOL_DEFINITIONS,
     SleepTool
 } from "./time/time.ts";
+export {
+    VIEW_IMAGE_TOOL,
+    VIEW_IMAGE_TOOL_DEFINITIONS,
+    ViewImageTool
+} from "./view-image/view-image.ts";
+export type { ViewImageToolOptions } from "./view-image/view-image.ts";
 export { ToolManagerRegistry } from "./tool-manager-registry.ts";
 export { ToolRegistry } from "./tool-registry.ts";
 export { toolFromExecutor } from "./tool-manager.ts";
@@ -65,5 +71,6 @@ export type {
     SleepView,
     ToolCallOutputDelta,
     ToolCallStatus,
-    ToolCallViewData
+    ToolCallViewData,
+    ViewImageView
 } from "./view.ts";

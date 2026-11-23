@@ -188,6 +188,63 @@ test("passes tool definitions and tool results to the provider context", async (
     ]);
 });
 
+test("passes tool result images to pi-ai as image content", async () => {
+    const { faux, adapter, model } = createFixture();
+    let context: Context | undefined;
+    faux.setResponses([
+        (next) => {
+            context = next;
+            return fauxAssistantMessage("seen");
+        }
+    ]);
+    const image = {
+        type: "image" as const,
+        data: "aW1hZ2U=",
+        mimeType: "image/png"
+    };
+
+    for await (const _event of adapter.stream({
+        model,
+        messages: [userMessage("inspect it"), {
+            role: "assistant",
+            content: [{
+                type: "toolCall",
+                id: "call-image",
+                name: "view_image",
+                arguments: { path: "image.png" }
+            }],
+            provider: model.provider,
+            model: model.id,
+            api: "test",
+            usage: {
+                inputTokens: 0,
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+                totalTokens: 0,
+                cost: 0
+            },
+            stopReason: "toolUse",
+            timestamp: 2
+        }, {
+            role: "toolResult",
+            toolCallId: "call-image",
+            toolName: "view_image",
+            content: [image],
+            isError: false,
+            timestamp: 3
+        }]
+    })) {
+        // Drain the stream; the provider context is captured above.
+    }
+
+    expect(context?.messages.findLast((message) => message.role === "toolResult"))
+        .toMatchObject({
+            role: "toolResult",
+            content: [image]
+        });
+});
+
 test("passes background task notices through system messages", async () => {
     const { faux, adapter, model } = createFixture();
     let context: Context | undefined;

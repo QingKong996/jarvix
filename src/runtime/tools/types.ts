@@ -1,4 +1,8 @@
-import type { LlmToolCallBlock, LlmToolDefinition } from "../../protocol/llm.ts";
+import type {
+    LlmImageContent,
+    LlmToolCallBlock,
+    LlmToolDefinition
+} from "../../protocol/llm.ts";
 import type {
     PermissionDecision,
     PermissionGrantInput,
@@ -26,6 +30,7 @@ export type ToolTaskSnapshot = ToolTaskState & {
 
 export type ToolExecutionResult = {
     content: string;
+    images?: readonly LlmImageContent[];
     data: ToolCallViewData;
     isError: boolean;
     endReason: ToolCallEndReason;

@@ -26,6 +26,47 @@ type PathRule = {
     glob: boolean;
 };
 
+type PathRuleMatch = {
+    path: string;
+    specificity: number;
+};
+
+/**
+ * Check read access against denyRead and allowRead. For reads, a more specific
+ * allowRead entry overrides a broader denyRead entry.
+ */
+export function authorizeSandboxRead(
+    policy: SandboxPolicy | null,
+    requestedPath: string
+): SandboxPathDecision {
+    const absolutePath = resolve(requestedPath);
+    if (policy === null || policy.filesystem.disabled === true) {
+        return { allowed: true, path: absolutePath };
+    }
+
+    let target: string;
+    try {
+        target = canonicalSandboxPath(absolutePath);
+    } catch (error) {
+        return {
+            allowed: false,
+            path: absolutePath,
+            reason: `the path could not be resolved: ${errorMessage(error)}`
+        };
+    }
+
+    const denied = matchingReadRule(policy.filesystem.denyRead, target);
+    const allowed = matchingReadRule(policy.filesystem.allowRead, target);
+    if (!denied || (allowed && allowed.specificity >= denied.specificity)) {
+        return { allowed: true, path: absolutePath };
+    }
+    return {
+        allowed: false,
+        path: absolutePath,
+        reason: `the path is inside sandbox denyRead root ${denied.path}`
+    };
+}
+
 /**
  * Check write access against the sandbox policy itself. Callers must not
  * derive separate directory rules: allowWrite and denyWrite are authoritative.
@@ -127,6 +168,86 @@ function pathRules(entries: readonly FilesystemPathEntry[] | undefined): PathRul
             glob: false
         };
     });
+}
+
+function matchingReadRule(
+    entries: readonly FilesystemPathEntry[] | undefined,
+    target: string
+): PathRuleMatch | null {
+    let best: PathRuleMatch | null = null;
+    for (const rule of pathRules(entries)) {
+        const match = rule.glob
+            ? matchGlobRule(rule.path, target)
+            : matchPathRule(rule.path, target);
+        if (match && (!best || match.specificity > best.specificity)) {
+            best = match;
+        }
+    }
+    return best;
+}
+
+function matchPathRule(path: string, target: string): PathRuleMatch | null {
+    let root: string;
+    try {
+        root = canonicalSandboxPath(path);
+    } catch {
+        return null;
+    }
+    return isWithin(root, target)
+        ? { path, specificity: comparablePath(root).length }
+        : null;
+}
+
+function matchGlobRule(pattern: string, target: string): PathRuleMatch | null {
+    const absolutePattern = process.platform === "win32"
+        ? resolve(pattern).replace(/\\/g, "/")
+        : resolve(pattern);
+    const comparableTarget = process.platform === "win32"
+        ? target.replace(/\\/g, "/").toLowerCase()
+        : target;
+    const expression = new RegExp(
+        `^${globExpression(absolutePattern)}$`,
+        process.platform === "win32" ? "i" : ""
+    );
+    if (!expression.test(comparableTarget)) {
+        return null;
+    }
+    return {
+        path: pattern,
+        specificity: absolutePattern.replace(/[*?[\]]/g, "").length
+    };
+}
+
+function globExpression(pattern: string): string {
+    let expression = "";
+    for (let index = 0; index < pattern.length; index += 1) {
+        const character = pattern[index]!;
+        if (character === "*" && pattern[index + 1] === "*") {
+            if (pattern[index + 2] === "/") {
+                expression += "(?:.*/)?";
+                index += 2;
+            } else {
+                expression += ".*";
+                index += 1;
+            }
+        } else if (character === "*") {
+            expression += "[^/]*";
+        } else if (character === "?") {
+            expression += "[^/]";
+        } else if (character === "[") {
+            const close = pattern.indexOf("]", index + 1);
+            if (close > index + 1) {
+                const content = pattern.slice(index + 1, close);
+                expression += `[${content.startsWith("!") ? `^${content.slice(1)}` : content}]`;
+                index = close;
+            } else {
+                expression += "\\[";
+            }
+        } else {
+            expression += character.replace(/[\\^$+.()|{}[\]]/g, "\\$&");
+        }
+    }
+    return expression;
 }
 
 function hasGlobSyntax(spelling: string): boolean {
