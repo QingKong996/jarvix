@@ -63,6 +63,7 @@ export function ProviderConfigForm({
                 <Input
                     value={draft.name}
                     required
+                    aria-label={t("settings.providers.name")}
                     disabled={fieldsDisabled}
                     onChange={(event) => onUpdate({ name: event.target.value })}
                 />
@@ -78,7 +79,10 @@ export function ProviderConfigForm({
                         if (protocol) onUpdate({ protocol });
                     }}
                 >
-                    <SelectTrigger className="w-64 max-w-[75%]">
+                    <SelectTrigger
+                        aria-label={t("settings.providers.protocol")}
+                        className="w-64 max-w-[75%]"
+                    >
                         <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -93,6 +97,7 @@ export function ProviderConfigForm({
                 <Input
                     required
                     value={draft.baseUrl}
+                    aria-label="Base URL"
                     disabled={fieldsDisabled}
                     onChange={(event) => onUpdate({ baseUrl: event.target.value })}
                     data-testid="provider-base-url"
@@ -105,6 +110,7 @@ export function ProviderConfigForm({
                         type={revealed ? "text" : "password"}
                         autoComplete="off"
                         value={draft.apiKey ?? ""}
+                        aria-label={t("settings.providers.apiKey")}
                         placeholder={draft.env.join(" / ")}
                         disabled={fieldsDisabled}
                         onChange={(event) => onUpdate({ apiKey: event.target.value })}

@@ -1,5 +1,6 @@
-import { useEffect, useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { animate, motion } from "motion/react";
 import {
     modelDefinitionSchema,
     providerConfigSchema,
@@ -20,6 +21,8 @@ import {
     DialogHeader,
     DialogTitle
 } from "../../ui/dialog.tsx";
+import { panelTransition, smoothTransition } from "../../../motion.ts";
+import { useMediaQuery } from "../../../use-media-query.ts";
 
 type ProviderConfigDialogProps = {
     provider: ProviderConfig;
@@ -50,18 +53,21 @@ export function ProviderConfigDialog({ provider, selectedModel, disabled, onClos
     const [revealed, setRevealed] = useState(false);
     const [syncingModels, setSyncingModels] = useState(false);
     const [error, setError] = useState("");
+    const contentRef = useRef<HTMLDivElement>(null);
+    const initialDialogWidth = useRef(modelPanelOpen ? "56rem" : "36rem");
+    const wideViewport = useMediaQuery("(min-width: 640px)");
     const modelDirty = editingModel !== undefined &&
         modelDraft !== undefined &&
         JSON.stringify(editingModel.model) !== JSON.stringify(modelDraft);
 
     useEffect(() => {
-        if (modelPanelOpen || !editingModel) return;
-        const timeout = window.setTimeout(() => {
-            setEditingModel(undefined);
-            setModelDraft(undefined);
-        }, 320);
-        return () => window.clearTimeout(timeout);
-    }, [editingModel, modelPanelOpen]);
+        const element = contentRef.current;
+        if (!element) return;
+        const controls = animate(element, {
+            "--dialog-width": modelPanelOpen ? "56rem" : "36rem"
+        }, smoothTransition);
+        return () => controls.stop();
+    }, [modelPanelOpen]);
 
     function update(patch: Partial<ProviderConfig>): void {
         setDraft((current) => ({ ...current, ...patch }));
@@ -212,11 +218,10 @@ export function ProviderConfigDialog({ provider, selectedModel, disabled, onClos
                 }}
                 className="gap-0 overflow-hidden p-0"
                 style={{
-                    maxWidth: modelPanelOpen
-                        ? "min(56rem, calc(100% - 2rem))"
-                        : "min(36rem, calc(100% - 2rem))",
-                    transition: "max-width 300ms cubic-bezier(0.22, 1, 0.36, 1)"
-                }}
+                    "--dialog-width": initialDialogWidth.current,
+                    maxWidth: "min(var(--dialog-width), calc(100% - 2rem))"
+                } as CSSProperties}
+                contentRef={contentRef}
             >
                 <DialogHeader className="border-b px-6 py-4">
                     <DialogTitle className="flex items-center gap-3">
@@ -226,9 +231,11 @@ export function ProviderConfigDialog({ provider, selectedModel, disabled, onClos
                 </DialogHeader>
 
                 <div className="relative min-w-0 overflow-hidden">
-                    <div className={`flex min-w-0 flex-col transition-[margin-right] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
-                        modelPanelOpen ? "sm:mr-96" : "mr-0"
-                    }`}>
+                    <motion.div
+                        animate={{ marginRight: wideViewport && modelPanelOpen ? 384 : 0 }}
+                        transition={panelTransition}
+                        className="flex min-w-0 flex-col"
+                    >
                         <ProviderConfigForm
                             formId={formId}
                             draft={draft}
@@ -254,14 +261,24 @@ export function ProviderConfigDialog({ provider, selectedModel, disabled, onClos
                                 {t("settings.save")}
                             </Button>
                         </DialogFooter>
-                    </div>
+                    </motion.div>
 
-                    <aside
+                    <motion.aside
                         inert={!modelPanelOpen}
-                        className={`absolute inset-y-0 right-0 w-full bg-card transition-[opacity,transform,border-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] sm:w-96 ${
-                            modelPanelOpen
-                                ? "translate-x-0 border-l opacity-100"
-                                : "pointer-events-none translate-x-full border-l-0 opacity-0"
+                        aria-hidden={!modelPanelOpen}
+                        initial={false}
+                        animate={{
+                            x: modelPanelOpen ? 0 : "100%",
+                            opacity: modelPanelOpen ? 1 : 0
+                        }}
+                        transition={panelTransition}
+                        onAnimationComplete={() => {
+                            if (modelPanelOpen) return;
+                            setEditingModel(undefined);
+                            setModelDraft(undefined);
+                        }}
+                        className={`absolute inset-y-0 right-0 w-full border-l bg-card sm:w-96 ${
+                            modelPanelOpen ? "pointer-events-auto" : "pointer-events-none"
                         }`}
                     >
                         {editingModel && modelDraft ? (
@@ -276,7 +293,7 @@ export function ProviderConfigDialog({ provider, selectedModel, disabled, onClos
                                 onSave={saveModel}
                             />
                         ) : null}
-                    </aside>
+                    </motion.aside>
                 </div>
             </DialogContent>
 

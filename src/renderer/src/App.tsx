@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { PanelRightOpen } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { useDefaultLayout } from "react-resizable-panels";
 import { Composer } from "./components/composer/Composer.tsx";
@@ -141,21 +142,31 @@ export function App() {
                             style={{ overflow: "hidden" }}
                         >
                             <main className="relative flex h-full min-h-0 min-w-0 flex-col">
-                                {!rightSidebarOpen ? (
-                                    <Button
-                                        ref={rightSidebarTriggerRef}
-                                        type="button"
-                                        variant="secondary"
-                                        size="icon-sm"
-                                        aria-label={t("rightSidebar.open")}
-                                        title={t("rightSidebar.open")}
-                                        onClick={openRightSidebar}
-                                        data-testid="right-sidebar-open"
-                                        className="absolute top-3 right-3 z-10 rounded-lg shadow-sm"
-                                    >
-                                        <PanelRightOpen />
-                                    </Button>
-                                ) : null}
+                                <AnimatePresence initial={false}>
+                                    {!rightSidebarOpen ? (
+                                        <motion.div
+                                            key="right-sidebar-open"
+                                            initial={{ opacity: 0, scale: 0.88 }}
+                                            animate={{ opacity: 1, scale: 1 }}
+                                            exit={{ opacity: 0, scale: 0.88 }}
+                                            className="absolute top-3 right-3 z-10"
+                                        >
+                                            <Button
+                                                ref={rightSidebarTriggerRef}
+                                                type="button"
+                                                variant="secondary"
+                                                size="icon-sm"
+                                                aria-label={t("rightSidebar.open")}
+                                                title={t("rightSidebar.open")}
+                                                onClick={openRightSidebar}
+                                                data-testid="right-sidebar-open"
+                                                className="rounded-lg shadow-sm"
+                                            >
+                                                <PanelRightOpen />
+                                            </Button>
+                                        </motion.div>
+                                    ) : null}
+                                </AnimatePresence>
                                 <Transcript key={activeSessionId ?? "new"} sessionId={activeSessionId} />
                                 <Composer
                                     disabled={!bridge || !ready || (busy && !running)}
@@ -199,15 +210,18 @@ export function App() {
                         ) : null}
                     </ResizablePanelGroup>
                 </div>
-                {rightSidebarOpen && !rightSidebarInPanel ? (
-                    <RightSidebar
-                        variant="overlay"
-                        tabs={rightSidebarTabs}
-                        sessionId={activeSessionId}
-                        providerContextRevision={providerContextRevision}
-                        onClose={closeRightSidebar}
-                    />
-                ) : null}
+                <AnimatePresence>
+                    {rightSidebarOpen && !rightSidebarInPanel ? (
+                        <RightSidebar
+                            key="right-sidebar-overlay"
+                            variant="overlay"
+                            tabs={rightSidebarTabs}
+                            sessionId={activeSessionId}
+                            providerContextRevision={providerContextRevision}
+                            onClose={closeRightSidebar}
+                        />
+                    ) : null}
+                </AnimatePresence>
             </div>
 
             <CreateProjectDialog

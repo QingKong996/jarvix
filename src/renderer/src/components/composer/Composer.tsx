@@ -1,5 +1,6 @@
 import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { ArrowUp, ChevronUp, Folder, Square } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ import { ComposerModelMenu } from "./ComposerModelMenu.tsx";
 import { ComposerPermissionMenu } from "./ComposerPermissionMenu.tsx";
 import { PermissionRequestDialog } from "./PermissionRequestDialog.tsx";
 import { SessionContextDialog } from "../sessions/SessionContextDialog.tsx";
+import { quickTransition } from "../../motion.ts";
 
 type ComposerProps = {
     disabled: boolean;
@@ -123,12 +125,15 @@ export function Composer({
             <div className={cn(CONTENT_GUTTER, "py-3")}>
                 <form data-testid="composer-form" onSubmit={handleSubmit}>
                     <div className={cn(CHAT_COLUMN, "flex flex-col gap-1 rounded-xl border bg-composer p-1.5 shadow-sm")}>
-                        {permissionRequest ? (
-                            <PermissionRequestDialog
-                                request={permissionRequest}
-                                onRespond={onPermissionResponse}
-                            />
-                        ) : null}
+                        <AnimatePresence initial={false}>
+                            {permissionRequest ? (
+                                <PermissionRequestDialog
+                                    key={permissionRequest.id}
+                                    request={permissionRequest}
+                                    onRespond={onPermissionResponse}
+                                />
+                            ) : null}
+                        </AnimatePresence>
                         <Textarea
                             ref={textareaRef}
                             rows={1}
@@ -180,38 +185,55 @@ export function Composer({
                                     onSave={saveConfig}
                                 />
 
-                                {running && value.trim().length === 0 ? (
-                                    <Button
-                                        type="button"
-                                        size="icon-sm"
-                                        className="shrink-0 p-0 dark:bg-[#E6EDF3] dark:text-[#0D1117] dark:hover:bg-[#E6EDF3]/90"
-                                        aria-label={t("composer.stop")}
-                                        title={t("composer.stop")}
-                                        onClick={onStop}
-                                        data-testid="composer-stop"
-                                    >
-                                        <Square aria-hidden="true" className="size-3 fill-current" />
-                                    </Button>
-                                ) : (
-                                    <Button
-                                        type="submit"
-                                        size="icon-sm"
-                                        className="shrink-0 bg-[#1F6FEB] p-0 text-white hover:bg-[#1F6FEB]/90"
-                                        aria-label={t("composer.send")}
-                                        disabled={disabled || saving || permissionSaving || permissionPending || value.trim().length === 0}
-                                        data-testid="composer-send"
-                                    >
-                                        <ArrowUp aria-hidden="true" className="size-4" />
-                                    </Button>
-                                )}
+                                <motion.div
+                                    key={running && value.trim().length === 0 ? "stop" : "send"}
+                                    initial={{ opacity: 0, scale: 0.86 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    transition={quickTransition}
+                                    className="shrink-0"
+                                >
+                                    {running && value.trim().length === 0 ? (
+                                        <Button
+                                            type="button"
+                                            size="icon-sm"
+                                            className="shrink-0 p-0 dark:bg-[#E6EDF3] dark:text-[#0D1117] dark:hover:bg-[#E6EDF3]/90"
+                                            aria-label={t("composer.stop")}
+                                            title={t("composer.stop")}
+                                            onClick={onStop}
+                                            data-testid="composer-stop"
+                                        >
+                                            <Square aria-hidden="true" className="size-3 fill-current" />
+                                        </Button>
+                                    ) : (
+                                        <Button
+                                            type="submit"
+                                            size="icon-sm"
+                                            className="shrink-0 bg-[#1F6FEB] p-0 text-white hover:bg-[#1F6FEB]/90"
+                                            aria-label={t("composer.send")}
+                                            disabled={disabled || saving || permissionSaving || permissionPending || value.trim().length === 0}
+                                            data-testid="composer-send"
+                                        >
+                                            <ArrowUp aria-hidden="true" className="size-4" />
+                                        </Button>
+                                    )}
+                                </motion.div>
                             </div>
                         </div>
                     </div>
-                    {error ? (
-                        <p role="alert" className={cn(CHAT_COLUMN, "mt-1 text-xs text-destructive")}>
-                            {error}
-                        </p>
-                    ) : null}
+                    <AnimatePresence initial={false}>
+                        {error ? (
+                            <motion.p
+                                role="alert"
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: "auto" }}
+                                exit={{ opacity: 0, height: 0 }}
+                                transition={quickTransition}
+                                className={cn(CHAT_COLUMN, "mt-1 overflow-hidden text-xs text-destructive")}
+                            >
+                                {error}
+                            </motion.p>
+                        ) : null}
+                    </AnimatePresence>
                 </form>
             </div>
 

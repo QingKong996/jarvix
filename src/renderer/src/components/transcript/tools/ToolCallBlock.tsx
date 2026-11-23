@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
+import { motion } from "motion/react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
@@ -10,8 +11,9 @@ import { ShellToolCall } from "./ShellToolCall.tsx";
 import { LocalTimeToolCall, SleepToolCall } from "./TimeToolCall.tsx";
 import { PermissionRequestToolCall } from "./PermissionRequestToolCall.tsx";
 import { ViewImageToolCall } from "./ViewImageToolCall.tsx";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { AnimatedCollapsibleContent, Collapsible, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { quickTransition } from "../../../motion.ts";
 
 type ToolCallBlockProps = {
     toolName: string;
@@ -36,13 +38,20 @@ export function ToolCallBlock({ toolName, data, isError, endReason }: ToolCallBl
                 type="button"
                 className="group -ml-5 flex w-fit items-center gap-1.5 rounded-md text-[13px] text-muted-foreground transition-colors outline-none select-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
-                <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+                <motion.span
+                    aria-hidden="true"
+                    animate={{ rotate: open ? 90 : 0 }}
+                    transition={quickTransition}
+                    className="inline-flex shrink-0"
+                >
+                    <ChevronRight className="size-3.5" />
+                </motion.span>
                 <span className={cn(active && "animate-pulse")}>{toolLabel(toolName, data, t)}</span>
                 <span aria-hidden="true">·</span>
                 <span>{statusLabel(data.status, isError, endReason, t)}</span>
             </CollapsibleTrigger>
 
-            <CollapsibleContent>
+            <AnimatedCollapsibleContent>
                 <div className="flex flex-col gap-2 border-l-2 pl-3">
                     {data.kind === "apply_patch" ? (
                         <ApplyPatchDiff patch={data.patch} />
@@ -69,7 +78,7 @@ export function ToolCallBlock({ toolName, data, isError, endReason }: ToolCallBl
                         <ToolOutput text={data.output} streaming={streaming} />
                     ) : null}
                 </div>
-            </CollapsibleContent>
+            </AnimatedCollapsibleContent>
         </Collapsible>
     );
 }

@@ -1,6 +1,9 @@
+import { useRef, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
+import { motion } from "motion/react";
 import { cn } from "cn";
 import type { JarvixContextUsage } from "../../../../protocol/context-usage.ts";
+import { smoothTransition } from "../../motion.ts";
 
 type ContextUsageRingProps = {
     usage: JarvixContextUsage | null;
@@ -11,6 +14,7 @@ const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
 export function ContextUsageRing({ usage }: ContextUsageRingProps) {
     const { t, i18n } = useTranslation();
+    const initialOffset = useRef<number | null>(null);
     const limit = usage?.contextWindow;
     if (!usage || !limit || limit <= 0) {
         return null;
@@ -38,13 +42,19 @@ export function ContextUsageRing({ usage }: ContextUsageRingProps) {
         : percentage >= 70
             ? "text-[#9a6700] dark:text-[#d29922]"
             : "text-[#1f6feb] dark:text-[#58a6ff]";
+    const strokeDashoffset = CIRCUMFERENCE * (1 - Math.min(1, ratio));
+    const initialStrokeDashoffset = initialOffset.current ?? strokeDashoffset;
+    initialOffset.current = initialStrokeDashoffset;
 
     return (
-        <span
+        <motion.span
             role="img"
             aria-label={label}
             title={label}
             className="inline-flex size-7 shrink-0 items-center justify-center"
+            style={{ "--ring-offset": initialStrokeDashoffset } as CSSProperties}
+            animate={{ "--ring-offset": strokeDashoffset }}
+            transition={smoothTransition}
         >
             <svg aria-hidden="true" viewBox="0 0 24 24" className="size-7">
                 <circle
@@ -64,9 +74,9 @@ export function ContextUsageRing({ usage }: ContextUsageRingProps) {
                     strokeWidth="2.25"
                     strokeLinecap="round"
                     strokeDasharray={CIRCUMFERENCE}
-                    strokeDashoffset={CIRCUMFERENCE * (1 - Math.min(1, ratio))}
+                    strokeDashoffset="var(--ring-offset)"
                     transform="rotate(-90 12 12)"
-                    className={cn("transition-[stroke-dashoffset] duration-300", tone)}
+                    className={tone}
                 />
                 <text
                     x="12"
@@ -80,6 +90,6 @@ export function ContextUsageRing({ usage }: ContextUsageRingProps) {
                     {percentLabel}
                 </text>
             </svg>
-        </span>
+        </motion.span>
     );
 }

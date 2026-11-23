@@ -1,4 +1,5 @@
 import { memo, useLayoutEffect, useRef, type RefObject } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
 import { useCommitted, useInjected, useLive } from "./state/transcript-hooks.ts";
@@ -8,6 +9,7 @@ import { CHAT_COLUMN, CONTENT_GUTTER } from "../../layout.ts";
 import { Markdown } from "./Markdown.tsx";
 import { ThinkingBlock } from "./ThinkingBlock.tsx";
 import { ToolCallBlock } from "./tools/ToolCallBlock.tsx";
+import { quickTransition } from "../../motion.ts";
 
 const CommittedTurnView = memo(function CommittedTurnView({ turn }: { turn: CommittedTurn }) {
     const { t } = useTranslation();
@@ -50,11 +52,20 @@ const CommittedTurnView = memo(function CommittedTurnView({ turn }: { turn: Comm
 function CommittedList() {
     const committed = useCommitted();
     return (
-        <>
+        <AnimatePresence initial={false}>
             {committed.map((turn) => (
-                <CommittedTurnView key={turn.id} turn={turn} />
+                <motion.div
+                    key={turn.id}
+                    layout="position"
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={quickTransition}
+                    className={turn.role === "user" ? "flex justify-end" : "min-w-0"}
+                >
+                    <CommittedTurnView turn={turn} />
+                </motion.div>
             ))}
-        </>
+        </AnimatePresence>
     );
 }
 
@@ -77,17 +88,40 @@ function LiveTurnView({ turn }: { turn: LiveTurn }) {
 
 function LiveSlot() {
     const live = useLive();
-    return live ? <LiveTurnView turn={live} /> : null;
+    return (
+        <AnimatePresence initial={false}>
+            {live ? (
+                <motion.div
+                    key={live.id}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={quickTransition}
+                >
+                    <LiveTurnView turn={live} />
+                </motion.div>
+            ) : null}
+        </AnimatePresence>
+    );
 }
 
 function InjectedList() {
     const injected = useInjected();
     return (
-        <>
+        <AnimatePresence initial={false}>
             {injected.map((turn) => (
-                <CommittedTurnView key={turn.id} turn={turn} />
+                <motion.div
+                    key={turn.id}
+                    layout="position"
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={quickTransition}
+                    className={turn.role === "user" ? "flex justify-end" : "min-w-0"}
+                >
+                    <CommittedTurnView turn={turn} />
+                </motion.div>
             ))}
-        </>
+        </AnimatePresence>
     );
 }
 

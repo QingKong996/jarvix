@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../ui/button.tsx";
 import { Input } from "../../ui/input.tsx";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../../ui/collapsible.tsx";
+import { AnimatedCollapsibleContent, Collapsible, CollapsibleTrigger } from "../../ui/collapsible.tsx";
 import { ProviderConfigDialog } from "./ProviderConfigDialog.tsx";
 import { ProviderIcon } from "./ProviderIcon.tsx";
 import {
@@ -12,6 +13,7 @@ import {
     type ProviderConfig,
     type ModelSelection
 } from "../../../../../protocol/providers.ts";
+import { quickTransition } from "../../../motion.ts";
 
 type ProviderSettingsProps = {
     providers: ProviderConfig[];
@@ -32,6 +34,7 @@ export function ProviderSettings({ providers, selectedModel, disabled, onChange 
     const [error, setError] = useState("");
     const [query, setQuery] = useState("");
     const [editor, setEditor] = useState<ProviderEditorState>();
+    const [catalogOpen, setCatalogOpen] = useState(true);
 
     useEffect(() => {
         let active = true;
@@ -146,10 +149,21 @@ export function ProviderSettings({ providers, selectedModel, disabled, onChange 
                 )}
             </section>
 
-            <Collapsible defaultOpen className="flex flex-col gap-3 border-t pt-5">
+            <Collapsible
+                open={catalogOpen}
+                onOpenChange={setCatalogOpen}
+                className="flex flex-col gap-3 border-t pt-5"
+            >
                 <div className="flex items-center justify-between gap-3">
                     <CollapsibleTrigger className="group flex items-center gap-2 rounded-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                        <ChevronDown className="size-4 transition-transform group-data-[state=closed]:-rotate-90" />
+                        <motion.span
+                            aria-hidden="true"
+                            animate={{ rotate: catalogOpen ? 0 : -90 }}
+                            transition={quickTransition}
+                            className="inline-flex shrink-0"
+                        >
+                            <ChevronDown className="size-4" />
+                        </motion.span>
                         {t("settings.providers.available")}
                     </CollapsibleTrigger>
                     <Button
@@ -163,7 +177,7 @@ export function ProviderSettings({ providers, selectedModel, disabled, onChange 
                         <RefreshCw className={loading ? "animate-spin" : undefined} />
                     </Button>
                 </div>
-                <CollapsibleContent className="flex flex-col gap-3">
+                <AnimatedCollapsibleContent className="flex flex-col gap-3">
                     <Input
                         aria-label={t("settings.providers.searchProviders")}
                         placeholder={t("settings.providers.searchProviders")}
@@ -191,7 +205,7 @@ export function ProviderSettings({ providers, selectedModel, disabled, onChange 
                         ))}
                     </div>
                     {available?.length === 0 ? <p className="text-muted-foreground">{t("settings.providers.noResults")}</p> : null}
-                </CollapsibleContent>
+                </AnimatedCollapsibleContent>
             </Collapsible>
 
             {editor ? (

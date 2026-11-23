@@ -1,11 +1,36 @@
 import * as React from "react"
+import { AnimatePresence, motion } from "motion/react"
 import { ContextMenu as ContextMenuPrimitive } from "radix-ui"
 import { cn } from "cn"
+import { quickTransition } from "../../motion.ts"
+
+const ContextMenuOpenContext = React.createContext(false)
 
 function ContextMenu({
+  open: controlledOpen,
+  onOpenChange,
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.Root>) {
-  return <ContextMenuPrimitive.Root data-slot="context-menu" {...props} />
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false)
+  const open = controlledOpen ?? uncontrolledOpen
+  const handleOpenChange = React.useCallback(
+    (next: boolean) => {
+      if (controlledOpen === undefined) setUncontrolledOpen(next)
+      onOpenChange?.(next)
+    },
+    [controlledOpen, onOpenChange]
+  )
+
+  return (
+    <ContextMenuOpenContext.Provider value={open}>
+      <ContextMenuPrimitive.Root
+        data-slot="context-menu"
+        open={controlledOpen}
+        onOpenChange={handleOpenChange}
+        {...props}
+      />
+    </ContextMenuOpenContext.Provider>
+  )
 }
 
 function ContextMenuTrigger({
@@ -21,18 +46,36 @@ function ContextMenuTrigger({
 
 function ContextMenuContent({
   className,
+  children,
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.Content>) {
+  const open = React.useContext(ContextMenuOpenContext)
+
   return (
-    <ContextMenuPrimitive.Portal>
-      <ContextMenuPrimitive.Content
-        data-slot="context-menu-content"
-        className={cn(
-          "bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 min-w-[10rem] overflow-hidden rounded-lg border p-1 shadow-md",
-          className
-        )}
-        {...props}
-      />
+    <ContextMenuPrimitive.Portal forceMount>
+      <AnimatePresence>
+        {open ? (
+          <ContextMenuPrimitive.Content
+            asChild
+            forceMount
+            data-slot="context-menu-content"
+            {...props}
+          >
+            <motion.div
+              className={cn(
+                "bg-popover text-popover-foreground z-50 min-w-[10rem] origin-[var(--radix-context-menu-content-transform-origin)] overflow-hidden rounded-lg border p-1 shadow-md",
+                className
+              )}
+              initial={{ opacity: 0, scale: 0.97, y: 4 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.98, y: 2 }}
+              transition={quickTransition}
+            >
+              {children}
+            </motion.div>
+          </ContextMenuPrimitive.Content>
+        ) : null}
+      </AnimatePresence>
     </ContextMenuPrimitive.Portal>
   )
 }

@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { ChevronRight, Folder, Inbox, Plus } from "lucide-react";
+import { motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
 import type { JarvixSessionSummary } from "../../../../protocol/session.ts";
+import { quickTransition, smoothTransition } from "../../motion.ts";
 import { Button } from "../ui/button.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible.tsx";
 import { SidebarSessionItem } from "./SidebarSessionItem.tsx";
@@ -59,7 +61,14 @@ export function SidebarSessionGroup({
                             className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-left text-sm font-medium text-foreground outline-none transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/50"
                             title={label}
                         >
-                            <ChevronRight className={`size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
+                            <motion.span
+                                aria-hidden="true"
+                                animate={{ rotate: open ? 90 : 0 }}
+                                transition={quickTransition}
+                                className="inline-flex shrink-0"
+                            >
+                                <ChevronRight className="size-3.5" />
+                            </motion.span>
                             <GroupIcon className="size-4 shrink-0" />
                             <span className="min-w-0 flex-1 truncate">{label}</span>
                         </button>
@@ -79,22 +88,36 @@ export function SidebarSessionGroup({
                     ) : null}
                 </div>
 
-                <CollapsibleContent>
-                    <div className="flex flex-col gap-0.5 py-0.5">
-                        {group.sessions.map((session) => (
-                            <SidebarSessionItem
-                                key={session.id}
-                                session={session}
-                                active={session.id === activeSessionId}
-                                busy={busy}
-                                onSelect={onSelectSession}
-                                onRename={onRenameSession}
-                                onAutoName={onAutoNameSession}
-                                onArchive={onArchiveSession}
-                                onRequestDelete={onRequestDeleteSession}
-                            />
-                        ))}
-                    </div>
+                <CollapsibleContent asChild>
+                    <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        transition={smoothTransition}
+                        className="overflow-hidden"
+                    >
+                        <div className="flex flex-col gap-0.5 py-0.5">
+                            {group.sessions.map((session) => (
+                                <motion.div
+                                    key={session.id}
+                                    layout="position"
+                                    initial={{ opacity: 0, y: -4 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={quickTransition}
+                                >
+                                    <SidebarSessionItem
+                                        session={session}
+                                        active={session.id === activeSessionId}
+                                        busy={busy}
+                                        onSelect={onSelectSession}
+                                        onRename={onRenameSession}
+                                        onAutoName={onAutoNameSession}
+                                        onArchive={onArchiveSession}
+                                        onRequestDelete={onRequestDeleteSession}
+                                    />
+                                </motion.div>
+                            ))}
+                        </div>
+                    </motion.div>
                 </CollapsibleContent>
             </section>
         </Collapsible>
