@@ -1,5 +1,3 @@
-import { appendBoundedOutput } from "./output.ts";
-
 export type ToolCallStatus = "pending" | "running" | "completed" | "timed_out" | "failed";
 
 export type GenericToolView = {
@@ -10,15 +8,10 @@ export type GenericToolView = {
     status: ToolCallStatus;
 };
 
-export type ToolCallViewBase = {
+type ToolCallViewBase = {
     kind: string;
     output: string;
     status: ToolCallStatus;
-};
-
-export type ToolCallOutputDelta = {
-    kind: string;
-    output: string;
 };
 
 export function createGenericToolCallViewData(
@@ -32,19 +25,6 @@ export function createGenericToolCallViewData(
         arguments: arguments_,
         output: "",
         status
-    };
-}
-
-export function appendToolViewOutput<TView extends ToolCallViewBase>(
-    data: TView,
-    delta: ToolCallOutputDelta
-): TView {
-    if (data.kind !== delta.kind) {
-        return data;
-    }
-    return {
-        ...data,
-        output: appendBoundedOutput(data.output, delta.output)
     };
 }
 

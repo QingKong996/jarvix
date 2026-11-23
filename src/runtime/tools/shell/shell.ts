@@ -57,7 +57,6 @@ import { startShellSession } from "./session-runner.ts";
 import {
     EXEC_COMMAND_TOOL,
     WRITE_STDIN_TOOL,
-    createShellToolCallViewData,
     type ShellWriteStdinView
 } from "./view.ts";
 

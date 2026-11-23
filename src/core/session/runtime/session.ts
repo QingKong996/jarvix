@@ -4,7 +4,6 @@ import type {
     LlmSystemMessage,
     LlmSystemNotice,
     LlmToolCallBlock,
-    LlmToolResultMessage,
     LlmUserMessage
 } from "../../../protocol/llm.ts";
 import type { LlmRequest } from "../../llm/index.ts";
@@ -40,7 +39,7 @@ import { ToolCallRunner } from "./tool-runner.ts";
 import type { SessionRuntime } from "./types.ts";
 
 export const MAX_TOOL_ROUNDS = 32;
-export const SHUTDOWN_TIMEOUT_MS = 10_000;
+const SHUTDOWN_TIMEOUT_MS = 10_000;
 export type { SessionRuntime } from "./types.ts";
 
 type TurnDecision = "continue" | "complete" | "failed";

@@ -133,8 +133,6 @@ export function useSessions() {
         setContextUsage,
         activeSessionIdRef,
         hasUserMessagesRef,
-        sessionContextRef,
-        sessionPermissionRef,
         permissionRequestRef,
         activateSession,
         clearPermissionRequest,
