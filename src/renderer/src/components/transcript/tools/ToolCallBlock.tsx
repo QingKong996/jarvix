@@ -22,13 +22,13 @@ type ToolCallBlockProps = {
 
 export function ToolCallBlock({ toolName, data, isError, endReason }: ToolCallBlockProps) {
     const { t } = useTranslation();
-    if (data.kind === "permission.request") {
-        return <PermissionRequestToolCall data={data} isError={isError} />;
-    }
     const active = endReason === null
         && (data.status === "pending" || data.status === "running");
     const streaming = active;
     const [open, setOpen] = useState(active || data.kind === "image.view_image");
+    if (data.kind === "permission.request") {
+        return <PermissionRequestToolCall data={data} isError={isError} />;
+    }
 
     return (
         <Collapsible open={open} onOpenChange={setOpen} className="flex flex-col gap-1.5">
