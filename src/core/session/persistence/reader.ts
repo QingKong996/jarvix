@@ -22,7 +22,10 @@ import {
 } from "./paths.ts";
 import {
     SESSION_HEADER_MAX_BYTES,
+    assignMessageRecordId,
+    isSessionCompactRecord,
     isSessionMessage,
+    messageRecordId,
     parseRecord,
     parseSessionMeta
 } from "./records.ts";
@@ -46,6 +49,7 @@ export function loadSession(
 
     const state: { meta: JarvixSessionMeta | null } = { meta: null };
     const messages: LlmMessage[] = [];
+    let messageOrdinal = 0;
     const pending: Buffer[] = [];
     const consume = (line: Buffer): void => {
         const record = parseRecord(line.toString("utf8"));
@@ -57,7 +61,16 @@ export function loadSession(
             return;
         }
         if (isSessionMessage(record)) {
+            assignMessageRecordId(
+                record.message,
+                record.id ?? `legacy:${messageOrdinal}`
+            );
+            messageOrdinal += 1;
             messages.push(record.message);
+            return;
+        }
+        if (isSessionCompactRecord(record)) {
+            applyCompaction(messages, record);
         }
     };
 
@@ -96,6 +109,35 @@ export function loadSession(
     }
 
     return state.meta?.id === id ? { meta: state.meta, messages } : null;
+}
+
+function applyCompaction(
+    messages: LlmMessage[],
+    record: {
+        id: string;
+        messageIds: readonly string[];
+        message: LlmMessage;
+    }
+): void {
+    if (record.messageIds.length === 0) {
+        return;
+    }
+    const positions: number[] = [];
+    for (const id of record.messageIds) {
+        const position = messages.findIndex(
+            (message) => messageRecordId(message) === id
+        );
+        if (position === -1) {
+            return;
+        }
+        positions.push(position);
+    }
+    const start = positions[0]!;
+    if (positions.some((position, index) => position !== start + index)) {
+        return;
+    }
+    assignMessageRecordId(record.message, record.id);
+    messages.splice(start, record.messageIds.length, record.message);
 }
 
 /** List session summaries newest first by their last message timestamp. */
@@ -276,6 +318,9 @@ function readLastMessageTimestamp(file: string): number | null {
                 if (isSessionMessage(record)) {
                     return record.message.timestamp;
                 }
+                if (isSessionCompactRecord(record)) {
+                    return record.message.timestamp;
+                }
             }
             if (separator === null) {
                 return null;
@@ -303,9 +348,9 @@ function readFirstUserPrompt(file: string): string | null {
         if (!isSessionMessage(record) || record.message.role !== "user") {
             return null;
         }
-        return record.message.context === "system-reminder"
-            ? null
-            : record.message.content;
+        return record.message.context === undefined
+            ? record.message.content
+            : null;
     };
 
     try {

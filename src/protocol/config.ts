@@ -17,4 +17,6 @@ export type JarvixConfig = {
     reasoning?: ReasoningLevel;
     language?: Language;
     theme?: Theme;
+    /** Remaining context headroom in tokens that triggers local compaction. */
+    contextCompactionThreshold?: number;
 };

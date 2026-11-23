@@ -135,7 +135,8 @@ function configSchema(defaults: ConfigDefaults) {
             selectedModel: modelSelectionSchema.optional(),
             reasoning: z.enum(REASONING_LEVELS).optional(),
             language: z.enum(SUPPORTED_LANGUAGES).catch(defaults.language),
-            theme: z.enum(SUPPORTED_THEMES).catch(defaults.theme)
+            theme: z.enum(SUPPORTED_THEMES).catch(defaults.theme),
+            contextCompactionThreshold: z.number().int().positive().optional()
         })
         .superRefine((config, context) => {
             const selection = config.selectedModel;
@@ -144,7 +145,14 @@ function configSchema(defaults: ConfigDefaults) {
             if (provider?.models.some((model) => model.id === selection.id)) return;
             context.addIssue({ code: "custom", path: ["selectedModel"], message: "Selected model is not configured" });
         })
-        .transform(({ language, theme, providers, selectedModel, reasoning }) => {
+        .transform(({
+            language,
+            theme,
+            providers,
+            selectedModel,
+            reasoning,
+            contextCompactionThreshold
+        }) => {
             const resolved = resolveConfiguredModel(providers, selectedModel);
             const nextSelection = resolved?.selection ?? selectedModel;
             const nextReasoning = resolved || reasoning
@@ -154,6 +162,9 @@ function configSchema(defaults: ConfigDefaults) {
                 ...(providers ? { providers } : {}),
                 ...(nextSelection ? { selectedModel: nextSelection } : {}),
                 ...(nextReasoning ? { reasoning: nextReasoning } : {}),
+                ...(contextCompactionThreshold !== undefined
+                    ? { contextCompactionThreshold }
+                    : {}),
                 language,
                 theme
             };

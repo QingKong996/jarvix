@@ -85,8 +85,8 @@ export type LlmUserMessage = {
     role: "user";
     content: string;
     timestamp: number;
-    /** Internal display marker for context appended as a user-role reminder. */
-    context?: "system-reminder";
+    /** Internal marker for user-role context such as reminders or compacted history. */
+    context?: "system-reminder" | "compact";
 };
 
 /**

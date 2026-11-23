@@ -259,6 +259,10 @@
         "general": {
             "language": "Language",
             "theme": "Theme",
+            "compactionThreshold": "Context compaction threshold",
+            "compactionThresholdDescription": "Trigger local compaction by remaining tokens. Leave blank to use the smaller of 10% of the context window or 64K.",
+            "compactionThresholdPlaceholder": "Auto",
+            "compactionThresholdInvalid": "The context compaction threshold must be a positive integer.",
             "themes": {
                 "dark": "Dark",
                 "light": "Light"

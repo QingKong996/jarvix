@@ -1,6 +1,9 @@
 import { expect, test } from "vitest";
 import type { LlmMessage } from "../../../protocol/llm.ts";
-import { estimateContextUsage } from "./context-usage.ts";
+import {
+    estimateContextUsage,
+    estimateMessageTokens
+} from "./context-usage.ts";
 
 test("estimates the full prompt including history and tool definitions", () => {
     const empty = estimateContextUsage({
@@ -96,6 +99,126 @@ test("ignores usage from aborted or failed assistant messages", () => {
     });
 
     expect(usage.estimatedTokens).toBe(12);
+});
+
+test("ignores provider usage recorded before the latest compact block", () => {
+    const messages: LlmMessage[] = [{
+        role: "user",
+        content: "x".repeat(3_500),
+        timestamp: 1
+    }, {
+        role: "assistant",
+        content: [{ type: "text", text: "reply" }],
+        provider: "test",
+        model: "test",
+        api: "test",
+        usage: {
+            inputTokens: 190_000,
+            outputTokens: 10_000,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            totalTokens: 200_000,
+            cost: 0
+        },
+        stopReason: "stop",
+        timestamp: 2
+    }, {
+        role: "user",
+        content: "<compact>\nsummary\n</compact>",
+        context: "compact",
+        timestamp: 3
+    }, {
+        role: "user",
+        content: "y".repeat(350),
+        timestamp: 4
+    }];
+    const fullPromptTokens = messages.reduce(
+        (total, message) => total + estimateMessageTokens(message),
+        0
+    );
+
+    const usage = estimateContextUsage({
+        contextWindow: 10_000,
+        messages
+    });
+
+    expect(usage.estimatedTokens).toBe(fullPromptTokens);
+    expect(usage.estimatedTokens).toBeLessThan(2_000);
+});
+
+test("uses provider usage recorded after the latest compact block", () => {
+    const usage = estimateContextUsage({
+        contextWindow: 1_000,
+        messages: [{
+            role: "user",
+            content: "<compact>\nsummary\n</compact>",
+            context: "compact",
+            timestamp: 1
+        }, {
+            role: "assistant",
+            content: [{ type: "text", text: "reply" }],
+            provider: "test",
+            model: "test",
+            api: "test",
+            usage: {
+                inputTokens: 90,
+                outputTokens: 30,
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+                totalTokens: 120,
+                cost: 0
+            },
+            stopReason: "stop",
+            timestamp: 2
+        }, {
+            role: "user",
+            content: "x".repeat(35),
+            timestamp: 3
+        }]
+    });
+
+    expect(usage.estimatedTokens).toBe(130);
+});
+
+test("ignores usage that predates the compact block in history order", () => {
+    const messages: LlmMessage[] = [{
+        role: "user",
+        content: "<compact>\nsummary\n</compact>",
+        context: "compact",
+        timestamp: 100
+    }, {
+        role: "assistant",
+        content: [{ type: "text", text: "reply" }],
+        provider: "test",
+        model: "test",
+        api: "test",
+        usage: {
+            inputTokens: 190_000,
+            outputTokens: 10_000,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            totalTokens: 200_000,
+            cost: 0
+        },
+        stopReason: "stop",
+        timestamp: 50
+    }, {
+        role: "user",
+        content: "y".repeat(350),
+        timestamp: 60
+    }];
+    const fullPromptTokens = messages.reduce(
+        (total, message) => total + estimateMessageTokens(message),
+        0
+    );
+
+    const usage = estimateContextUsage({
+        contextWindow: 10_000,
+        messages
+    });
+
+    expect(usage.estimatedTokens).toBe(fullPromptTokens);
+    expect(usage.estimatedTokens).toBeLessThan(2_000);
 });
 
 test("estimates images with pi-ai's context heuristic", () => {
