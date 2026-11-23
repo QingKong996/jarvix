@@ -1,5 +1,6 @@
 import type { LlmAdapter } from "./llm/index.ts";
 import { i18n } from "../i18n/index.ts";
+import { type JarvixLogger, noopLogger } from "./logger.ts";
 import type { JarvixConfig } from "../protocol/config.ts";
 import type { JarvixContextUsage } from "../protocol/context-usage.ts";
 import type { JarvixEvent, JarvixListener } from "../protocol/event.ts";
@@ -35,6 +36,7 @@ export type JarvixOptions = {
     sandboxPreflight?: SandboxPreflight;
     contextManagerFactory?: ContextManagerFactory;
     toolManagers?: readonly ToolManager[];
+    logger?: JarvixLogger;
 };
 
 export class Jarvix {
@@ -42,26 +44,43 @@ export class Jarvix {
     private config: JarvixConfig;
     private readonly llm: LlmAdapter;
     private readonly sessions: SessionManager;
+    private readonly logger: JarvixLogger;
 
     constructor(options: JarvixOptions) {
         this.config = options.config ?? {};
         this.llm = options.llm;
+        this.logger = options.logger ?? noopLogger;
         this.sessions = new SessionManager(
             options.sandboxPreflight,
             options.contextManagerFactory,
-            options.toolManagers
+            options.toolManagers,
+            this.logger
         );
+        this.logger.info("Jarvix runtime initialized", {
+            providerCount: this.config.providers?.length ?? 0,
+            selectedModel: selectedModelLabel(this.config)
+        });
     }
 
     setConfig(config: JarvixConfig): void {
         this.config = config;
+        this.logger.info("Jarvix configuration applied", {
+            providerCount: config.providers?.length ?? 0,
+            selectedModel: selectedModelLabel(config),
+            language: config.language
+        });
         for (const session of this.sessions.listLoaded()) {
             this.emitContextUsage(session);
         }
     }
 
     createProject(name: string, workingDirectories: readonly string[]): JarvixProject {
-        return createStoredProject(name, workingDirectories);
+        const project = createStoredProject(name, workingDirectories);
+        this.logger.info("Project created", {
+            projectId: project.id,
+            workingDirectoryCount: project.workingDirectories.length
+        });
+        return project;
     }
 
     listProjects(): JarvixProject[] {
@@ -170,20 +189,37 @@ export class Jarvix {
     }
 
     async autoNameSession(sessionId: string, firstPrompt?: string): Promise<string> {
+        const startedAt = performance.now();
         const { currentName, prompt } = this.sessions.namingContext(
             sessionId,
             firstPrompt
         );
         if (!prompt) {
+            this.logger.warn("Session auto-naming requires a prompt", {
+                sessionId
+            });
             throw new Error("The session has no user prompt to name");
         }
 
-        const name = await generateSessionName(this.llm, this.config, prompt);
-        const update = this.sessions.renameIfUnchanged(sessionId, currentName, name);
-        if (update.renamed) {
-            this.emit(sessionId, { type: "session.renamed", name: update.name });
+        try {
+            const name = await generateSessionName(this.llm, this.config, prompt);
+            const update = this.sessions.renameIfUnchanged(sessionId, currentName, name);
+            if (update.renamed) {
+                this.emit(sessionId, { type: "session.renamed", name: update.name });
+            }
+            this.logger.info("Session auto-naming completed", {
+                sessionId,
+                renamed: update.renamed,
+                durationMs: elapsedMs(startedAt)
+            });
+            return update.name;
+        } catch (error) {
+            this.logger.error("Session auto-naming failed", error, {
+                sessionId,
+                durationMs: elapsedMs(startedAt)
+            });
+            throw error;
         }
-        return update.name;
     }
 
     private emit(sessionId: string, event: JarvixEvent): void {
@@ -256,4 +292,13 @@ export class Jarvix {
     dispose(): void {
         this.sessions.dispose();
     }
+}
+
+function selectedModelLabel(config: JarvixConfig): string | null {
+    const selection = config.selectedModel;
+    return selection ? `${selection.provider}/${selection.id}` : null;
+}
+
+function elapsedMs(startedAt: number): number {
+    return Math.round((performance.now() - startedAt) * 10) / 10;
 }

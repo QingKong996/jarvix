@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { type JarvixLogger, noopLogger } from "../../core/logger.ts";
 import { modelDefinitionSchema, type ModelDefinition } from "../../protocol/providers.ts";
 import { readJsonResponse } from "./response-body.ts";
 
@@ -39,7 +40,8 @@ function apiKeyFor(request: z.infer<typeof requestSchema>): string | undefined {
 
 export async function syncProviderModels(
     payload: unknown,
-    requestModels: typeof fetch = fetch
+    requestModels: typeof fetch = fetch,
+    logger: JarvixLogger = noopLogger
 ): Promise<ModelDefinition[]> {
     const parsed = requestSchema.safeParse(payload);
     if (!parsed.success) throw new Error("Invalid provider model sync request");
@@ -71,5 +73,8 @@ export async function syncProviderModels(
         seen.add(id);
         models.push(model.data);
     }
+    logger.info("Provider models synchronized", {
+        modelCount: models.length
+    });
     return models;
 }

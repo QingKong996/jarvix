@@ -7,6 +7,7 @@ import {
     type SandboxProfileReadiness,
     type SandboxPreflightResult
 } from "../../core/permissions/sandbox-launch.ts";
+import { type JarvixLogger, noopLogger } from "../../core/logger.ts";
 import type { SandboxInstallOutcome, SandboxStatus } from "../../protocol/ipc.ts";
 
 type SandboxSetupServiceOptions = {
@@ -16,6 +17,7 @@ type SandboxSetupServiceOptions = {
     notifyRequired?: () => void;
     windowAvailable?: () => boolean;
     installStatusPollMs?: number;
+    logger?: JarvixLogger;
 };
 
 type PendingRequest = {
@@ -43,6 +45,7 @@ export class SandboxSetupService {
     private readonly notifyRequired: () => void;
     private readonly windowAvailable: () => boolean;
     private readonly installStatusPollMs: number;
+    private readonly logger: JarvixLogger;
     private pending: PendingRequest | null = null;
     private installRequest: Promise<SandboxInstallOutcome> | null = null;
 
@@ -53,10 +56,15 @@ export class SandboxSetupService {
         this.notifyRequired = options.notifyRequired ?? (() => undefined);
         this.windowAvailable = options.windowAvailable ?? (() => true);
         this.installStatusPollMs = options.installStatusPollMs ?? DEFAULT_INSTALL_STATUS_POLL_MS;
+        this.logger = options.logger ?? noopLogger;
     }
 
     async status(): Promise<SandboxStatus> {
         const result = await this.preflightSandbox();
+        this.logger.debug("Checked sandbox status", {
+            ready: result.ready,
+            warningCount: result.warnings.length
+        });
         return {
             ready: result.ready,
             warnings: [...result.warnings]
@@ -66,15 +74,21 @@ export class SandboxSetupService {
     async preflight(): Promise<SandboxPreflightResult> {
         const current = await this.preflightSandbox();
         if (current.ready) {
+            this.logger.debug("Sandbox preflight passed");
             return current;
         }
         if (!this.windowAvailable()) {
+            this.logger.warn("Sandbox preflight needs setup but no window is available", {
+                errorCount: current.errors.length,
+                warningCount: current.warnings.length
+            });
             return setupFailure(
                 current,
                 "The Jarvix window is not available to confirm Windows sandbox setup."
             );
         }
         if (this.pending) {
+            this.logger.debug("Reusing pending sandbox setup request");
             return this.pending.promise;
         }
 
@@ -87,10 +101,15 @@ export class SandboxSetupService {
             resolve: resolveRequest
         };
         this.notifyRequired();
+        this.logger.info("Sandbox setup is required", {
+            errorCount: current.errors.length,
+            warningCount: current.warnings.length
+        });
         return promise;
     }
 
     dismiss(): void {
+        this.logger.warn("Sandbox setup was dismissed");
         this.resolvePending(setupFailure(
             { ready: false, errors: [], warnings: [] },
             "Windows sandbox installation was not approved."
@@ -99,9 +118,11 @@ export class SandboxSetupService {
 
     async install(): Promise<SandboxInstallOutcome> {
         if (this.installRequest) {
+            this.logger.debug("Reusing pending sandbox installation");
             return this.installRequest;
         }
 
+        this.logger.info("Sandbox installation started");
         this.installRequest = this.runInstall().finally(() => {
             this.installRequest = null;
         });
@@ -123,6 +144,7 @@ export class SandboxSetupService {
                 throw new Error("Sandbox installation status polling stopped unexpectedly.");
             }
             if (settlement.kind === "ready") {
+                this.logger.info("Sandbox became ready while installation was running");
                 this.resolvePending(settlement.result);
                 return { status: "installed" };
             }
@@ -132,6 +154,7 @@ export class SandboxSetupService {
 
             const result = settlement.result;
             if (result.status === "cancelled") {
+                this.logger.warn("Sandbox installation was cancelled");
                 this.resolvePending(setupFailure(
                     { ready: false, errors: [], warnings: [] },
                     "Windows sandbox installation was cancelled at the UAC prompt."
@@ -142,14 +165,19 @@ export class SandboxSetupService {
             const next = await this.preflightSandbox();
             this.resolvePending(next);
             if (!next.ready) {
+                this.logger.warn("Sandbox installation finished but preflight still fails", {
+                    errors: next.errors
+                });
                 return {
                     status: "failed",
                     errors: [...next.errors]
                 };
             }
+            this.logger.info("Sandbox installation completed");
             return { status: "installed" };
         } catch (error) {
             const message = errorMessage(error);
+            this.logger.error("Sandbox installation failed", error);
             this.resolvePending(setupFailure(
                 { ready: false, errors: [], warnings: [] },
                 message

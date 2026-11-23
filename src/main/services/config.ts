@@ -12,6 +12,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
+import { type JarvixLogger, noopLogger } from "../../core/logger.ts";
 import {
     REASONING_LEVELS,
     modelSelectionSchema,
@@ -69,10 +70,25 @@ export function serializeConfig(config: JarvixConfig, defaults: ConfigDefaults =
     return configSchema(defaults).parse(config);
 }
 
-export function loadConfig(paths: ConfigPaths = configPaths(), defaults: ConfigDefaults = systemDefaults()): JarvixConfig {
+export function loadConfig(
+    paths: ConfigPaths = configPaths(),
+    defaults: ConfigDefaults = systemDefaults(),
+    logger: JarvixLogger = noopLogger
+): JarvixConfig {
     try {
         return parseConfig(JSON.parse(readConfigFile(paths.file)), defaults);
-    } catch {
+    } catch (error) {
+        const code = errorCode(error);
+        if (code === "ENOENT") {
+            logger.debug("Config file does not exist; using defaults", {
+                file: paths.file
+            });
+        } else {
+            logger.warn("Failed to load config; using defaults", {
+                file: paths.file,
+                reason: error instanceof Error ? error.message : String(error)
+            });
+        }
         return parseConfig({}, defaults);
     }
 }
@@ -173,6 +189,14 @@ function configSchema(defaults: ConfigDefaults) {
 
 function detectLanguage(locale: string): Language {
     return locale.toLowerCase().startsWith("zh") ? "zh" : "en";
+}
+
+function errorCode(error: unknown): string | undefined {
+    if (typeof error !== "object" || error === null || !("code" in error)) {
+        return undefined;
+    }
+    const code = (error as { code?: unknown }).code;
+    return typeof code === "string" ? code : undefined;
 }
 
 function formatConfigError(error: z.ZodError): string {
