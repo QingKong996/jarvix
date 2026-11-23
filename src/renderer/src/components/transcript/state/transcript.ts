@@ -2,9 +2,9 @@ import type {
     LlmAssistantMessage,
     LlmMessage,
     LlmSystemMessage
-} from "../../../../../llm/types.ts";
+} from "../../../../../protocol/llm.ts";
 import type { JarvixEvent } from "../../../../../protocol/event.ts";
-import { appendToolOutput } from "../../../../../core/tools/view.ts";
+import { appendToolOutput } from "../../../../../runtime/tools/view.ts";
 import { hydrateSession, systemTurn, toHistoryBlock } from "./history.ts";
 import { updateToolBlock } from "./tool-blocks.ts";
 import type {

@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import type { LlmMessage } from "../../../llm/types.ts";
+import type { LlmMessage } from "../../../protocol/llm.ts";
 import {
     permissionModeOrDefault,
     type PermissionMode

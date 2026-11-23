@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { unlinkSync } from "node:fs";
 import { i18n } from "../../../i18n/index.ts";
-import type { LlmMessage } from "../../../llm/types.ts";
+import type { LlmMessage } from "../../../protocol/llm.ts";
 import {
     DEFAULT_PERMISSION_MODE,
     permissionModeSchema,

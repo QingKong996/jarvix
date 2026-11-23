@@ -2,7 +2,7 @@ import type {
     LlmMessage,
     LlmSystemMessage,
     LlmUserMessage
-} from "../../../llm/types.ts";
+} from "../../../protocol/llm.ts";
 import type { PermissionMode } from "../../../protocol/permission.ts";
 
 export const SYSTEM_PROMPT = `Current operating system: ${process.platform}.`;

@@ -9,10 +9,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, test, vi } from "vitest";
-import type { LlmAdapter } from "../../llm/index.ts";
-import type { LlmAssistantMessage, LlmModelInfo, LlmStreamEvent } from "../../llm/types.ts";
+import type { LlmAdapter } from "../llm/index.ts";
+import type { LlmAssistantMessage, LlmModelInfo, LlmStreamEvent } from "../../protocol/llm.ts";
 import { providerConfigSchema } from "../../protocol/providers.ts";
-import { APPLY_PATCH_TOOL } from "../tools/index.ts";
+import { APPLY_PATCH_TOOL } from "../../runtime/tools/index.ts";
 import { SessionManager } from "./manager.ts";
 
 const home = vi.hoisted(() => ({ path: "" }));

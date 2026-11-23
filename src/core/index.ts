@@ -1,4 +1,4 @@
-import { createLlm, type LlmAdapter } from "../llm/index.ts";
+import type { LlmAdapter } from "./llm/index.ts";
 import { i18n } from "../i18n/index.ts";
 import type { JarvixConfig } from "../protocol/config.ts";
 import type { JarvixContextUsage } from "../protocol/context-usage.ts";
@@ -17,11 +17,12 @@ import {
     type PermissionMode
 } from "../protocol/permission.ts";
 import type { SandboxPreflight } from "./permissions/sandbox-launch.ts";
+import type { ToolManager } from "../runtime/tools/tool-manager.ts";
 import {
     createProject as createStoredProject,
     listProjects as listStoredProjects,
     loadProject
-} from "../project/store.ts";
+} from "./project/store.ts";
 import { workingDirectoriesFor } from "./session/directories.ts";
 import { SessionManager } from "./session/manager.ts";
 import type { ContextManagerFactory } from "./session/runtime/context-manager.ts";
@@ -36,12 +37,19 @@ export type {
     ContextManager,
     ContextManagerFactory
 } from "./session/runtime/context-manager.ts";
+export type {
+    Tool,
+    ToolExecutionContext,
+    ToolManager,
+    ToolManagerContext
+} from "../runtime/tools/tool-manager.ts";
 
 export type JarvixOptions = {
-    llm?: LlmAdapter;
+    llm: LlmAdapter;
     config?: JarvixConfig;
     sandboxPreflight?: SandboxPreflight;
     contextManagerFactory?: ContextManagerFactory;
+    toolManagers?: readonly ToolManager[];
 };
 
 export class Jarvix {
@@ -50,12 +58,13 @@ export class Jarvix {
     private readonly llm: LlmAdapter;
     private readonly sessions: SessionManager;
 
-    constructor(options: JarvixOptions = {}) {
+    constructor(options: JarvixOptions) {
         this.config = options.config ?? {};
-        this.llm = options.llm ?? createLlm(() => this.config.providers);
+        this.llm = options.llm;
         this.sessions = new SessionManager(
             options.sandboxPreflight,
-            options.contextManagerFactory
+            options.contextManagerFactory,
+            options.toolManagers
         );
     }
 
@@ -156,6 +165,19 @@ export class Jarvix {
         return this.sessions.respondPermission(sessionId, requestId, approved);
     }
 
+    async registerToolManager(manager: ToolManager): Promise<void> {
+        await this.sessions.registerToolManager(manager);
+        this.emitLoadedContextUsage();
+    }
+
+    async unregisterToolManager(managerId: string): Promise<boolean> {
+        try {
+            return await this.sessions.unregisterToolManager(managerId);
+        } finally {
+            this.emitLoadedContextUsage();
+        }
+    }
+
     renameSession(sessionId: string, name: string): string {
         const renamed = this.sessions.rename(sessionId, sessionNameSchema.parse(name));
         this.emit(sessionId, { type: "session.renamed", name: renamed });
@@ -208,6 +230,12 @@ export class Jarvix {
         const usage = this.contextUsageFor(session);
         if (usage) {
             this.emit(session.meta.id, { type: "context.usage", usage });
+        }
+    }
+
+    private emitLoadedContextUsage(): void {
+        for (const session of this.sessions.listLoaded()) {
+            this.emitContextUsage(session);
         }
     }
 

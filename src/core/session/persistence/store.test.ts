@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, expect, test, vi } from "vitest";
-import type { LlmAssistantMessage, LlmUserMessage } from "../../../llm/types.ts";
+import type { LlmAssistantMessage, LlmUserMessage } from "../../../protocol/llm.ts";
 import { DEFAULT_PERMISSION_MODE } from "../../../protocol/permission.ts";
 import type { JarvixSessionMeta } from "../../../protocol/session.ts";
 import {

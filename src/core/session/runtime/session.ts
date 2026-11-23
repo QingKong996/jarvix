@@ -1,13 +1,13 @@
 import type {
     LlmAssistantMessage,
     LlmMessage,
-    LlmRequest,
     LlmSystemMessage,
     LlmSystemNotice,
     LlmToolCallBlock,
     LlmToolResultMessage,
     LlmUserMessage
-} from "../../../llm/index.ts";
+} from "../../../protocol/llm.ts";
+import type { LlmRequest } from "../../llm/index.ts";
 import type { JarvixContextUsage } from "../../../protocol/context-usage.ts";
 import type { JarvixProviderContext } from "../../../protocol/provider-context.ts";
 import type {
@@ -20,9 +20,10 @@ import {
     resolveReasoningLevel
 } from "../../../protocol/providers.ts";
 import {
-    createDefaultTools,
+    type ToolManager,
     type ToolExecutor
-} from "../../tools/index.ts";
+} from "../../../runtime/tools/index.ts";
+import { createDefaultTools } from "../../../runtime/tools/index.ts";
 import { SessionPermissions } from "../../permissions/session-permissions.ts";
 import {
     createDefaultContextManager,
@@ -224,6 +225,14 @@ export class Session {
 
     respondPermission(requestId: string, decision: PermissionDecision): boolean {
         return this.permissions.respond(requestId, decision);
+    }
+
+    registerToolManager(manager: ToolManager): void {
+        this.toolRunner.registerToolManager(manager);
+    }
+
+    async unregisterToolManager(managerId: string): Promise<void> {
+        await this.toolRunner.unregisterToolManager(managerId);
     }
 
     private async takeTurn(

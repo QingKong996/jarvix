@@ -1,5 +1,5 @@
 import type { JarvixSessionContext } from "../../protocol/session.ts";
-import { loadProject } from "../../project/store.ts";
+import { loadProject } from "../project/store.ts";
 
 type SessionLocation = Pick<JarvixSessionContext, "projectId" | "workingDirectory">;
 

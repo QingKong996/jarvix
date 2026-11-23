@@ -1,10 +1,10 @@
 import { expect, test } from "vitest";
 import type { JarvixEvent } from "../../../protocol/event.ts";
-import type { ToolTaskSnapshot, ToolTaskState } from "../../../core/tools/shared/types.ts";
+import type { ToolTaskSnapshot, ToolTaskState } from "../../../runtime/tools/types.ts";
 import {
     MAX_TOOL_OUTPUT_CHARS,
     OUTPUT_TRUNCATION_NOTICE
-} from "../../../core/tools/shared/output.ts";
+} from "../../../runtime/tools/output.ts";
 import {
     backgroundTasksFor,
     clearBackgroundTasks,

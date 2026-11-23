@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, truncate, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, test, vi } from "vitest";
-import { parseModelsDevCatalog } from "../../llm/catalog.ts";
+import { parseModelsDevCatalog } from "./models-dev.ts";
 
 const readFileCalls = vi.hoisted(() => [] as string[]);
 

@@ -1,4 +1,4 @@
-import type { LlmAdapter } from "../../../llm/index.ts";
+import type { LlmAdapter } from "../../llm/index.ts";
 import type { JarvixConfig } from "../../../protocol/config.ts";
 import type { JarvixEvent } from "../../../protocol/event.ts";
 

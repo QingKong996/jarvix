@@ -4,7 +4,7 @@ import { cn } from "cn";
 import type {
     ShellExecCommandView,
     ShellWriteStdinView
-} from "../../../../../core/tools/view.ts";
+} from "../../../../../runtime/tools/view.ts";
 
 type ShellToolCallProps = {
     data: ShellExecCommandView | ShellWriteStdinView;

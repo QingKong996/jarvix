@@ -1,7 +1,7 @@
 import { mkdir, open, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
-import { parseModelsDevCatalog } from "../../llm/catalog.ts";
+import { parseModelsDevCatalog } from "./models-dev.ts";
 import { providerCatalogEntrySchema, type ModelCatalog } from "../../protocol/providers.ts";
 import { readJsonResponse } from "./response-body.ts";
 

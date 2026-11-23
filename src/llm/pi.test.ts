@@ -8,7 +8,7 @@ import {
 import type { Context } from "@earendil-works/pi-ai";
 import { expect, test } from "vitest";
 import { createPiAdapter } from "./pi.ts";
-import type { LlmAssistantMessage, LlmMessage, LlmStreamEvent } from "./types.ts";
+import type { LlmAssistantMessage, LlmMessage, LlmStreamEvent } from "../protocol/llm.ts";
 
 function createFixture() {
     const faux = fauxProvider();

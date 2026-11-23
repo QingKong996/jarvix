@@ -3,7 +3,7 @@ import { ChevronRight, ShieldAlert } from "lucide-react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
-import type { PermissionRequestView } from "../../../../../core/tools/view.ts";
+import type { PermissionRequestView } from "../../../../../runtime/tools/view.ts";
 import {
     Collapsible,
     CollapsibleContent,

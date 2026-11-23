@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import type { LlmMessage } from "../../../llm/types.ts";
+import type { LlmMessage } from "../../../protocol/llm.ts";
 import type {
     JarvixSession,
     JarvixSessionMeta,

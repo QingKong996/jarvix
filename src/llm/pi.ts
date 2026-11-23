@@ -17,7 +17,7 @@ import type {
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import type { ProviderConfig } from "../protocol/providers.ts";
 import { configuredModels } from "./providers.ts";
-import type { LlmAdapter, LlmRequest } from "./adapter.ts";
+import type { LlmAdapter, LlmRequest } from "../core/llm/adapter.ts";
 import type {
     LlmAssistantMessage,
     LlmContentBlock,
@@ -26,7 +26,7 @@ import type {
     LlmStreamEvent,
     LlmToolCallBlock,
     LlmUsage
-} from "./types.ts";
+} from "../protocol/llm.ts";
 
 export type PiAdapterOptions = {
     /** Model collection to talk to. Defaults to every built-in pi provider. */
