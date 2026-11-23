@@ -9,6 +9,7 @@ import { ApplyPatchDiff } from "./ApplyPatchDiff.tsx";
 import { ShellToolCall } from "./ShellToolCall.tsx";
 import { LocalTimeToolCall, SleepToolCall } from "./TimeToolCall.tsx";
 import { PermissionRequestToolCall } from "./PermissionRequestToolCall.tsx";
+import { ViewImageToolCall } from "./ViewImageToolCall.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -27,7 +28,7 @@ export function ToolCallBlock({ toolName, data, isError, endReason }: ToolCallBl
     const active = endReason === null
         && (data.status === "pending" || data.status === "running");
     const streaming = active;
-    const [open, setOpen] = useState(active);
+    const [open, setOpen] = useState(active || data.kind === "image.view_image");
 
     return (
         <Collapsible open={open} onOpenChange={setOpen} className="flex flex-col gap-1.5">
@@ -49,6 +50,8 @@ export function ToolCallBlock({ toolName, data, isError, endReason }: ToolCallBl
                         <LocalTimeToolCall data={data} />
                     ) : data.kind === "time.sleep" ? (
                         <SleepToolCall data={data} />
+                    ) : data.kind === "image.view_image" ? (
+                        <ViewImageToolCall data={data} />
                     ) : data.kind === "generic" ? (
                         open ? (
                             <pre className="font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-muted-foreground">
@@ -108,6 +111,9 @@ function toolLabel(toolName: string, data: ToolCallViewData, t: TFunction<"trans
     }
     if (data.kind === "time.sleep") {
         return t("tools.sleep");
+    }
+    if (data.kind === "image.view_image") {
+        return t("tools.viewImage");
     }
     return `${t("tools.generic")} · ${toolName}`;
 }

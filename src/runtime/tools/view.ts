@@ -37,6 +37,12 @@ import {
     type SleepView,
     type TimeToolCallViewData
 } from "./time/view.ts";
+import {
+    createViewImageToolCallViewData,
+    isViewImageView,
+    VIEW_IMAGE_TOOL,
+    type ViewImageView
+} from "./view-image/view.ts";
 
 export {
     APPLY_PATCH_TOOL,
@@ -44,6 +50,7 @@ export {
     LOCAL_TIME_TOOL,
     REQUEST_PERMISSION_TOOL,
     SLEEP_TOOL,
+    VIEW_IMAGE_TOOL,
     WRITE_STDIN_TOOL
 };
 export type {
@@ -54,7 +61,8 @@ export type {
     ShellExecCommandView,
     ShellWriteStdinView,
     SleepView,
-    ToolCallStatus
+    ToolCallStatus,
+    ViewImageView
 };
 
 export type ToolCallViewData =
@@ -62,6 +70,7 @@ export type ToolCallViewData =
     | ApplyPatchView
     | TimeToolCallViewData
     | PermissionRequestView
+    | ViewImageView
     | GenericToolView;
 
 export type ToolCallOutputDelta =
@@ -72,14 +81,16 @@ const toolCallViewFactories = [
     createShellToolCallViewData,
     createApplyPatchToolCallViewData,
     createTimeToolCallViewData,
-    createPermissionRequestToolCallViewData
+    createPermissionRequestToolCallViewData,
+    createViewImageToolCallViewData
 ];
 
 const toolCallViewValidators = [
     isShellToolCallViewData,
     isApplyPatchView,
     isTimeToolCallViewData,
-    isPermissionRequestView
+    isPermissionRequestView,
+    isViewImageView
 ];
 
 export function createToolCallViewData(
@@ -104,7 +115,10 @@ export function appendToolOutput(
 }
 
 export function toToolResultDetails(data: ToolCallViewData): LlmJsonObject {
-    return data as unknown as LlmJsonObject;
+    const persisted = data.kind === "image.view_image"
+        ? { ...data, imageUrl: "" }
+        : data;
+    return persisted as unknown as LlmJsonObject;
 }
 
 export function isToolCallViewData(value: unknown): value is ToolCallViewData {

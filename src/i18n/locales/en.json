@@ -166,6 +166,7 @@
         "execCommand": "Run command",
         "writeStdin": "Write to shell",
         "applyPatch": "Edit files",
+        "viewImage": "View image",
         "localTime": "Local time",
         "sleep": "Wait",
         "localTimeDetails": {

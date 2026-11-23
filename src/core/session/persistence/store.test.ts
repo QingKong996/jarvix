@@ -11,7 +11,11 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, expect, test, vi } from "vitest";
-import type { LlmAssistantMessage, LlmUserMessage } from "../../../protocol/llm.ts";
+import type {
+    LlmAssistantMessage,
+    LlmToolResultMessage,
+    LlmUserMessage
+} from "../../../protocol/llm.ts";
 import { DEFAULT_PERMISSION_MODE } from "../../../protocol/permission.ts";
 import type { JarvixSessionMeta } from "../../../protocol/session.ts";
 import {
@@ -178,6 +182,35 @@ test("round-trips context reminder and environment markers", () => {
     appendSessionMessage(created.meta.id, reminder, directory);
 
     expect(loadSession(created.meta.id, directory)?.messages).toEqual([environment, reminder]);
+});
+
+test("round-trips image tool result content", () => {
+    const directory = join(base, "tool-result-image");
+    const created = createSession({ projectId: PROJECT_ID }, SESSION_NAME, directory);
+    const result: LlmToolResultMessage = {
+        role: "toolResult",
+        toolCallId: "call-image",
+        toolName: "view_image",
+        content: [{
+            type: "image",
+            data: "aW1hZ2U=",
+            mimeType: "image/png"
+        }],
+        details: {
+            kind: "image.view_image",
+            path: "image.png",
+            mimeType: "image/png",
+            imageUrl: "",
+            output: "",
+            status: "completed"
+        },
+        isError: false,
+        timestamp: 4
+    };
+
+    appendSessionMessage(created.meta.id, result, directory);
+
+    expect(loadSession(created.meta.id, directory)?.messages).toEqual([result]);
 });
 
 test("loadSession ignores corrupt and blank lines between valid records", () => {

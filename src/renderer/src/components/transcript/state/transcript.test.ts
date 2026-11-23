@@ -273,6 +273,49 @@ test("hydrates and updates shell tool output", () => {
     });
 });
 
+test("restores view_image data URLs from persisted image content", () => {
+    const hydrated = transcriptReducer(initialTranscriptState, {
+        type: "session.loaded",
+        messages: [{
+            ...message,
+            content: [{
+                type: "toolCall",
+                id: "call-image",
+                name: "view_image",
+                arguments: { path: "pixel.png" }
+            }],
+            stopReason: "toolUse"
+        }, {
+            role: "toolResult",
+            toolCallId: "call-image",
+            toolName: "view_image",
+            content: [{
+                type: "image",
+                data: "aW1hZ2U=",
+                mimeType: "image/png"
+            }],
+            details: {
+                kind: "image.view_image",
+                path: "pixel.png",
+                mimeType: "image/png",
+                imageUrl: "",
+                output: "",
+                status: "completed"
+            },
+            isError: false,
+            timestamp: 2
+        }]
+    });
+
+    expect(hydrated.committed[0]?.blocks[0]).toMatchObject({
+        type: "tool",
+        data: {
+            kind: "image.view_image",
+            imageUrl: "data:image/png;base64,aW1hZ2U="
+        }
+    });
+});
+
 test("bounds streamed shell output retained by the transcript", () => {
     const toolCall = {
         type: "toolCall" as const,

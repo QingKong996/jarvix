@@ -55,6 +55,14 @@ export type LlmThinkingBlock = {
     redacted?: boolean;
 };
 
+/** Image payload accepted by pi-ai's tool result content. */
+export type LlmImageContent = {
+    type: "image";
+    /** Base64-encoded image bytes without a data URL prefix. */
+    data: string;
+    mimeType: string;
+};
+
 export type LlmToolDefinition = {
     name: string;
     description: string;
@@ -71,6 +79,7 @@ export type LlmToolCallBlock = {
 };
 
 export type LlmContentBlock = LlmTextBlock | LlmThinkingBlock | LlmToolCallBlock;
+export type LlmToolResultContent = LlmTextBlock | LlmImageContent;
 
 export type LlmUserMessage = {
     role: "user";
@@ -103,7 +112,8 @@ export type LlmToolResultMessage = {
     role: "toolResult";
     toolCallId: string;
     toolName: string;
-    content: string;
+    /** Legacy text-only results stay readable; new results may also carry images. */
+    content: string | LlmToolResultContent[];
     details?: LlmJsonObject;
     isError: boolean;
     timestamp: number;
@@ -144,3 +154,14 @@ export type LlmStreamEvent =
     | { type: "toolCall.end"; index: number; toolCall: LlmToolCallBlock }
     | { type: "done"; message: LlmAssistantMessage }
     | { type: "error"; message: LlmAssistantMessage };
+
+export function toolResultContentText(
+    content: LlmToolResultMessage["content"]
+): string {
+    if (typeof content === "string") {
+        return content;
+    }
+    return content
+        .map((block) => block.type === "text" ? block.text : `[Image: ${block.mimeType}]`)
+        .join("\n");
+}

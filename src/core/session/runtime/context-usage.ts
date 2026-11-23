@@ -2,11 +2,13 @@ import type {
     LlmContentBlock,
     LlmMessage,
     LlmToolDefinition,
+    LlmToolResultContent,
     LlmUsage
 } from "../../../protocol/llm.ts";
 import type { JarvixContextUsage } from "../../../protocol/context-usage.ts";
 
 const CHARS_PER_TOKEN = 3.5;
+const ESTIMATED_IMAGE_CHARS = 4800;
 // Session history is append-only, so each message's estimate can be reused.
 const messageTokenCache = new WeakMap<LlmMessage, number>();
 
@@ -76,8 +78,19 @@ function estimateMessageTokensUncached(message: LlmMessage): number {
     }
 }
 
-function estimateToolResultContentTokens(content: string): number {
-    return estimateTextTokens(content);
+function estimateToolResultContentTokens(
+    content: string | LlmToolResultContent[]
+): number {
+    if (typeof content === "string") {
+        return estimateTextTokens(content);
+    }
+    let characters = 0;
+    for (const block of content) {
+        characters += block.type === "text"
+            ? block.text.length
+            : ESTIMATED_IMAGE_CHARS;
+    }
+    return Math.ceil(characters / CHARS_PER_TOKEN);
 }
 
 function estimateAssistantContentTokens(blocks: readonly LlmContentBlock[]): number {

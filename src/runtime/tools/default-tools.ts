@@ -3,6 +3,10 @@ import { BackgroundTaskManager } from "./shell/background-task-manager.ts";
 import { ShellTool, type ShellToolOptions } from "./shell/shell.ts";
 import { LocalTimeTool, SleepTool } from "./time/time.ts";
 import {
+    ViewImageTool,
+    type ViewImageToolOptions
+} from "./view-image/view-image.ts";
+import {
     RequestPermissionTool,
     type RequestPermissionToolOptions
 } from "./request-permission/request-permission.ts";
@@ -13,6 +17,7 @@ export type DefaultToolsOptions = {
     shell?: ShellToolOptions;
     applyPatch?: ApplyPatchToolOptions;
     requestPermission?: RequestPermissionToolOptions;
+    viewImage?: ViewImageToolOptions;
 };
 
 /** Build the tool set available to a standard Jarvix conversation. */
@@ -22,6 +27,7 @@ export function createDefaultTools(options: DefaultToolsOptions = {}): ToolExecu
         new ApplyPatchTool(options.applyPatch),
         new RequestPermissionTool(options.requestPermission),
         new LocalTimeTool(),
-        new SleepTool()
+        new SleepTool(),
+        new ViewImageTool(options.viewImage)
     ]);
 }

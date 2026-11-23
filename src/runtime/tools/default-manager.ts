@@ -37,6 +37,10 @@ export function createDefaultToolManager(
                 },
                 requestPermission: {
                     sandboxPolicy
+                },
+                viewImage: {
+                    defaultCwd: () => context.workingDirectories()[0],
+                    sandboxPolicy
                 }
             }))];
         }

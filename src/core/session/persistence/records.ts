@@ -120,7 +120,7 @@ function isLlmMessage(value: unknown): value is LlmMessage {
         return (
             typeof value.toolCallId === "string" &&
             typeof value.toolName === "string" &&
-            typeof value.content === "string" &&
+            isToolResultContent(value.content) &&
             typeof value.isError === "boolean"
         );
     }
@@ -144,6 +144,27 @@ function isLlmMessage(value: unknown): value is LlmMessage {
         );
     }
     return false;
+}
+
+function isToolResultContent(value: unknown): boolean {
+    if (typeof value === "string") {
+        return true;
+    }
+    if (!Array.isArray(value)) {
+        return false;
+    }
+    return value.every((block) => {
+        if (!isRecord(block)) {
+            return false;
+        }
+        if (block.type === "text") {
+            return typeof block.text === "string";
+        }
+        if (block.type === "image") {
+            return typeof block.data === "string" && typeof block.mimeType === "string";
+        }
+        return false;
+    });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

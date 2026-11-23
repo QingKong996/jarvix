@@ -3,6 +3,7 @@ import type {
     AssistantMessage,
     AssistantMessageEvent,
     Context,
+    ImageContent,
     JsonObject,
     JsonValue,
     Message,
@@ -24,6 +25,7 @@ import type {
     LlmMessage,
     LlmModelInfo,
     LlmStreamEvent,
+    LlmToolResultContent,
     LlmToolCallBlock,
     LlmUsage
 } from "../protocol/llm.ts";
@@ -111,7 +113,7 @@ function toPiMessage(message: LlmMessage): Message {
             role: "toolResult",
             toolCallId: message.toolCallId,
             toolName: message.toolName,
-            content: [{ type: "text", text: message.content }],
+            content: toPiToolResultContent(message.content),
             details: message.details as JsonValue | undefined,
             isError: message.isError,
             timestamp: message.timestamp
@@ -138,6 +140,24 @@ function toPiMessage(message: LlmMessage): Message {
         responseModel: message.responseModel,
         errorMessage: message.errorMessage
     };
+}
+
+function toPiToolResultContent(
+    content: string | LlmToolResultContent[]
+): (TextContent | ImageContent)[] {
+    if (typeof content === "string") {
+        return [{ type: "text", text: content }];
+    }
+    return content.map((block) => block.type === "image"
+        ? {
+            type: "image",
+            data: block.data,
+            mimeType: block.mimeType
+        }
+        : {
+            type: "text",
+            text: block.text
+        });
 }
 
 function toPiContentBlock(block: LlmContentBlock): TextContent | ThinkingContent | ToolCall {
