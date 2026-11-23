@@ -1,4 +1,4 @@
-import type { LlmMessage } from "../../../llm/types.ts";
+import type { LlmMessage } from "../../../protocol/llm.ts";
 import { appendSessionMessage } from "../persistence/store.ts";
 
 const PERSIST_ATTEMPTS = 2;

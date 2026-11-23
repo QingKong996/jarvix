@@ -2,7 +2,7 @@ import type {
     LlmContentBlock,
     LlmMessage,
     LlmToolDefinition
-} from "../../../llm/types.ts";
+} from "../../../protocol/llm.ts";
 import type { JarvixContextUsage } from "../../../protocol/context-usage.ts";
 
 const MESSAGE_OVERHEAD_TOKENS = 4;

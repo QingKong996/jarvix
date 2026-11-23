@@ -2,13 +2,13 @@ import type {
     LlmContentBlock,
     LlmMessage,
     LlmSystemMessage
-} from "../../../../../llm/types.ts";
-import type { ToolCallEndReason } from "../../../../../core/tools/shared/types.ts";
+} from "../../../../../protocol/llm.ts";
+import type { ToolCallEndReason } from "../../../../../runtime/tools/types.ts";
 import {
     createToolCallViewData,
     isToolCallViewData,
     type ToolCallViewData
-} from "../../../../../core/tools/view.ts";
+} from "../../../../../runtime/tools/view.ts";
 import type { CommittedBlock, CommittedTurn } from "./types.ts";
 
 type HistoryToolCallLocation = {

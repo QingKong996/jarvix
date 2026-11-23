@@ -1,5 +1,5 @@
 import type { Jarvix } from "../core/index.ts";
-import { appendBoundedOutput } from "../core/tools/shared/output.ts";
+import { appendBoundedOutput } from "../runtime/tools/output.ts";
 import type { JarvixEvent } from "../protocol/event.ts";
 import { IPC_CHANNELS, type JarvixEventBatch } from "../protocol/ipc.ts";
 import type { MainWindowController } from "./window.ts";

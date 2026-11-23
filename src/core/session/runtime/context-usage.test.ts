@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import type { LlmMessage } from "../../../llm/types.ts";
+import type { LlmMessage } from "../../../protocol/llm.ts";
 import { estimateContextUsage } from "./context-usage.ts";
 
 test("estimates the full prompt including history and tool definitions", () => {

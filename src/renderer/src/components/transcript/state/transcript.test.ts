@@ -1,9 +1,9 @@
 import { expect, test, vi } from "vitest";
-import type { LlmAssistantMessage } from "../../../../../llm/types.ts";
+import type { LlmAssistantMessage } from "../../../../../protocol/llm.ts";
 import {
     MAX_TOOL_OUTPUT_CHARS,
     OUTPUT_TRUNCATION_NOTICE
-} from "../../../../../core/tools/shared/output.ts";
+} from "../../../../../runtime/tools/output.ts";
 import { initialTranscriptState, transcriptReducer } from "./transcript.ts";
 
 const message: LlmAssistantMessage = {

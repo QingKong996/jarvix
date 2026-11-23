@@ -8,8 +8,15 @@ import { sessionContextFrom } from "../../protocol/session.ts";
 import type { PermissionMode } from "../../protocol/permission.ts";
 import type { SandboxPreflight } from "../permissions/sandbox-launch.ts";
 import { SessionPermissions } from "../permissions/session-permissions.ts";
-import { createSandboxPolicy } from "../permissions/sandbox.ts";
-import { createDefaultTools, ShellSessionBudget } from "../tools/index.ts";
+import {
+    ToolManagerRegistry,
+    type ToolManager
+} from "../../runtime/tools/index.ts";
+import {
+    createDefaultToolManager,
+    DEFAULT_TOOL_MANAGER_ID,
+    ShellSessionBudget
+} from "../../runtime/tools/index.ts";
 import {
     createDefaultContextManager,
     type ContextManagerFactory
@@ -29,7 +36,7 @@ import {
     updateSessionPermission as updateStoredSessionPermission,
     updateSessionStatus
 } from "./persistence/store.ts";
-import type { LlmUserMessage } from "../../llm/types.ts";
+import type { LlmUserMessage } from "../../protocol/llm.ts";
 
 /** Owns the session instances currently loaded by the app. */
 export class SessionManager {
@@ -37,14 +44,20 @@ export class SessionManager {
     private readonly permissions = new Map<string, SessionPermissions>();
     private readonly sandboxPreflight?: SandboxPreflight;
     private readonly contextManagerFactory: ContextManagerFactory;
+    private readonly toolManagers = new Map<string, ToolManager>();
     private readonly shellSessionBudget = new ShellSessionBudget();
 
     constructor(
         sandboxPreflight?: SandboxPreflight,
-        contextManagerFactory: ContextManagerFactory = createDefaultContextManager
+        contextManagerFactory: ContextManagerFactory = createDefaultContextManager,
+        toolManagers: readonly ToolManager[] = []
     ) {
         this.sandboxPreflight = sandboxPreflight;
         this.contextManagerFactory = contextManagerFactory;
+        for (const manager of toolManagers) {
+            this.assertToolManagerAvailable(manager.id);
+            this.toolManagers.set(manager.id, manager);
+        }
     }
 
     create(
@@ -149,6 +162,49 @@ export class SessionManager {
         );
     }
 
+    async registerToolManager(manager: ToolManager): Promise<void> {
+        this.assertToolManagerAvailable(manager.id);
+        this.toolManagers.set(manager.id, manager);
+
+        const registered: Session[] = [];
+        try {
+            for (const session of this.sessions.values()) {
+                session.registerToolManager(manager);
+                registered.push(session);
+            }
+        } catch (error) {
+            this.toolManagers.delete(manager.id);
+            await Promise.allSettled(
+                registered.map((session) => session.unregisterToolManager(manager.id))
+            );
+            manager.dispose?.();
+            throw error;
+        }
+    }
+
+    async unregisterToolManager(managerId: string): Promise<boolean> {
+        const manager = this.toolManagers.get(managerId);
+        if (!manager) {
+            return false;
+        }
+        this.toolManagers.delete(managerId);
+
+        const results = await Promise.allSettled(
+            [...this.sessions.values()].map(
+                (session) => session.unregisterToolManager(managerId)
+            )
+        );
+        manager.dispose?.();
+
+        const failed = results.find(
+            (result): result is PromiseRejectedResult => result.status === "rejected"
+        );
+        if (failed) {
+            throw failed.reason;
+        }
+        return true;
+    }
+
     rename(id: string, name: string): string {
         const meta = updateSessionName(id, name);
         const session = this.sessions.get(id);
@@ -211,6 +267,7 @@ export class SessionManager {
         );
         this.sessions.clear();
         this.disposePermissions();
+        this.disposeToolManagers();
         const failed = results.find(
             (result): result is PromiseRejectedResult => result.status === "rejected"
         );
@@ -225,37 +282,44 @@ export class SessionManager {
         }
         this.sessions.clear();
         this.disposePermissions();
+        this.disposeToolManagers();
     }
 
     private track(session: JarvixSession): Session {
-        const permissions = this.permissions.get(session.meta.id)
+        const existingPermissions = this.permissions.get(session.meta.id);
+        const permissions = existingPermissions
             ?? new SessionPermissions();
         this.permissions.set(session.meta.id, permissions);
-        const sandboxPolicy = () => permissions.apply(createSandboxPolicy(
-            session.meta.permission,
-            workingDirectoriesFor(session.meta)
-        ));
-        const instance = new Session(
-            session.meta,
-            session.messages,
-            createDefaultTools({
-                shell: {
-                    defaultCwd: () => workingDirectoriesFor(session.meta)[0],
-                    sandboxPolicy,
-                    sandboxPreflight: this.sandboxPreflight,
-                    sharedBudget: this.shellSessionBudget
-                },
-                applyPatch: {
-                    defaultCwd: () => workingDirectoriesFor(session.meta)[0],
-                    sandboxPolicy
-                },
-                requestPermission: {
-                    sandboxPolicy
-                }
-            }),
-            permissions,
-            this.contextManagerFactory
-        );
+        const tools = new ToolManagerRegistry({
+            sessionId: session.meta.id,
+            permission: () => session.meta.permission,
+            workingDirectories: () => workingDirectoriesFor(session.meta)
+        });
+        let instance: Session;
+        try {
+            tools.registerManager(createDefaultToolManager({
+                permissions,
+                sandboxPreflight: this.sandboxPreflight,
+                sharedBudget: this.shellSessionBudget
+            }));
+            for (const manager of this.toolManagers.values()) {
+                tools.registerManager(manager);
+            }
+            instance = new Session(
+                session.meta,
+                session.messages,
+                tools,
+                permissions,
+                this.contextManagerFactory
+            );
+        } catch (error) {
+            tools.dispose();
+            if (!existingPermissions) {
+                permissions.dispose();
+                this.permissions.delete(session.meta.id);
+            }
+            throw error;
+        }
         this.sessions.set(instance.meta.id, instance);
         return instance;
     }
@@ -265,6 +329,22 @@ export class SessionManager {
             permissions.dispose();
         }
         this.permissions.clear();
+    }
+
+    private disposeToolManagers(): void {
+        for (const manager of this.toolManagers.values()) {
+            manager.dispose?.();
+        }
+        this.toolManagers.clear();
+    }
+
+    private assertToolManagerAvailable(managerId: string): void {
+        if (managerId === DEFAULT_TOOL_MANAGER_ID) {
+            throw new Error(`Tool manager id is reserved: ${managerId}`);
+        }
+        if (this.toolManagers.has(managerId)) {
+            throw new Error(`Tool manager already registered: ${managerId}`);
+        }
     }
 
     private applyContext(session: Session, context: JarvixSessionContext): void {

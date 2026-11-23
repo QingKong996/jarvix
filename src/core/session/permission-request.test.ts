@@ -2,14 +2,14 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, test, vi } from "vitest";
-import type { LlmAdapter } from "../../llm/index.ts";
+import type { LlmAdapter } from "../llm/index.ts";
 import type {
     LlmAssistantMessage,
     LlmContentBlock,
     LlmModelInfo,
     LlmStopReason,
     LlmStreamEvent
-} from "../../llm/types.ts";
+} from "../../protocol/llm.ts";
 import type { JarvixEvent } from "../../protocol/event.ts";
 import { providerConfigSchema } from "../../protocol/providers.ts";
 import { Jarvix } from "../index.ts";

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Clock3, Timer } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
-import type { LocalTimeView, SleepView } from "../../../../../core/tools/view.ts";
+import type { LocalTimeView, SleepView } from "../../../../../runtime/tools/view.ts";
 
 export function LocalTimeToolCall({ data }: { data: LocalTimeView }) {
     const { t } = useTranslation();

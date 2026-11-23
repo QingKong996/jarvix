@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { LlmMessage } from "../llm/types.ts";
+import type { LlmMessage } from "./llm.ts";
 import type { JarvixContextUsage } from "./context-usage.ts";
 import type { PermissionMode } from "./permission.ts";
 

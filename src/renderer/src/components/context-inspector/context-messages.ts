@@ -2,7 +2,7 @@ import type {
     LlmContentBlock,
     LlmMessage,
     LlmToolCallBlock
-} from "../../../../llm/types.ts";
+} from "../../../../protocol/llm.ts";
 import type { JarvixProviderContext } from "../../../../protocol/provider-context.ts";
 
 export type ContextMessageKind =

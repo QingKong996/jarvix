@@ -1,4 +1,4 @@
-import type { LlmSystemMessage } from "../../../llm/types.ts";
+import type { LlmSystemMessage } from "../../../protocol/llm.ts";
 
 export type PendingPrompt = {
     type: "prompt";

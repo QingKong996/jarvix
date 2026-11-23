@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
 import { afterEach, expect, test, vi } from "vitest";
 import { i18n } from "../../../../../i18n/index.ts";
-import type { ToolCallViewData } from "../../../../../core/tools/view.ts";
+import type { ToolCallViewData } from "../../../../../runtime/tools/view.ts";
 import { ToolCallBlock } from "./ToolCallBlock.tsx";
 
 afterEach(() => {

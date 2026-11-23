@@ -1,5 +1,5 @@
-import type { ToolCallEndReason } from "../../../../../core/tools/shared/types.ts";
-import type { ToolCallViewData } from "../../../../../core/tools/view.ts";
+import type { ToolCallEndReason } from "../../../../../runtime/tools/types.ts";
+import type { ToolCallViewData } from "../../../../../runtime/tools/view.ts";
 
 export type CommittedBlock =
     | {

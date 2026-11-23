@@ -1,4 +1,4 @@
-import type { LlmMessage } from "../../../../../llm/types.ts";
+import type { LlmMessage } from "../../../../../protocol/llm.ts";
 import type { JarvixEvent } from "../../../../../protocol/event.ts";
 import { initialTranscriptState, transcriptReducer, type TranscriptAction } from "./transcript.ts";
 import type { CommittedTurn, LiveTurn, TranscriptState } from "./types.ts";

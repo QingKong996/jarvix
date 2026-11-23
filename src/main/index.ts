@@ -1,6 +1,7 @@
 import { app } from "electron";
 import { join } from "node:path";
 import { Jarvix } from "../core/index.ts";
+import { createLlm } from "../llm/index.ts";
 import { IPC_CHANNELS } from "../protocol/ipc.ts";
 import { attachEventBridge } from "./event-bridge.ts";
 import { registerIpc } from "./ipc.ts";
@@ -32,6 +33,8 @@ if (!app.requestSingleInstanceLock()) {
             windowAvailable: () => windows.current !== null
         });
         const jarvix = new Jarvix({
+            llm: createLlm(() => config.providers),
+            config,
             sandboxPreflight: () => sandboxSetup.preflight()
         });
         const catalog = new ModelCatalogService(join(paths.directory, "tmp", "models-dev.json"));
@@ -45,7 +48,6 @@ if (!app.requestSingleInstanceLock()) {
             return next;
         };
 
-        jarvix.setConfig(config);
         windows.applyTheme(config.theme);
         attachEventBridge(jarvix, windows);
         registerIpc({

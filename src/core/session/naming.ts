@@ -1,4 +1,5 @@
-import type { LlmAdapter, LlmAssistantMessage, LlmStream } from "../../llm/index.ts";
+import type { LlmAdapter, LlmStream } from "../llm/index.ts";
+import type { LlmAssistantMessage } from "../../protocol/llm.ts";
 import type { JarvixConfig } from "../../protocol/config.ts";
 import { resolveConfiguredModel } from "../../protocol/providers.ts";
 import { SESSION_NAME_MAX_LENGTH } from "../../protocol/session.ts";

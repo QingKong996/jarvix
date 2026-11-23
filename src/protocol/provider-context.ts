@@ -1,4 +1,4 @@
-import type { LlmMessage } from "../llm/types.ts";
+import type { LlmMessage } from "./llm.ts";
 
 export type JarvixProviderContext = {
     systemPrompt: string;

@@ -2,13 +2,13 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, expect, test, vi } from "vitest";
-import type { LlmAdapter, LlmRequest } from "../../../llm/index.ts";
+import type { LlmAdapter, LlmRequest } from "../../llm/index.ts";
 import type {
     LlmAssistantMessage,
     LlmMessage,
     LlmModelInfo,
     LlmStreamEvent
-} from "../../../llm/types.ts";
+} from "../../../protocol/llm.ts";
 import type { JarvixEvent } from "../../../protocol/event.ts";
 import { DEFAULT_PERMISSION_MODE } from "../../../protocol/permission.ts";
 import type { JarvixSessionMeta } from "../../../protocol/session.ts";
@@ -16,10 +16,12 @@ import { MAX_TOOL_ROUNDS, Session } from "./session.ts";
 import { appendSessionMessage } from "../persistence/store.ts";
 import { providerConfigSchema } from "../../../protocol/providers.ts";
 import {
-    BackgroundTaskManager,
-    REQUEST_PERMISSION_TOOL,
     type ToolExecutor
-} from "../../tools/index.ts";
+} from "../../../runtime/tools/index.ts";
+import {
+    BackgroundTaskManager,
+    REQUEST_PERMISSION_TOOL
+} from "../../../runtime/tools/index.ts";
 import { SessionPermissions } from "../../permissions/session-permissions.ts";
 import { estimateContextUsage } from "./context-usage.ts";
 import { createDefaultContextManager } from "./context-manager.ts";

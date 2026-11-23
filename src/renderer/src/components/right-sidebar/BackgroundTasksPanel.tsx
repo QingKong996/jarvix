@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronRight, Terminal } from "lucide-react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import type { ToolTaskSnapshot } from "../../../../core/tools/shared/types.ts";
+import type { ToolTaskSnapshot } from "../../../../runtime/tools/types.ts";
 import { useBackgroundTasks } from "../../background-tasks/store.ts";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";

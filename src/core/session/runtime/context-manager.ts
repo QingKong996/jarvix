@@ -3,7 +3,7 @@ import type {
     LlmSystemMessage,
     LlmToolDefinition,
     LlmUserMessage
-} from "../../../llm/types.ts";
+} from "../../../protocol/llm.ts";
 import type { JarvixContextUsage } from "../../../protocol/context-usage.ts";
 import type { PermissionMode } from "../../../protocol/permission.ts";
 import { estimateContextUsage } from "./context-usage.ts";

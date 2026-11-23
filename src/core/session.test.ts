@@ -2,7 +2,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, test, vi } from "vitest";
-import type { LlmAdapter, LlmAssistantMessage, LlmMessage, LlmModelInfo, LlmStreamEvent } from "../llm/index.ts";
+import type { LlmAdapter } from "./llm/index.ts";
+import type {
+    LlmAssistantMessage,
+    LlmMessage,
+    LlmModelInfo,
+    LlmStreamEvent
+} from "../protocol/llm.ts";
 import { loadSession } from "./session/persistence/store.ts";
 import { SESSION_NAME_TIMEOUT_MS } from "./session/naming.ts";
 import { Jarvix } from "./index.ts";

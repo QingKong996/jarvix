@@ -2,7 +2,7 @@ import type {
     LlmMessage,
     LlmToolCallBlock,
     LlmToolResultMessage
-} from "../../../llm/types.ts";
+} from "../../../protocol/llm.ts";
 import type {
     PermissionDecision,
     PermissionGrantInput,
@@ -10,15 +10,17 @@ import type {
 } from "../../../protocol/permission.ts";
 import type { SessionPermissions } from "../../permissions/session-permissions.ts";
 import {
-    createDefaultTools,
+    ToolManagerRegistry,
+    type ToolManager,
     type ToolExecutionResult,
     type ToolExecutor
-} from "../../tools/index.ts";
+} from "../../../runtime/tools/index.ts";
+import { createDefaultTools } from "../../../runtime/tools/index.ts";
 import {
     createToolCallViewData,
     toToolResultDetails,
     type ToolCallViewData
-} from "../../tools/view.ts";
+} from "../../../runtime/tools/view.ts";
 import type { SessionRuntime } from "./types.ts";
 
 type ToolCallRunnerOptions = {
@@ -36,6 +38,7 @@ type ToolCallRunnerOptions = {
 
 export class ToolCallRunner {
     private readonly tools: ToolExecutor;
+    private readonly managerRegistry?: ToolManagerRegistry;
     private readonly permissions: SessionPermissions;
     private readonly append: (message: LlmMessage) => void;
     private readonly queueBackgroundExitNotice: ToolCallRunnerOptions["queueBackgroundExitNotice"];
@@ -43,6 +46,9 @@ export class ToolCallRunner {
 
     constructor(options: ToolCallRunnerOptions) {
         this.tools = options.tools ?? createDefaultTools();
+        this.managerRegistry = this.tools instanceof ToolManagerRegistry
+            ? this.tools
+            : undefined;
         this.permissions = options.permissions;
         this.append = options.append;
         this.queueBackgroundExitNotice = options.queueBackgroundExitNotice;
@@ -140,6 +146,20 @@ export class ToolCallRunner {
 
     async stop() {
         return this.tools.stop();
+    }
+
+    registerToolManager(manager: ToolManager): void {
+        if (!this.managerRegistry) {
+            throw new Error("Tool manager registration requires a dynamic tool registry");
+        }
+        this.managerRegistry.registerManager(manager);
+    }
+
+    async unregisterToolManager(managerId: string): Promise<void> {
+        if (!this.managerRegistry) {
+            throw new Error("Tool manager registration requires a dynamic tool registry");
+        }
+        await this.managerRegistry.unregisterManager(managerId);
     }
 
     dispose(): void {

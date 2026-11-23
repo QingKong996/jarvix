@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, test, vi } from "vitest";
-import type { LlmUserMessage } from "../../../llm/types.ts";
+import type { LlmUserMessage } from "../../../protocol/llm.ts";
 
 const readFileSyncCalls = vi.hoisted(() => [] as string[]);
 const readSyncBytes = vi.hoisted(() => [] as number[]);
