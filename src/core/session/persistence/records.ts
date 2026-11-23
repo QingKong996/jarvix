@@ -1,9 +1,6 @@
 import { resolve } from "node:path";
 import type { LlmMessage } from "../../../protocol/llm.ts";
-import {
-    permissionModeOrDefault,
-    type PermissionMode
-} from "../../../protocol/permission.ts";
+import { permissionModeOrDefault } from "../../../protocol/permission.ts";
 import {
     type JarvixSessionContext,
     type JarvixSessionMeta,

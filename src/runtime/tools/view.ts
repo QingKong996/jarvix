@@ -22,12 +22,12 @@ import {
     type ShellWriteStdinView
 } from "./shell/view.ts";
 import {
-    appendToolViewOutput,
     createGenericToolCallViewData,
     isToolCallViewBase,
     type GenericToolView,
     type ToolCallStatus
 } from "./tool-view.ts";
+import { appendBoundedOutput } from "./output.ts";
 import {
     createTimeToolCallViewData,
     isTimeToolCallViewData,
@@ -111,7 +111,13 @@ export function appendToolOutput(
     data: ToolCallViewData,
     delta: ToolCallOutputDelta
 ): ToolCallViewData {
-    return appendToolViewOutput(data, delta);
+    if (data.kind !== delta.kind) {
+        return data;
+    }
+    return {
+        ...data,
+        output: appendBoundedOutput(data.output, delta.output)
+    };
 }
 
 export function toToolResultDetails(data: ToolCallViewData): LlmJsonObject {

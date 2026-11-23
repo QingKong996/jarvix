@@ -8,7 +8,12 @@ export function appendBoundedOutput(output: string, chunk: string): string {
     }
 
     const bodyLength = MAX_TOOL_OUTPUT_CHARS - OUTPUT_TRUNCATION_NOTICE.length;
-    return OUTPUT_TRUNCATION_NOTICE + combined.slice(-bodyLength);
+    let start = combined.length - bodyLength;
+    const firstCodeUnit = combined.charCodeAt(start);
+    if (firstCodeUnit >= 0xdc00 && firstCodeUnit <= 0xdfff) {
+        start += 1;
+    }
+    return OUTPUT_TRUNCATION_NOTICE + combined.slice(start);
 }
 
 export function formatTruncatedOutput(output: string, discardedCharacters: number): string {

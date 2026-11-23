@@ -28,8 +28,6 @@ export type SessionActionsOptions = {
     setContextUsage: Dispatch<SetStateAction<JarvixContextUsage | null>>;
     activeSessionIdRef: RefObject<string | null>;
     hasUserMessagesRef: RefObject<boolean>;
-    sessionContextRef: RefObject<JarvixSessionContext>;
-    sessionPermissionRef: RefObject<PermissionMode>;
     permissionRequestRef: RefObject<ActivePermissionRequest | null>;
     activateSession: (session: JarvixSession | null) => void;
     clearPermissionRequest: (sessionId?: string, requestId?: string) => void;
@@ -52,8 +50,6 @@ export function useSessionActions(options: SessionActionsOptions) {
         setContextUsage,
         activeSessionIdRef,
         hasUserMessagesRef,
-        sessionContextRef,
-        sessionPermissionRef,
         permissionRequestRef,
         activateSession,
         clearPermissionRequest,

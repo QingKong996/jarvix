@@ -103,10 +103,7 @@ test("retains only the tail of oversized command output", async () => {
     }
 });
 
-test("starts Windows PowerShell without relying on PATH", async () => {
-    if (process.platform !== "win32") {
-        return;
-    }
+test.skipIf(process.platform !== "win32")("starts Windows PowerShell without relying on PATH", async () => {
     const path = process.env.Path;
     const upperPath = process.env.PATH;
     process.env.Path = "";

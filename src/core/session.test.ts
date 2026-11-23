@@ -14,6 +14,7 @@ import { SESSION_NAME_TIMEOUT_MS } from "./session/naming.ts";
 import { Jarvix } from "./index.ts";
 import type { Language } from "../protocol/config.ts";
 import { providerConfigSchema } from "../protocol/providers.ts";
+import { SESSION_NAME_MAX_LENGTH } from "../protocol/session.ts";
 
 const home = vi.hoisted(() => ({ path: "" }));
 
@@ -429,7 +430,7 @@ test("bounds automatic naming output when a provider ignores max tokens", async 
     const session = jarvix.createSession({}, SESSION_NAME);
 
     expect(await jarvix.autoNameSession(session.meta.id, "Name this session"))
-        .toBe("x".repeat(80));
+        .toBe("x".repeat(SESSION_NAME_MAX_LENGTH));
 });
 
 test("creates temporary sessions by default and validates explicit project context", () => {
