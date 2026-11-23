@@ -31,16 +31,94 @@ test("estimates the full prompt including history and tool definitions", () => {
     expect(populated.contextWindow).toBe(128_000);
 });
 
-test("counts non-ASCII text more heavily than ASCII text", () => {
-    const estimate = (content: string) => estimateContextUsage({
+test("uses the latest assistant usage and estimates only trailing messages", () => {
+    const usage = estimateContextUsage({
         contextWindow: 1_000,
-        messages: [{ role: "user", content, timestamp: 1 }]
-    }).estimatedTokens;
+        systemPrompt: "x".repeat(3_500),
+        tools: [{
+            name: "read_file",
+            description: "Read a file",
+            parameters: {
+                type: "object",
+                properties: { path: { type: "string" } }
+            }
+        }],
+        messages: [{
+            role: "assistant",
+            content: [{ type: "text", text: "reply" }],
+            provider: "test",
+            model: "test",
+            api: "test",
+            usage: {
+                inputTokens: 90,
+                outputTokens: 30,
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+                totalTokens: 120,
+                cost: 0
+            },
+            stopReason: "stop",
+            timestamp: 2
+        }, {
+            role: "user",
+            content: "x".repeat(35),
+            timestamp: 3
+        }]
+    });
 
-    expect(estimate("上".repeat(100))).toBeGreaterThan(estimate("a".repeat(100)));
+    expect(usage.estimatedTokens).toBe(130);
+});
+
+test("ignores usage from aborted or failed assistant messages", () => {
+    const usage = estimateContextUsage({
+        contextWindow: 1_000,
+        messages: [{
+            role: "assistant",
+            content: [{ type: "text", text: "reply" }],
+            provider: "test",
+            model: "test",
+            api: "test",
+            usage: {
+                inputTokens: 900,
+                outputTokens: 100,
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+                totalTokens: 1_000,
+                cost: 0
+            },
+            stopReason: "error",
+            timestamp: 2
+        }, {
+            role: "user",
+            content: "x".repeat(35),
+            timestamp: 3
+        }]
+    });
+
+    expect(usage.estimatedTokens).toBe(12);
 });
 
 test("reuses message token estimates across context usage checks", () => {
+    let contentReads = 0;
+    const message: LlmMessage = {
+        role: "toolResult",
+        toolCallId: "call",
+        toolName: "exec_command",
+        get content() {
+            contentReads += 1;
+            return "result";
+        },
+        isError: false,
+        timestamp: 1
+    };
+
+    estimateContextUsage({ contextWindow: 1_000, messages: [message] });
+    estimateContextUsage({ contextWindow: 1_000, messages: [message] });
+
+    expect(contentReads).toBe(1);
+});
+
+test("does not estimate persisted tool details as model context", () => {
     let detailReads = 0;
     const details = {
         get payload(): string {
@@ -61,5 +139,5 @@ test("reuses message token estimates across context usage checks", () => {
     estimateContextUsage({ contextWindow: 1_000, messages: [message] });
     estimateContextUsage({ contextWindow: 1_000, messages: [message] });
 
-    expect(detailReads).toBe(1);
+    expect(detailReads).toBe(0);
 });

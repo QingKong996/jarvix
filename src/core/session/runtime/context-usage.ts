@@ -1,13 +1,12 @@
 import type {
     LlmContentBlock,
     LlmMessage,
-    LlmToolDefinition
+    LlmToolDefinition,
+    LlmUsage
 } from "../../../protocol/llm.ts";
 import type { JarvixContextUsage } from "../../../protocol/context-usage.ts";
 
-const MESSAGE_OVERHEAD_TOKENS = 4;
-const CONTENT_BLOCK_OVERHEAD_TOKENS = 2;
-const TOOL_OVERHEAD_TOKENS = 8;
+const CHARS_PER_TOKEN = 3.5;
 // Session history is append-only, so each message's estimate can be reused.
 const messageTokenCache = new WeakMap<LlmMessage, number>();
 
@@ -18,12 +17,18 @@ export type ContextUsageInput = {
     tools?: readonly LlmToolDefinition[];
 };
 
-/** Estimate the prompt footprint without provider-specific tokenizers. */
+type UsageInfo = {
+    index: number;
+    usage: LlmUsage;
+};
+
+/** Estimate the prompt from the latest provider usage plus any trailing messages. */
 export function estimateContextUsage(input: ContextUsageInput): JarvixContextUsage {
-    let estimatedTokens = estimateFixedTokens(input);
-    for (const message of input.messages) {
-        estimatedTokens += estimateMessageTokens(message);
-    }
+    const usageInfo = latestAssistantUsage(input.messages);
+    const estimatedTokens = usageInfo
+        ? reportedContextTokens(usageInfo.usage)
+            + estimateMessages(input.messages.slice(usageInfo.index + 1))
+        : estimateFixedTokens(input) + estimateMessages(input.messages);
     return {
         estimatedTokens,
         contextWindow: Math.max(1, Math.floor(input.contextWindow))
@@ -31,14 +36,21 @@ export function estimateContextUsage(input: ContextUsageInput): JarvixContextUsa
 }
 
 function estimateFixedTokens(input: Pick<ContextUsageInput, "systemPrompt" | "tools">): number {
-    let estimatedTokens = 3;
-    if (input.systemPrompt) {
-        estimatedTokens += MESSAGE_OVERHEAD_TOKENS + estimateTextTokens(input.systemPrompt);
+    const systemPromptTokens = input.systemPrompt
+        ? estimateTextTokens(input.systemPrompt)
+        : 0;
+    const toolTokens = input.tools && input.tools.length > 0
+        ? estimateTextTokens(safeJsonStringify(input.tools))
+        : 0;
+    return systemPromptTokens + toolTokens;
+}
+
+function estimateMessages(messages: readonly LlmMessage[]): number {
+    let tokens = 0;
+    for (const message of messages) {
+        tokens += estimateMessageTokens(message);
     }
-    for (const tool of input.tools ?? []) {
-        estimatedTokens += estimateToolTokens(tool);
-    }
-    return estimatedTokens;
+    return tokens;
 }
 
 function estimateMessageTokens(message: LlmMessage): number {
@@ -54,55 +66,76 @@ function estimateMessageTokens(message: LlmMessage): number {
 function estimateMessageTokensUncached(message: LlmMessage): number {
     switch (message.role) {
         case "user":
-            return MESSAGE_OVERHEAD_TOKENS + estimateTextTokens(message.content);
+            return estimateTextTokens(message.content);
         case "system":
-            return MESSAGE_OVERHEAD_TOKENS + estimateTextTokens(message.content);
+            return estimateTextTokens(message.content);
         case "toolResult":
-            return MESSAGE_OVERHEAD_TOKENS
-                + estimateTextTokens(message.toolName)
-                + estimateTextTokens(message.content)
-                + estimateJsonTokens(message.details);
+            return estimateToolResultContentTokens(message.content);
         case "assistant":
-            return MESSAGE_OVERHEAD_TOKENS + message.content.reduce(
-                (total, block) => total + estimateBlockTokens(block),
-                0
-            );
+            return estimateAssistantContentTokens(message.content);
     }
 }
 
-function estimateBlockTokens(block: LlmContentBlock): number {
+function estimateToolResultContentTokens(content: string): number {
+    return estimateTextTokens(content);
+}
+
+function estimateAssistantContentTokens(blocks: readonly LlmContentBlock[]): number {
+    let characters = 0;
+    for (const block of blocks) {
+        characters += estimateBlockCharacters(block);
+    }
+    return Math.ceil(characters / CHARS_PER_TOKEN);
+}
+
+function estimateBlockCharacters(block: LlmContentBlock): number {
     switch (block.type) {
         case "text":
-            return CONTENT_BLOCK_OVERHEAD_TOKENS + estimateTextTokens(block.text);
+            return block.text.length;
         case "thinking":
-            return CONTENT_BLOCK_OVERHEAD_TOKENS + estimateTextTokens(block.thinking);
+            return block.thinking.length;
         case "toolCall":
-            return CONTENT_BLOCK_OVERHEAD_TOKENS
-                + estimateTextTokens(block.name)
-                + estimateJsonTokens(block.arguments);
+            return block.name.length + safeJsonStringify(block.arguments).length;
     }
 }
 
-function estimateToolTokens(tool: LlmToolDefinition): number {
-    return TOOL_OVERHEAD_TOKENS
-        + estimateTextTokens(tool.name)
-        + estimateTextTokens(tool.description)
-        + estimateJsonTokens(tool.parameters);
+function latestAssistantUsage(messages: readonly LlmMessage[]): UsageInfo | null {
+    let usageInfo: UsageInfo | null = null;
+    let latestPrefixTimestamp = Number.NEGATIVE_INFINITY;
+    for (const [index, message] of messages.entries()) {
+        if (message.role === "assistant") {
+            const appliesToPrefix = message.timestamp >= latestPrefixTimestamp;
+            const usageTokens = reportedContextTokens(message.usage);
+            if (
+                appliesToPrefix
+                && message.stopReason !== "aborted"
+                && message.stopReason !== "error"
+                && usageTokens > 0
+            ) {
+                usageInfo = { index, usage: message.usage };
+            }
+        }
+        latestPrefixTimestamp = Math.max(latestPrefixTimestamp, message.timestamp);
+    }
+    return usageInfo;
 }
 
-function estimateJsonTokens(value: unknown): number {
-    return value === undefined ? 0 : estimateTextTokens(JSON.stringify(value));
+function reportedContextTokens(usage: LlmUsage): number {
+    return usage.totalTokens
+        || usage.inputTokens
+            + usage.outputTokens
+            + usage.cacheReadTokens
+            + usage.cacheWriteTokens;
 }
 
 function estimateTextTokens(text: string): number {
-    let asciiCharacters = 0;
-    let otherCharacters = 0;
-    for (const character of text) {
-        if (character.codePointAt(0)! <= 0x7f) {
-            asciiCharacters += 1;
-        } else {
-            otherCharacters += 1;
-        }
+    return Math.ceil(text.length / CHARS_PER_TOKEN);
+}
+
+function safeJsonStringify(value: unknown): string {
+    try {
+        return JSON.stringify(value) ?? "undefined";
+    } catch {
+        return "[unserializable]";
     }
-    return Math.ceil(asciiCharacters / 4 + otherCharacters / 1.5);
 }
