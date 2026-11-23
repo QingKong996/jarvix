@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
-import type { LlmMessage } from "../../../protocol/llm.ts";
+import { randomUUID } from "node:crypto";
+import type { LlmMessage, LlmUserMessage } from "../../../protocol/llm.ts";
 import { permissionModeOrDefault } from "../../../protocol/permission.ts";
 import {
     type JarvixSessionContext,
@@ -11,10 +12,40 @@ export const SESSION_HEADER_MAX_BYTES = 1024 * 1024;
 
 export type SessionMessageRecord = {
     type: "message";
+    id?: string;
     message: LlmMessage;
 };
 
-export type SessionRecord = JarvixSessionMeta | SessionMessageRecord;
+export type SessionCompactRecord = {
+    type: "compact";
+    version: 1;
+    id: string;
+    messageIds: string[];
+    message: LlmUserMessage;
+};
+
+export type SessionRecord = JarvixSessionMeta | SessionMessageRecord | SessionCompactRecord;
+
+const messageRecordIds = new WeakMap<object, string>();
+
+export function ensureMessageRecordId(message: object): string {
+    const current = messageRecordIds.get(message);
+    if (current) {
+        return current;
+    }
+    const id = randomUUID();
+    messageRecordIds.set(message, id);
+    return id;
+}
+
+export function assignMessageRecordId(message: object, id: string): string {
+    messageRecordIds.set(message, id);
+    return id;
+}
+
+export function messageRecordId(message: object): string | undefined {
+    return messageRecordIds.get(message);
+}
 
 export function serializeRecord(record: SessionRecord): string {
     return `${JSON.stringify(record)}\n`;
@@ -90,7 +121,30 @@ export function normalizeSessionContext(
 }
 
 export function isSessionMessage(value: unknown): value is SessionMessageRecord {
-    return isRecord(value) && value.type === "message" && isLlmMessage(value.message);
+    return (
+        isRecord(value) &&
+        value.type === "message" &&
+        (
+            value.id === undefined ||
+            (typeof value.id === "string" && value.id.length > 0)
+        ) &&
+        isLlmMessage(value.message)
+    );
+}
+
+export function isSessionCompactRecord(value: unknown): value is SessionCompactRecord {
+    return (
+        isRecord(value) &&
+        value.type === "compact" &&
+        value.version === 1 &&
+        typeof value.id === "string" &&
+        value.id.length > 0 &&
+        Array.isArray(value.messageIds) &&
+        value.messageIds.every((id) => typeof id === "string" && id.length > 0) &&
+        isLlmMessage(value.message) &&
+        value.message.role === "user" &&
+        value.message.context === "compact"
+    );
 }
 
 function isLlmMessage(value: unknown): value is LlmMessage {
@@ -100,7 +154,11 @@ function isLlmMessage(value: unknown): value is LlmMessage {
     if (value.role === "user") {
         return (
             typeof value.content === "string" &&
-            (value.context === undefined || value.context === "system-reminder")
+            (
+                value.context === undefined ||
+                value.context === "system-reminder" ||
+                value.context === "compact"
+            )
         );
     }
     if (value.role === "assistant") {

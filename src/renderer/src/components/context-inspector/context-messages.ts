@@ -35,9 +35,14 @@ export function contextMessagesFor(context: JarvixProviderContext): ContextMessa
 }
 
 function messageEntries(message: LlmMessage): ContextMessageEntry[] {
-    if (message.role === "system" || message.role === "user") {
+    if (
+        message.role === "system" ||
+        message.role === "user"
+    ) {
         return [{
-            kind: message.role,
+            kind: message.role === "user" && message.context === "compact"
+                ? "system"
+                : message.role,
             text: () => message.content,
             preview: previewText(message.content)
         }];

@@ -102,7 +102,8 @@ export class SessionManager {
                 prompt: prompt || loaded.snapshot().messages.find(
                     (message): message is LlmUserMessage => (
                         message.role === "user" &&
-                        message.context !== "system-reminder"
+                        message.context !== "system-reminder" &&
+                        message.context !== "compact"
                     )
                 )?.content
             };

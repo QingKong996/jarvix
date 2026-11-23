@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { unlinkSync } from "node:fs";
 import { i18n } from "../../../i18n/index.ts";
-import type { LlmMessage } from "../../../protocol/llm.ts";
+import type { LlmMessage, LlmUserMessage } from "../../../protocol/llm.ts";
 import {
     DEFAULT_PERMISSION_MODE,
     permissionModeSchema,
@@ -17,7 +17,10 @@ import {
 import { defaultSessionDirectory, sessionFile } from "./paths.ts";
 import { readSessionMeta } from "./reader.ts";
 import {
+    ensureMessageRecordId,
+    messageRecordId,
     normalizeSessionContext,
+    type SessionCompactRecord,
     type SessionMessageRecord
 } from "./records.ts";
 import {
@@ -26,7 +29,7 @@ import {
     writeSessionMeta
 } from "./writer.ts";
 
-export const SESSION_FORMAT_VERSION = 3;
+export const SESSION_FORMAT_VERSION = 4;
 
 export { defaultSessionDirectory, sessionFile } from "./paths.ts";
 export {
@@ -176,7 +179,28 @@ export function appendSessionMessage(
     message: LlmMessage,
     directory = defaultSessionDirectory()
 ): void {
-    const record: SessionMessageRecord = { type: "message", message };
+    const recordId = messageRecordId(message);
+    const record: SessionMessageRecord = {
+        type: "message",
+        ...(recordId ? { id: recordId } : {}),
+        message
+    };
+    appendSessionRecord(sessionFile(id, directory), record);
+}
+
+export function appendSessionCompaction(
+    id: string,
+    message: LlmUserMessage,
+    messageIds: readonly string[],
+    directory = defaultSessionDirectory()
+): void {
+    const record: SessionCompactRecord = {
+        type: "compact",
+        version: 1,
+        id: ensureMessageRecordId(message),
+        messageIds: [...messageIds],
+        message
+    };
     appendSessionRecord(sessionFile(id, directory), record);
 }
 

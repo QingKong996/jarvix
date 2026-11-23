@@ -34,6 +34,15 @@ function activeLanguage(i18nLanguage: string): Language {
     return i18nLanguage === "en" ? "en" : "zh";
 }
 
+function parseCompactionThreshold(value: string): number | undefined | null {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) {
+        return undefined;
+    }
+    const parsed = Number(trimmed);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 export function SettingsDialog({
     open,
     onOpenChange,
@@ -48,6 +57,7 @@ export function SettingsDialog({
     const [selectedModel, setSelectedModel] = useState<ModelSelection | undefined>(config?.selectedModel);
     const [language, setLanguage] = useState<Language>(activeLanguage(i18n.language));
     const [theme, setTheme] = useState<Theme>(config?.theme ?? DEFAULT_THEME);
+    const [compactionThreshold, setCompactionThreshold] = useState("");
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -60,6 +70,9 @@ export function SettingsDialog({
         setSelectedModel(config?.selectedModel);
         setLanguage(config?.language ?? activeLanguage(i18n.language));
         setTheme(config?.theme ?? DEFAULT_THEME);
+        setCompactionThreshold(
+            config?.contextCompactionThreshold?.toString() ?? ""
+        );
     }, [open, config, i18n.language]);
 
     async function handleSave(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -67,13 +80,31 @@ export function SettingsDialog({
         if (!bridge || !config || saving) {
             return;
         }
+        const threshold = parseCompactionThreshold(compactionThreshold);
+        if (threshold === null) {
+            setError(t("settings.general.compactionThresholdInvalid"));
+            return;
+        }
         setSaving(true);
         setError(null);
         try {
-            const next = await bridge.setConfig({ ...config, language, theme, providers, selectedModel });
+            const { contextCompactionThreshold: _currentThreshold, ...baseConfig } = config;
+            const next = await bridge.setConfig({
+                ...baseConfig,
+                language,
+                theme,
+                providers,
+                selectedModel,
+                ...(threshold !== undefined
+                    ? { contextCompactionThreshold: threshold }
+                    : {})
+            });
             onSaved(next);
             setLanguage(next.language ?? language);
             setTheme(next.theme ?? DEFAULT_THEME);
+            setCompactionThreshold(
+                next.contextCompactionThreshold?.toString() ?? ""
+            );
             await i18n.changeLanguage(next.language ?? language);
             onOpenChange(false);
         } catch (cause) {
@@ -141,6 +172,7 @@ export function SettingsDialog({
                             <GeneralSettings
                                 language={language}
                                 theme={theme}
+                                compactionThreshold={compactionThreshold}
                                 disabled={disabled}
                                 onLanguageChange={(next) => {
                                     setLanguage(next);
@@ -148,6 +180,10 @@ export function SettingsDialog({
                                 }}
                                 onThemeChange={(next) => {
                                     setTheme(next);
+                                    setError(null);
+                                }}
+                                onCompactionThresholdChange={(next) => {
+                                    setCompactionThreshold(next);
                                     setError(null);
                                 }}
                             />

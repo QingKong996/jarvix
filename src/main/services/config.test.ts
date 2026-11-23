@@ -147,6 +147,36 @@ test("saveConfig and loadConfig round-trip the config data object", () => {
     expect(readdirSync(paths.directory)).toEqual(["config.json"]);
 });
 
+test("round-trips the context compaction threshold and rejects invalid values", () => {
+    expect(parseConfig({
+        contextCompactionThreshold: 32_000
+    }, defaults)).toMatchObject({
+        language: "zh",
+        theme: "dark",
+        contextCompactionThreshold: 32_000
+    });
+    expect(parseConfig({}, defaults)).not.toHaveProperty(
+        "contextCompactionThreshold"
+    );
+    for (const invalid of [0, -1, 1.5, "1000", null]) {
+        expect(() => parseConfig({
+            contextCompactionThreshold: invalid
+        }, defaults)).toThrow(/Invalid config/);
+    }
+
+    const paths = configPaths(join(base, "compaction-threshold"));
+    saveConfig({
+        language: "en",
+        theme: "light",
+        contextCompactionThreshold: 24_000
+    }, paths, defaults);
+    expect(loadConfig(paths, defaults)).toEqual({
+        language: "en",
+        theme: "light",
+        contextCompactionThreshold: 24_000
+    });
+});
+
 test("saveConfig removes its temporary file when replacement fails", () => {
     const paths = configPaths(join(base, "failed-replace"));
     mkdirSync(paths.file, { recursive: true });

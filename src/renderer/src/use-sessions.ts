@@ -93,7 +93,10 @@ export function useSessions() {
     const activateSession = useCallback((session: JarvixSession | null): void => {
         activeSessionIdRef.current = session?.meta.id ?? null;
         hasUserMessagesRef.current = session?.messages.some(
-            (message) => message.role === "user"
+            (message) => (
+                message.role === "user" &&
+                message.context !== "compact"
+            )
         ) ?? false;
         setActiveSessionId(session?.meta.id ?? null);
         updateContextState(session ? sessionContextFrom(session.meta) : {});

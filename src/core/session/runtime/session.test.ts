@@ -14,7 +14,11 @@ import type { JarvixEvent } from "../../../protocol/event.ts";
 import { DEFAULT_PERMISSION_MODE } from "../../../protocol/permission.ts";
 import type { JarvixSessionMeta } from "../../../protocol/session.ts";
 import { MAX_TOOL_ROUNDS, Session } from "./session.ts";
-import { appendSessionMessage } from "../persistence/store.ts";
+import {
+    appendSessionCompaction,
+    appendSessionMessage
+} from "../persistence/store.ts";
+import { messageRecordId } from "../persistence/records.ts";
 import { providerConfigSchema } from "../../../protocol/providers.ts";
 import {
     type ToolExecutor
@@ -26,12 +30,15 @@ import {
 import { SessionPermissions } from "../../permissions/session-permissions.ts";
 import { estimateContextUsage } from "./context-usage.ts";
 import { createDefaultContextManager } from "./context-manager.ts";
+import { CONTEXT_COMPACTION_SYSTEM_PROMPT } from "./context-compaction.ts";
 
 vi.mock("../persistence/store.ts", () => ({
-    appendSessionMessage: vi.fn()
+    appendSessionMessage: vi.fn(),
+    appendSessionCompaction: vi.fn()
 }));
 
 const persist = vi.mocked(appendSessionMessage);
+const persistCompaction = vi.mocked(appendSessionCompaction);
 const meta: JarvixSessionMeta = {
     type: "session",
     version: 1,
@@ -73,6 +80,31 @@ const SMALL_CONTEXT_CONFIG = {
     providers: [SMALL_CONTEXT_PROVIDER],
     selectedModel: { provider: SMALL_CONTEXT_PROVIDER.id, id: "test-model" }
 };
+const COMPACTION_PROVIDER = providerConfigSchema.parse({
+    id: "test",
+    name: "Test",
+    protocol: "openai-completions",
+    baseUrl: "http://localhost:8080/v1",
+    models: [{
+        id: "test-model",
+        name: "Test",
+        contextWindow: 30_000,
+        maxTokens: 1_000
+    }]
+});
+const COMPACTION_MODEL: LlmModelInfo = {
+    ...MODEL,
+    contextWindow: 30_000,
+    maxTokens: 1_000
+};
+const COMPACTION_CONFIG = {
+    providers: [COMPACTION_PROVIDER],
+    selectedModel: {
+        provider: COMPACTION_PROVIDER.id,
+        id: "test-model"
+    },
+    contextCompactionThreshold: 5_000
+};
 const NO_TOOLS: ToolExecutor = {
     definitions: [],
     handles: () => false,
@@ -85,6 +117,7 @@ const NO_TOOLS: ToolExecutor = {
 
 beforeEach(() => {
     persist.mockReset();
+    persistCompaction.mockReset();
 });
 
 test("uses the configured model, provider credential and reasoning for the request", async () => {
@@ -445,6 +478,153 @@ test("sends complete history even when it exceeds the model context window", asy
         content: "latest question"
     });
     expect(JSON.stringify(sent)).not.toContain("Earlier conversation history was omitted");
+});
+
+test("compacts old context while preserving the unselected prefix and latest messages", async () => {
+    const history = compactionHistory();
+    const session = new Session(meta, history, NO_TOOLS);
+    let compactionRequests = 0;
+    let actualMessages: LlmMessage[] | undefined;
+
+    await session.request("latest question", {
+        llm: {
+            getModel: () => COMPACTION_MODEL,
+            stream(request) {
+                if (request.systemPrompt === CONTEXT_COMPACTION_SYSTEM_PROMPT) {
+                    compactionRequests += 1;
+                    return (async function* (): AsyncIterable<LlmStreamEvent> {
+                        yield {
+                            type: "done",
+                            message: assistantTextMessage(
+                                "<compact>\ncondensed old context\n</compact>"
+                            )
+                        };
+                    })();
+                }
+                actualMessages = [...request.messages];
+                return (async function* (): AsyncIterable<LlmStreamEvent> {
+                    yield { type: "done", message: assistantMessage() };
+                })();
+            }
+        },
+        config: COMPACTION_CONFIG,
+        emit: () => undefined
+    });
+
+    const messages = session.snapshot().messages;
+    const compactIndex = messages.findIndex(
+        (message) => message.role === "user" && message.context === "compact"
+    );
+    const selectedPositions = history
+        .map((message, index) => ({
+            index,
+            id: messageRecordId(message)
+        }))
+        .filter((entry): entry is { index: number; id: string } => (
+            entry.id !== undefined
+        ));
+    const selectedIds = selectedPositions.map((entry) => entry.id);
+    const selectionStart = selectedPositions[0]?.index ?? -1;
+    const selectionEnd = (selectedPositions.at(-1)?.index ?? -1) + 1;
+    expect(compactionRequests).toBe(1);
+    expect(selectedPositions.length).toBeGreaterThan(0);
+    expect(selectedPositions.every((entry, index) => (
+        entry.index === selectionStart + index
+    ))).toBe(true);
+    expect(compactIndex).toBe(selectionStart);
+    for (let index = 0; index < compactIndex; index += 1) {
+        expect(messages[index]).toBe(history[index]);
+    }
+    expect(messages[compactIndex]).toMatchObject({
+        role: "user",
+        context: "compact",
+        content: "<compact>\ncondensed old context\n</compact>"
+    });
+    const retained = messages.slice(compactIndex + 1, messages.length - 2);
+    expect(retained).toHaveLength(history.length - selectionEnd);
+    for (const [index, message] of retained.entries()) {
+        expect(message).toBe(history[selectionEnd + index]);
+    }
+    expect(messages.at(-2)).toMatchObject({
+        role: "user",
+        content: "latest question"
+    });
+    expect(messages.at(-1)).toMatchObject({
+        role: "assistant"
+    });
+    expect(actualMessages).toContainEqual(expect.objectContaining({
+        context: "compact"
+    }));
+    const serializedRequest = JSON.stringify(actualMessages);
+    for (const [index, message] of history.entries()) {
+        if (message.role !== "user") {
+            continue;
+        }
+        const oldIndex = index / 2;
+        const selected = index >= selectionStart && index < selectionEnd;
+        expect(
+            serializedRequest.includes(`old-${oldIndex}-`),
+            `old-${oldIndex}- selected=${selected}`
+        ).toBe(!selected);
+    }
+    expect(persistCompaction).toHaveBeenCalledWith(
+        meta.id,
+        expect.objectContaining({
+            context: "compact",
+            content: expect.stringContaining("<compact>")
+        }),
+        expect.any(Array)
+    );
+    expect(persistCompaction.mock.calls[0]?.[2]).toEqual(selectedIds);
+});
+
+test("leaves history unchanged when compaction fails", async () => {
+    const history = compactionHistory();
+    const session = new Session(meta, history, NO_TOOLS);
+    const events: JarvixEvent[] = [];
+    let modelRequests = 0;
+
+    await expect(session.request("latest question", {
+        llm: {
+            getModel: () => COMPACTION_MODEL,
+            stream(request) {
+                if (request.systemPrompt === CONTEXT_COMPACTION_SYSTEM_PROMPT) {
+                    return (async function* (): AsyncIterable<LlmStreamEvent> {
+                        yield {
+                            type: "error",
+                            message: {
+                                ...assistantMessage(),
+                                stopReason: "error",
+                                errorMessage: "compact failed"
+                            }
+                        };
+                    })();
+                }
+                modelRequests += 1;
+                return (async function* (): AsyncIterable<LlmStreamEvent> {
+                    yield { type: "done", message: assistantMessage() };
+                })();
+            }
+        },
+        config: COMPACTION_CONFIG,
+        emit: (event) => events.push(event)
+    })).rejects.toThrow("compact failed");
+
+    const messages = session.snapshot().messages;
+    expect(modelRequests).toBe(0);
+    expect(persistCompaction).not.toHaveBeenCalled();
+    expect(messages).toHaveLength(history.length + 1);
+    for (const [index, message] of history.entries()) {
+        expect(messages[index]).toBe(message);
+    }
+    expect(messages.at(-1)).toMatchObject({
+        role: "user",
+        content: "latest question"
+    });
+    expect(events).toContainEqual({
+        type: "request.error",
+        error: "compact failed"
+    });
 });
 
 test("retries persistence once and dequeues the message on success", async () => {
@@ -1642,6 +1822,20 @@ function fakeLlm(message: LlmAssistantMessage): LlmAdapter {
     })());
 }
 
+function compactionHistory(pairs = 15): LlmMessage[] {
+    return Array.from({ length: pairs }, (_, index): LlmMessage[] => [
+        {
+            role: "user",
+            content: `old-${index}-${"u".repeat(3_500)}`,
+            timestamp: index * 2 + 1
+        },
+        {
+            ...assistantTextMessage(`reply-${index}-${"a".repeat(3_500)}`),
+            timestamp: index * 2 + 2
+        }
+    ]).flat();
+}
+
 function withoutContextUsage(events: readonly JarvixEvent[]): JarvixEvent[] {
     return events.filter((event) => event.type !== "context.usage");
 }
@@ -1672,5 +1866,12 @@ function assistantMessage(): LlmAssistantMessage {
         },
         stopReason: "stop",
         timestamp: 2
+    };
+}
+
+function assistantTextMessage(text: string): LlmAssistantMessage {
+    return {
+        ...assistantMessage(),
+        content: [{ type: "text", text }]
     };
 }

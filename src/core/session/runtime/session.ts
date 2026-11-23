@@ -30,6 +30,14 @@ import {
     type ContextManagerFactory
 } from "./context-manager.ts";
 import {
+    CONTEXT_COMPACTION_BLOCK_TOKENS,
+    CONTEXT_COMPACTION_SYSTEM_PROMPT,
+    compactBlockContent,
+    compactionPromptFor,
+    contextCompactionTriggerTokens,
+    selectCompactionRange
+} from "./context-compaction.ts";
+import {
     PendingMessageQueue,
     type PendingPrompt,
     type PendingSystemMessage
@@ -40,6 +48,7 @@ import type { SessionRuntime } from "./types.ts";
 
 export const MAX_TOOL_ROUNDS = 32;
 const SHUTDOWN_TIMEOUT_MS = 10_000;
+const MAX_CONTEXT_COMPACTION_ATTEMPTS = 8;
 export type { SessionRuntime } from "./types.ts";
 
 type TurnDecision = "continue" | "complete" | "failed";
@@ -144,6 +153,7 @@ export class Session {
                 }
             };
 
+            await this.compactContextIfNeeded(turn);
             this.emitContextUsage(turn);
 
             for (let round = 0; ;) {
@@ -154,6 +164,7 @@ export class Session {
                     throw new Error(`Tool call limit exceeded (${MAX_TOOL_ROUNDS})`);
                 }
 
+                await this.compactContextIfNeeded(turn);
                 const decision = await this.takeTurn(turn);
                 if (signal.aborted || decision === "failed") {
                     break;
@@ -460,6 +471,104 @@ export class Session {
 
     private emitContextUsage(turn: TurnContext): void {
         this.emitContextUsageFor(turn.runtime, turn.contextWindow);
+    }
+
+    private async compactContextIfNeeded(turn: TurnContext): Promise<void> {
+        for (
+            let attempt = 0;
+            attempt < MAX_CONTEXT_COMPACTION_ATTEMPTS;
+            attempt += 1
+        ) {
+            if (turn.signal.aborted) {
+                return;
+            }
+            const usage = this.contextUsage(
+                turn.contextWindow,
+                turn.runtime.workingDirectories ?? []
+            );
+            const triggerTokens = contextCompactionTriggerTokens(
+                turn.contextWindow,
+                turn.runtime.config.contextCompactionThreshold
+            );
+            if (usage.estimatedTokens <= triggerTokens) {
+                return;
+            }
+            const selection = selectCompactionRange(
+                this.history,
+                usage.estimatedTokens,
+                triggerTokens
+            );
+            if (!selection) {
+                return;
+            }
+
+            const selected = this.history.slice(selection.start, selection.end);
+            const summary = await this.generateCompactionSummary(selected, turn);
+            if (turn.signal.aborted) {
+                return;
+            }
+            const message: LlmUserMessage = {
+                role: "user",
+                content: compactBlockContent(summary),
+                context: "compact",
+                timestamp: Date.now()
+            };
+            this.history.splice(
+                selection.start,
+                selection.end - selection.start,
+                message
+            );
+            this.persistence.enqueueCompaction(message, selected);
+            this.emitContextUsageFor(turn.runtime, turn.contextWindow);
+        }
+    }
+
+    private async generateCompactionSummary(
+        messages: readonly LlmMessage[],
+        turn: TurnContext
+    ): Promise<string> {
+        let completed: LlmAssistantMessage | undefined;
+        const request = {
+            ...turn.request,
+            systemPrompt: CONTEXT_COMPACTION_SYSTEM_PROMPT,
+            messages: [{
+                role: "user" as const,
+                content: compactionPromptFor(messages),
+                timestamp: Date.now()
+            }],
+            tools: [],
+            temperature: 0,
+            maxTokens: Math.min(
+                CONTEXT_COMPACTION_BLOCK_TOKENS,
+                turn.request.maxTokens ?? CONTEXT_COMPACTION_BLOCK_TOKENS
+            ),
+            signal: turn.signal
+        };
+
+        for await (const event of turn.runtime.llm.stream(request)) {
+            if (turn.signal.aborted) {
+                return "";
+            }
+            if (event.type === "done") {
+                completed = event.message;
+            } else if (event.type === "error") {
+                throw new Error(
+                    event.message.errorMessage ?? "Context compaction failed"
+                );
+            }
+        }
+        if (!completed) {
+            throw new Error("Context compaction ended without a completion event");
+        }
+        const summary = completed.content
+            .filter((block) => block.type === "text")
+            .map((block) => block.type === "text" ? block.text : "")
+            .join("\n")
+            .trim();
+        if (summary.length === 0) {
+            throw new Error("Context compaction produced an empty summary");
+        }
+        return summary;
     }
 
     private emitContextUsageFor(

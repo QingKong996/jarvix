@@ -5,14 +5,17 @@ import {
     type Language,
     type Theme
 } from "../../../../protocol/config.ts";
+import { Input } from "../ui/input.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select.tsx";
 
 type GeneralSettingsProps = {
     language: Language;
     theme: Theme;
+    compactionThreshold: string;
     disabled: boolean;
     onLanguageChange: (language: Language) => void;
     onThemeChange: (theme: Theme) => void;
+    onCompactionThresholdChange: (value: string) => void;
 };
 
 const LANGUAGE_LABELS: Record<Language, string> = {
@@ -31,9 +34,11 @@ function isTheme(value: string): value is Theme {
 export function GeneralSettings({
     language,
     theme,
+    compactionThreshold,
     disabled,
     onLanguageChange,
-    onThemeChange
+    onThemeChange,
+    onCompactionThresholdChange
 }: GeneralSettingsProps) {
     const { t } = useTranslation();
 
@@ -89,6 +94,28 @@ export function GeneralSettings({
                         ))}
                     </SelectContent>
                 </Select>
+            </div>
+
+            <div className="flex items-start justify-between gap-4">
+                <div className="flex flex-col gap-1">
+                    <label htmlFor="settings-compaction-threshold" className="font-medium">
+                        {t("settings.general.compactionThreshold")}
+                    </label>
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                        {t("settings.general.compactionThresholdDescription")}
+                    </p>
+                </div>
+                <Input
+                    id="settings-compaction-threshold"
+                    type="number"
+                    min={1}
+                    step={1024}
+                    value={compactionThreshold}
+                    placeholder={t("settings.general.compactionThresholdPlaceholder")}
+                    disabled={disabled}
+                    className="w-44"
+                    onChange={(event) => onCompactionThresholdChange(event.target.value)}
+                />
             </div>
         </div>
     );

@@ -26,7 +26,12 @@ type UsageInfo = {
 
 /** Estimate the prompt from the latest provider usage plus any trailing messages. */
 export function estimateContextUsage(input: ContextUsageInput): JarvixContextUsage {
-    const usageInfo = latestAssistantUsage(input.messages);
+    // Compaction rewrites the prefix, so usage reported before the newest
+    // compact block no longer describes the prompt that will be sent.
+    const usageInfo = latestAssistantUsage(
+        input.messages,
+        latestCompactIndex(input.messages) + 1
+    );
     const estimatedTokens = usageInfo
         ? reportedContextTokens(usageInfo.usage)
             + estimateMessages(input.messages.slice(usageInfo.index + 1))
@@ -55,7 +60,7 @@ function estimateMessages(messages: readonly LlmMessage[]): number {
     return tokens;
 }
 
-function estimateMessageTokens(message: LlmMessage): number {
+export function estimateMessageTokens(message: LlmMessage): number {
     const cached = messageTokenCache.get(message);
     if (cached !== undefined) {
         return cached;
@@ -112,11 +117,14 @@ function estimateBlockCharacters(block: LlmContentBlock): number {
     }
 }
 
-function latestAssistantUsage(messages: readonly LlmMessage[]): UsageInfo | null {
+function latestAssistantUsage(
+    messages: readonly LlmMessage[],
+    startIndex: number
+): UsageInfo | null {
     let usageInfo: UsageInfo | null = null;
     let latestPrefixTimestamp = Number.NEGATIVE_INFINITY;
     for (const [index, message] of messages.entries()) {
-        if (message.role === "assistant") {
+        if (index >= startIndex && message.role === "assistant") {
             const appliesToPrefix = message.timestamp >= latestPrefixTimestamp;
             const usageTokens = reportedContextTokens(message.usage);
             if (
@@ -131,6 +139,16 @@ function latestAssistantUsage(messages: readonly LlmMessage[]): UsageInfo | null
         latestPrefixTimestamp = Math.max(latestPrefixTimestamp, message.timestamp);
     }
     return usageInfo;
+}
+
+function latestCompactIndex(messages: readonly LlmMessage[]): number {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index]!;
+        if (message.role === "user" && message.context === "compact") {
+            return index;
+        }
+    }
+    return -1;
 }
 
 function reportedContextTokens(usage: LlmUsage): number {

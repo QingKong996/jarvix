@@ -42,6 +42,17 @@ export function hydrateSession(messages: LlmMessage[]): CommittedTurn[] {
                 });
                 continue;
             }
+            if (message.context === "compact") {
+                turns.push({
+                    id,
+                    role: "system",
+                    text: message.content,
+                    blocks: [],
+                    error: null,
+                    reason: null
+                });
+                continue;
+            }
             turns.push({
                 id,
                 role: "user",

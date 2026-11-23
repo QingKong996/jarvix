@@ -571,3 +571,20 @@ test("hides the leading environment snapshot and renders user reminders as syste
     expect(hydrated.committed[1]?.text).toContain("permission: full-access");
     expect(hydrated.committed[1]?.text).not.toContain("<system-reminder>");
 });
+
+test("renders persisted compact context blocks as system turns", () => {
+    const hydrated = transcriptReducer(initialTranscriptState, {
+        type: "session.loaded",
+        messages: [{
+            role: "user",
+            content: "<compact>\nEarlier work summary\n</compact>",
+            context: "compact",
+            timestamp: 1
+        }]
+    });
+
+    expect(hydrated.committed).toEqual([expect.objectContaining({
+        role: "system",
+        text: "<compact>\nEarlier work summary\n</compact>"
+    })]);
+});

@@ -1,11 +1,25 @@
-import type { LlmMessage } from "../../../protocol/llm.ts";
-import { appendSessionMessage } from "../persistence/store.ts";
+import type { LlmMessage, LlmUserMessage } from "../../../protocol/llm.ts";
+import { ensureMessageRecordId } from "../persistence/records.ts";
+import {
+    appendSessionCompaction,
+    appendSessionMessage
+} from "../persistence/store.ts";
 
 const PERSIST_ATTEMPTS = 2;
 
+type PendingPersistence =
+    | {
+        type: "message";
+        message: LlmMessage;
+    } | {
+        type: "compact";
+        message: LlmUserMessage;
+        messageIds: readonly string[];
+    };
+
 export class SessionPersistenceQueue {
     private readonly sessionId: string;
-    private readonly pending: LlmMessage[] = [];
+    private readonly pending: PendingPersistence[] = [];
 
     constructor(sessionId: string) {
         this.sessionId = sessionId;
@@ -16,7 +30,15 @@ export class SessionPersistenceQueue {
     }
 
     enqueue(message: LlmMessage): void {
-        this.pending.push(message);
+        ensureMessageRecordId(message);
+        this.pending.push({ type: "message", message });
+        this.flush();
+    }
+
+    enqueueCompaction(message: LlmUserMessage, compacted: readonly LlmMessage[]): void {
+        ensureMessageRecordId(message);
+        const messageIds = compacted.map(ensureMessageRecordId);
+        this.pending.push({ type: "compact", message, messageIds });
         this.flush();
     }
 
@@ -27,11 +49,19 @@ export class SessionPersistenceQueue {
         }
     }
 
-    private persist(message: LlmMessage): void {
+    private persist(pending: PendingPersistence): void {
         let lastError: unknown;
         for (let attempt = 0; attempt < PERSIST_ATTEMPTS; attempt += 1) {
             try {
-                appendSessionMessage(this.sessionId, message);
+                if (pending.type === "message") {
+                    appendSessionMessage(this.sessionId, pending.message);
+                } else {
+                    appendSessionCompaction(
+                        this.sessionId,
+                        pending.message,
+                        pending.messageIds
+                    );
+                }
                 return;
             } catch (error) {
                 lastError = error;

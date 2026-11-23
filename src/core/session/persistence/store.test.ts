@@ -20,6 +20,7 @@ import { DEFAULT_PERMISSION_MODE } from "../../../protocol/permission.ts";
 import type { JarvixSessionMeta } from "../../../protocol/session.ts";
 import {
     SESSION_FORMAT_VERSION,
+    appendSessionCompaction,
     appendSessionMessage,
     createSession,
     deleteSession,
@@ -32,6 +33,7 @@ import {
     updateSessionPermission,
     updateSessionStatus
 } from "./store.ts";
+import { ensureMessageRecordId, messageRecordId } from "./records.ts";
 
 const base = mkdtempSync(join(tmpdir(), "jarvix-session-"));
 const SESSION_NAME = "Untitled session";
@@ -211,6 +213,141 @@ test("round-trips image tool result content", () => {
     appendSessionMessage(created.meta.id, result, directory);
 
     expect(loadSession(created.meta.id, directory)?.messages).toEqual([result]);
+});
+
+test("appendSessionCompaction replaces its selected range on resume", () => {
+    const directory = join(base, "compact");
+    const created = createSession({ projectId: PROJECT_ID }, SESSION_NAME, directory);
+    const first: LlmUserMessage = {
+        ...userMessage,
+        content: "first",
+        timestamp: 10
+    };
+    const firstReply: LlmAssistantMessage = {
+        ...assistantMessage,
+        content: [{ type: "text", text: "first reply" }],
+        timestamp: 11
+    };
+    const second: LlmUserMessage = {
+        ...userMessage,
+        content: "second",
+        timestamp: 12
+    };
+    const secondReply: LlmAssistantMessage = {
+        ...assistantMessage,
+        content: [{ type: "text", text: "second reply" }],
+        timestamp: 13
+    };
+    const later: LlmUserMessage = {
+        ...userMessage,
+        content: "later",
+        timestamp: 16
+    };
+    const selectedIds = [
+        ensureMessageRecordId(first),
+        ensureMessageRecordId(firstReply)
+    ];
+    const compact: LlmUserMessage = {
+        role: "user",
+        content: "<compact>\nfirst and first reply\n</compact>",
+        context: "compact",
+        timestamp: 15
+    };
+
+    appendSessionMessage(created.meta.id, first, directory);
+    appendSessionMessage(created.meta.id, firstReply, directory);
+    appendSessionMessage(created.meta.id, second, directory);
+    appendSessionMessage(created.meta.id, secondReply, directory);
+    appendSessionCompaction(created.meta.id, compact, selectedIds, directory);
+    expect(listSessionSummaries(directory)[0]?.updatedAt).toBe(compact.timestamp);
+    appendSessionMessage(created.meta.id, later, directory);
+    expect(listSessionSummaries(directory)[0]?.updatedAt).toBe(later.timestamp);
+
+    expect(loadSession(created.meta.id, directory)).toEqual({
+        meta: created.meta,
+        messages: [compact, second, secondReply, later]
+    });
+
+    const lines = readFileSync(
+        sessionFile(created.meta.id, directory),
+        "utf8"
+    ).trimEnd().split("\n");
+    expect(lines).toHaveLength(7);
+    expect(JSON.parse(lines[1] ?? "")).toMatchObject({
+        type: "message",
+        id: selectedIds[0],
+        message: first
+    });
+    expect(JSON.parse(lines[5] ?? "")).toMatchObject({
+        type: "compact",
+        version: 1,
+        messageIds: selectedIds,
+        message: compact
+    });
+});
+
+test("loadSession ignores compaction records with an incomplete range", () => {
+    const directory = join(base, "compact-missing-range");
+    const created = createSession({}, SESSION_NAME, directory);
+    const first = { ...userMessage, content: "first", timestamp: 10 };
+    const second = { ...userMessage, content: "second", timestamp: 11 };
+
+    appendSessionMessage(created.meta.id, first, directory);
+    appendSessionMessage(created.meta.id, second, directory);
+    appendSessionCompaction(created.meta.id, {
+        role: "user",
+        content: "<compact>\nmissing range\n</compact>",
+        context: "compact",
+        timestamp: 12
+    }, ["missing-id"], directory);
+
+    expect(loadSession(created.meta.id, directory)?.messages).toEqual([
+        first,
+        second
+    ]);
+});
+
+test("loadSession replays chained compaction records", () => {
+    const directory = join(base, "compact-chain");
+    const created = createSession({}, SESSION_NAME, directory);
+    const first = { ...userMessage, content: "first", timestamp: 10 };
+    const second = { ...userMessage, content: "second", timestamp: 11 };
+    const third = { ...userMessage, content: "third", timestamp: 12 };
+    const firstIds = [
+        ensureMessageRecordId(first),
+        ensureMessageRecordId(second)
+    ];
+    const thirdId = ensureMessageRecordId(third);
+    const firstCompact: LlmUserMessage = {
+        role: "user",
+        content: "<compact>\nfirst two messages\n</compact>",
+        context: "compact",
+        timestamp: 13
+    };
+    const secondCompact: LlmUserMessage = {
+        role: "user",
+        content: "<compact>\nall earlier messages\n</compact>",
+        context: "compact",
+        timestamp: 14
+    };
+
+    appendSessionMessage(created.meta.id, first, directory);
+    appendSessionMessage(created.meta.id, second, directory);
+    appendSessionMessage(created.meta.id, third, directory);
+    appendSessionCompaction(
+        created.meta.id,
+        firstCompact,
+        firstIds,
+        directory
+    );
+    appendSessionCompaction(created.meta.id, secondCompact, [
+        messageRecordId(firstCompact)!,
+        thirdId
+    ], directory);
+
+    expect(loadSession(created.meta.id, directory)?.messages).toEqual([
+        secondCompact
+    ]);
 });
 
 test("loadSession ignores corrupt and blank lines between valid records", () => {
