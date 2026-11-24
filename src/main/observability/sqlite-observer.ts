@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs";
+import { chmodSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { type JarvixLogger, noopLogger } from "../../core/logger.ts";
@@ -19,9 +19,6 @@ import {
 } from "../../core/observability/index.ts";
 import { AGENT_DATABASE_VERSION, migrateAgentDatabase } from "./schema.ts";
 
-const DEFAULT_RETENTION_DAYS = 90;
-const DEFAULT_MAX_BYTES = 200 * 1024 * 1024;
-const DAY_MS = 24 * 60 * 60 * 1000;
 const ERROR_MESSAGE_MAX_LENGTH = 500;
 
 const SQL = {
@@ -341,26 +338,6 @@ const SQL = {
             error_code = 'app_crashed',
             error_message = 'Jarvix exited before this run completed.'
         WHERE run_id = :run_id AND outcome = 'running'
-    `,
-    pruneRuns: `
-        DELETE FROM runs
-        WHERE outcome != 'running' AND started_at_ms < :cutoff
-    `,
-    pruneEvents: `
-        DELETE FROM events
-        WHERE ts_ms < :cutoff
-    `,
-    countFinishedRuns: `
-        SELECT count(*) AS count FROM runs WHERE outcome != 'running'
-    `,
-    deleteOldestRuns: `
-        DELETE FROM runs
-        WHERE run_id IN (
-            SELECT run_id FROM runs
-            WHERE outcome != 'running'
-            ORDER BY started_at_ms ASC
-            LIMIT :count
-        )
     `
 } as const;
 
@@ -381,8 +358,6 @@ export type SqliteObserverOptions = {
     appInstanceId?: string;
     logger?: JarvixLogger;
     now?: () => number;
-    retentionDays?: number;
-    maxBytes?: number;
 };
 
 export class SqliteAgentObserver implements AgentObserver {
@@ -393,10 +368,7 @@ export class SqliteAgentObserver implements AgentObserver {
     private readonly appInstanceId: string;
     private readonly logger: JarvixLogger;
     private readonly now: () => number;
-    private readonly retentionDays: number;
-    private readonly maxBytes: number;
     private readonly statements = new Map<string, StatementSync>();
-    private readonly maintenanceTimer: ReturnType<typeof setInterval>;
     private closed = false;
     private writeErrors = 0;
     private droppedWrites = 0;
@@ -409,8 +381,6 @@ export class SqliteAgentObserver implements AgentObserver {
         this.appInstanceId = options.appInstanceId ?? randomUUID();
         this.logger = options.logger ?? noopLogger;
         this.now = options.now ?? Date.now;
-        this.retentionDays = Math.max(0, options.retentionDays ?? DEFAULT_RETENTION_DAYS);
-        this.maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
 
         if (this.databasePath !== ":memory:") {
             mkdirSync(dirname(this.databasePath), { recursive: true, mode: 0o700 });
@@ -437,9 +407,7 @@ export class SqliteAgentObserver implements AgentObserver {
         `);
         migrateAgentDatabase(this.database);
         this.writeMeta(options.appVersion);
-        this.maintain(true);
-        this.maintenanceTimer = setInterval(() => this.maintain(false), DAY_MS);
-        this.maintenanceTimer.unref?.();
+        this.recoverInterruptedRuns();
     }
 
     runStarted(run: AgentRunStarted): void {
@@ -675,7 +643,6 @@ export class SqliteAgentObserver implements AgentObserver {
             return;
         }
         this.closed = true;
-        clearInterval(this.maintenanceTimer);
         this.statements.clear();
         try {
             this.database.close();
@@ -703,10 +670,6 @@ export class SqliteAgentObserver implements AgentObserver {
         this.statement(SQL.insertCreatedMeta).run({
             value: String(this.now())
         });
-        this.statement(SQL.upsertMeta).run({
-            key: "retention_days",
-            value: String(this.retentionDays)
-        });
         for (const key of [
             "observer_write_errors",
             "observer_dropped_writes"
@@ -718,45 +681,36 @@ export class SqliteAgentObserver implements AgentObserver {
         }
     }
 
-    private maintain(recoverInterrupted: boolean): void {
+    private recoverInterruptedRuns(): void {
         try {
             const now = this.now();
-            const cutoff = now - this.retentionDays * DAY_MS;
-            const running = recoverInterrupted
-                ? this.statement(SQL.selectRunningRuns).all() as unknown as RunningRunRow[]
-                : [];
-            let deleted = 0;
+            const running = this.statement(SQL.selectRunningRuns)
+                .all() as unknown as RunningRunRow[];
 
             this.database.exec("BEGIN IMMEDIATE");
             try {
-                if (recoverInterrupted) {
-                    for (const run of running) {
-                        this.statement(SQL.recoverRun).run({
-                            run_id: run.run_id,
-                            now
-                        });
-                        this.statement(SQL.insertEvent).run({
-                            app_instance_id: this.appInstanceId,
-                            session_id: run.session_id,
-                            run_id: run.run_id,
-                            turn_id: null,
-                            tool_span_id: null,
-                            ts_ms: now,
-                            event: "run.crashed",
-                            detail_json: jsonDetail({
-                                previousAppInstanceId: run.app_instance_id,
-                                startedAtMs: Number(run.started_at_ms),
-                                lastHeartbeatMs: Number(run.last_heartbeat_ms)
-                            })
-                        });
-                    }
-                    this.statement(SQL.recoverTurn).run({ now });
-                    this.statement(SQL.recoverTool).run({ now });
+                for (const run of running) {
+                    this.statement(SQL.recoverRun).run({
+                        run_id: run.run_id,
+                        now
+                    });
+                    this.statement(SQL.insertEvent).run({
+                        app_instance_id: this.appInstanceId,
+                        session_id: run.session_id,
+                        run_id: run.run_id,
+                        turn_id: null,
+                        tool_span_id: null,
+                        ts_ms: now,
+                        event: "run.crashed",
+                        detail_json: jsonDetail({
+                            previousAppInstanceId: run.app_instance_id,
+                            startedAtMs: Number(run.started_at_ms),
+                            lastHeartbeatMs: Number(run.last_heartbeat_ms)
+                        })
+                    });
                 }
-
-                const prunedRuns = this.statement(SQL.pruneRuns).run({ cutoff });
-                const prunedEvents = this.statement(SQL.pruneEvents).run({ cutoff });
-                deleted = Number(prunedRuns.changes) + Number(prunedEvents.changes);
+                this.statement(SQL.recoverTurn).run({ now });
+                this.statement(SQL.recoverTool).run({ now });
                 this.database.exec("COMMIT");
             } catch (error) {
                 this.database.exec("ROLLBACK");
@@ -764,42 +718,9 @@ export class SqliteAgentObserver implements AgentObserver {
             }
 
             this.database.exec("PRAGMA optimize");
-            if (deleted > 0) {
-                this.database.exec("PRAGMA incremental_vacuum");
-            }
-            this.enforceSizeLimit();
         } catch (error) {
-            this.recordFailure("maintenance", error);
+            this.recordFailure("recovery", error);
         }
-    }
-
-    private enforceSizeLimit(): void {
-        if (this.databasePath === ":memory:" || this.maxBytes <= 0) {
-            return;
-        }
-        if (this.databaseSizeBytes() <= this.maxBytes) {
-            return;
-        }
-
-        const row = this.database.prepare(SQL.countFinishedRuns).get();
-        const count = Number(row?.count ?? 0);
-        if (count === 0) {
-            return;
-        }
-
-        const deleteCount = Math.max(1, Math.ceil(count * 0.25));
-        this.statement(SQL.deleteOldestRuns).run({ count: deleteCount });
-        this.statements.clear();
-        this.database.exec("VACUUM");
-    }
-
-    private databaseSizeBytes(): number {
-        let size = statSync(this.databasePath).size;
-        const walPath = `${this.databasePath}-wal`;
-        if (existsSync(walPath)) {
-            size += statSync(walPath).size;
-        }
-        return size;
     }
 
     private write(
@@ -946,9 +867,11 @@ function sanitizeError(value: string | undefined): string | null {
         .slice(0, ERROR_MESSAGE_MAX_LENGTH)
         .replace(/https?:\/\/[^\s"'<>]+/gi, "[url]")
         .replace(/\b[A-Za-z]:\\[^\s"'<>]+/g, "[path]")
+        .replace(/\\\\[^\s"'<>]+/g, "[path]")
         .replace(/\/(?:Users|home|var|tmp)\/[^\s"'<>]+/g, "[path]")
+        .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[email]")
         .replace(
-            /\b(api[_-]?key|access[_-]?token|refresh[_-]?token|password)\b\s*[:=]\s*[^\s,;]+/gi,
+            /\b(api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|x-api-key|password|secret)\b\s*[:=]\s*[^\s,;]+/gi,
             "$1=[redacted]"
         )
         .replace(/\b(?:sk|pk|api)[-_][A-Za-z0-9_-]{8,}\b/gi, "[redacted]")
