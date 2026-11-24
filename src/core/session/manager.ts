@@ -7,6 +7,10 @@ import type {
 import { sessionContextFrom } from "../../protocol/session.ts";
 import type { PermissionMode } from "../../protocol/permission.ts";
 import { type JarvixLogger, noopLogger } from "../logger.ts";
+import {
+    noopAgentObserver,
+    type AgentObserver
+} from "../observability/index.ts";
 import type { SandboxPreflight } from "../permissions/sandbox-launch.ts";
 import { SessionPermissions } from "../permissions/session-permissions.ts";
 import {
@@ -48,16 +52,19 @@ export class SessionManager {
     private readonly toolManagers = new Map<string, ToolManager>();
     private readonly shellSessionBudget = new ShellSessionBudget();
     private readonly logger: JarvixLogger;
+    private readonly observer: AgentObserver;
 
     constructor(
         sandboxPreflight?: SandboxPreflight,
         contextManagerFactory: ContextManagerFactory = createDefaultContextManager,
         toolManagers: readonly ToolManager[] = [],
-        logger: JarvixLogger = noopLogger
+        logger: JarvixLogger = noopLogger,
+        observer: AgentObserver = noopAgentObserver
     ) {
         this.sandboxPreflight = sandboxPreflight;
         this.contextManagerFactory = contextManagerFactory;
         this.logger = logger;
+        this.observer = observer;
         for (const manager of toolManagers) {
             this.assertToolManagerAvailable(manager.id);
             this.toolManagers.set(manager.id, manager);
@@ -367,7 +374,8 @@ export class SessionManager {
                 tools,
                 permissions,
                 this.contextManagerFactory,
-                this.logger
+                this.logger,
+                this.observer
             );
         } catch (error) {
             tools.dispose();

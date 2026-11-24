@@ -16,6 +16,7 @@
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
     "test": "vitest run",
+    "report:agent": "node --disable-warning=ExperimentalWarning scripts/agent-report.mjs",
     "test:ui": "node scripts/run-bombadil.mjs",
     "test:ui:check": "tsc -p tests/bombadil/tsconfig.json --noEmit",
     "test:watch": "vitest",

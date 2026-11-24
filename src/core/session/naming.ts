@@ -1,5 +1,5 @@
 import type { LlmAdapter, LlmStream } from "../llm/index.ts";
-import type { LlmAssistantMessage } from "../../protocol/llm.ts";
+import type { LlmAssistantMessage, LlmUsage } from "../../protocol/llm.ts";
 import type { JarvixConfig } from "../../protocol/config.ts";
 import { resolveConfiguredModel } from "../../protocol/providers.ts";
 import { SESSION_NAME_MAX_LENGTH } from "../../protocol/session.ts";
@@ -15,12 +15,32 @@ const NAME_PROMPT_MAX_LENGTH = 4_000;
 const SESSION_NAME_OUTPUT_MAX_LENGTH = 4_096;
 export const SESSION_NAME_TIMEOUT_MS = 15_000;
 
+export type SessionNameResult = {
+    name: string;
+    usage?: LlmUsage;
+    responseId?: string;
+    responseModel?: string;
+    stopReason?: string;
+    durationMs: number;
+    ttftMs?: number;
+    generationMs?: number;
+    receivedTextChars: number;
+};
+
 /** Generate a display name from the user's first message. */
 export async function generateSessionName(
     llm: LlmAdapter,
     config: JarvixConfig,
     prompt: string
 ): Promise<string> {
+    return (await generateSessionNameResult(llm, config, prompt)).name;
+}
+
+export async function generateSessionNameResult(
+    llm: LlmAdapter,
+    config: JarvixConfig,
+    prompt: string
+): Promise<SessionNameResult> {
     const source = prompt.trim().slice(0, NAME_PROMPT_MAX_LENGTH);
     if (source.length === 0) {
         throw new Error("A prompt is required to name a session");
@@ -70,14 +90,21 @@ export async function generateSessionName(
 async function readGeneratedName(
     stream: LlmStream,
     signal: AbortSignal
-): Promise<string> {
+): Promise<SessionNameResult> {
+    const startedAt = performance.now();
     let output = "";
+    let receivedTextChars = 0;
+    let firstTokenAt: number | null = null;
     let completed: LlmAssistantMessage | undefined;
     for await (const event of stream) {
         if (signal.aborted) {
             throw new Error("Session naming timed out");
         }
         if (event.type === "text.delta") {
+            if (firstTokenAt === null) {
+                firstTokenAt = performance.now();
+            }
+            receivedTextChars += event.delta.length;
             output = appendGeneratedNameOutput(output, event.delta);
         } else if (event.type === "done") {
             completed = event.message;
@@ -91,7 +118,22 @@ async function readGeneratedName(
     if (!name) {
         throw new Error("The model returned an empty session name");
     }
-    return name;
+    const endedAt = performance.now();
+    return {
+        name,
+        usage: completed?.usage,
+        responseId: completed?.responseId,
+        responseModel: completed?.responseModel,
+        stopReason: completed?.stopReason,
+        durationMs: Math.round(endedAt - startedAt),
+        ttftMs: firstTokenAt === null
+            ? undefined
+            : Math.round(firstTokenAt - startedAt),
+        generationMs: firstTokenAt === null
+            ? undefined
+            : Math.round(endedAt - firstTokenAt),
+        receivedTextChars
+    };
 }
 
 function appendGeneratedNameOutput(output: string, delta: string): string {

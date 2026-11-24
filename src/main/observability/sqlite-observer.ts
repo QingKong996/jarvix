@@ -321,6 +321,7 @@ export class SqliteAgentObserver implements AgentObserver {
     private readonly retentionDays: number;
     private readonly maxBytes: number;
     private readonly statements = new Map<string, StatementSync>();
+    private readonly maintenanceTimer: ReturnType<typeof setInterval>;
     private closed = false;
     private writeErrors = 0;
     private droppedWrites = 0;
@@ -359,26 +360,28 @@ export class SqliteAgentObserver implements AgentObserver {
         `);
         migrateAgentDatabase(this.database);
         this.writeMeta(options.appVersion);
-        this.maintain();
+        this.maintain(true);
+        this.maintenanceTimer = setInterval(() => this.maintain(false), DAY_MS);
+        this.maintenanceTimer.unref?.();
     }
 
     runStarted(run: AgentRunStarted): void {
         this.write("run.started", SQL.insertRun, {
             run_id: run.runId,
-            app_instance_id: run.appInstanceId,
+            app_instance_id: this.appInstanceId,
             session_id: run.sessionId,
             run_type: run.runType,
             provider: nullable(run.provider),
             model: nullable(run.model),
             permission: nullable(run.permission),
-            started_at_ms: run.startedAtMs,
-            last_heartbeat_ms: run.lastHeartbeatMs ?? run.startedAtMs,
-            prompt_chars: nullable(run.promptChars),
+            started_at_ms: Math.round(run.startedAtMs),
+            last_heartbeat_ms: Math.round(run.lastHeartbeatMs ?? run.startedAtMs),
+            prompt_chars: nullableInteger(run.promptChars),
             prompt_hash: nullable(run.promptHash),
-            history_messages_at_start: nullable(run.historyMessagesAtStart),
-            context_window: nullable(run.contextWindow),
-            context_tokens_start: nullable(run.contextTokensStart),
-            max_rounds: nullable(run.maxRounds)
+            history_messages_at_start: nullableInteger(run.historyMessagesAtStart),
+            context_window: nullableInteger(run.contextWindow),
+            context_tokens_start: nullableInteger(run.contextTokensStart),
+            max_rounds: nullableInteger(run.maxRounds)
         });
     }
 
@@ -386,19 +389,20 @@ export class SqliteAgentObserver implements AgentObserver {
         const permissionWaitMs = run.permissionWaitMs ?? 0;
         this.write("run.finished", SQL.updateRun, {
             run_id: runId,
-            ended_at_ms: run.endedAtMs,
-            last_heartbeat_ms: run.lastHeartbeatMs ?? run.endedAtMs,
-            duration_ms: run.durationMs,
-            active_duration_ms: run.activeDurationMs
-                ?? Math.max(0, run.durationMs - permissionWaitMs),
+            ended_at_ms: Math.round(run.endedAtMs),
+            last_heartbeat_ms: Math.round(run.lastHeartbeatMs ?? run.endedAtMs),
+            duration_ms: Math.round(run.durationMs),
+            active_duration_ms: run.activeDurationMs !== undefined
+                ? Math.round(run.activeDurationMs)
+                : Math.round(Math.max(0, run.durationMs - permissionWaitMs)),
             outcome: run.outcome,
             provider: nullable(run.provider),
             model: nullable(run.model),
             error_stage: nullable(run.errorStage),
             error_code: nullable(run.errorCode),
             error_message: sanitizeError(run.errorMessage),
-            context_tokens_end: nullable(run.contextTokensEnd),
-            context_utilization_end: nullable(run.contextUtilizationEnd),
+            context_tokens_end: nullableInteger(run.contextTokensEnd),
+            context_utilization_end: nullableNumber(run.contextUtilizationEnd),
             llm_turns: run.llmTurns,
             tool_calls: run.toolCalls,
             agent_steps: run.agentSteps,
@@ -407,24 +411,24 @@ export class SqliteAgentObserver implements AgentObserver {
             tool_errors: run.toolErrors ?? 0,
             repeat_tool_calls: run.repeatToolCalls ?? 0,
             permission_requests: run.permissionRequests ?? 0,
-            permission_wait_ms: permissionWaitMs,
+            permission_wait_ms: Math.round(permissionWaitMs),
             compactions: run.compactions ?? 0,
-            compaction_duration_ms: run.compactionDurationMs ?? 0,
-            compaction_input_tokens: nullable(run.compactionInputTokens),
-            compaction_output_tokens: nullable(run.compactionOutputTokens),
-            llm_duration_ms: run.llmDurationMs ?? 0,
-            tool_duration_ms: run.toolDurationMs ?? 0,
-            tool_execution_ms: run.toolExecutionMs ?? 0,
-            unaccounted_ms: nullable(run.unaccountedMs),
-            ttft_ms: nullable(run.ttftMs),
-            input_tokens: nullable(run.inputTokens),
-            output_tokens: nullable(run.outputTokens),
-            cache_read_tokens: nullable(run.cacheReadTokens),
-            cache_write_tokens: nullable(run.cacheWriteTokens),
-            reasoning_tokens: nullable(run.reasoningTokens),
-            cost_usd: nullable(run.costUsd),
-            tokens_per_second: nullable(run.tokensPerSecond),
-            wall_tokens_per_second: nullable(run.wallTokensPerSecond),
+            compaction_duration_ms: Math.round(run.compactionDurationMs ?? 0),
+            compaction_input_tokens: nullableInteger(run.compactionInputTokens),
+            compaction_output_tokens: nullableInteger(run.compactionOutputTokens),
+            llm_duration_ms: Math.round(run.llmDurationMs ?? 0),
+            tool_duration_ms: Math.round(run.toolDurationMs ?? 0),
+            tool_execution_ms: Math.round(run.toolExecutionMs ?? 0),
+            unaccounted_ms: nullableInteger(run.unaccountedMs),
+            ttft_ms: nullableInteger(run.ttftMs),
+            input_tokens: nullableInteger(run.inputTokens),
+            output_tokens: nullableInteger(run.outputTokens),
+            cache_read_tokens: nullableInteger(run.cacheReadTokens),
+            cache_write_tokens: nullableInteger(run.cacheWriteTokens),
+            reasoning_tokens: nullableInteger(run.reasoningTokens),
+            cost_usd: nullableNumber(run.costUsd),
+            tokens_per_second: nullableNumber(run.tokensPerSecond),
+            wall_tokens_per_second: nullableNumber(run.wallTokensPerSecond),
             final_stop_reason: nullable(run.finalStopReason),
             tool_sequence_json: jsonText(run.toolSequenceJson)
         });
@@ -433,43 +437,43 @@ export class SqliteAgentObserver implements AgentObserver {
     turnStarted(turn: AgentTurnStarted): void {
         this.write("turn.started", SQL.insertTurn, {
             turn_id: turn.turnId,
-            app_instance_id: turn.appInstanceId,
+            app_instance_id: this.appInstanceId,
             session_id: turn.sessionId,
             run_id: turn.runId,
-            turn_index: nullable(turn.turnIndex),
+            turn_index: nullableInteger(turn.turnIndex),
             turn_kind: turn.turnKind,
             provider: nullable(turn.provider),
             model: nullable(turn.model),
-            started_at_ms: turn.startedAtMs,
-            message_count: nullable(turn.messageCount),
-            context_tokens_before: nullable(turn.contextTokensBefore)
+            started_at_ms: Math.round(turn.startedAtMs),
+            message_count: nullableInteger(turn.messageCount),
+            context_tokens_before: nullableInteger(turn.contextTokensBefore)
         });
     }
 
     turnFinished(turnId: string, turn: AgentTurnFinished): void {
         this.write("turn.finished", SQL.updateTurn, {
             turn_id: turnId,
-            ended_at_ms: turn.endedAtMs,
-            duration_ms: turn.durationMs,
+            ended_at_ms: Math.round(turn.endedAtMs),
+            duration_ms: Math.round(turn.durationMs),
             outcome: turn.outcome,
-            ttft_ms: nullable(turn.ttftMs),
+            ttft_ms: nullableInteger(turn.ttftMs),
             first_token_kind: nullable(turn.firstTokenKind),
-            generation_ms: nullable(turn.generationMs),
-            input_tokens: nullable(turn.inputTokens),
-            output_tokens: nullable(turn.outputTokens),
-            cache_read_tokens: nullable(turn.cacheReadTokens),
-            cache_write_tokens: nullable(turn.cacheWriteTokens),
-            reasoning_tokens: nullable(turn.reasoningTokens),
-            cost_usd: nullable(turn.costUsd),
-            tokens_per_second: nullable(turn.tokensPerSecond),
-            wall_tokens_per_second: nullable(turn.wallTokensPerSecond),
+            generation_ms: nullableInteger(turn.generationMs),
+            input_tokens: nullableInteger(turn.inputTokens),
+            output_tokens: nullableInteger(turn.outputTokens),
+            cache_read_tokens: nullableInteger(turn.cacheReadTokens),
+            cache_write_tokens: nullableInteger(turn.cacheWriteTokens),
+            reasoning_tokens: nullableInteger(turn.reasoningTokens),
+            cost_usd: nullableNumber(turn.costUsd),
+            tokens_per_second: nullableNumber(turn.tokensPerSecond),
+            wall_tokens_per_second: nullableNumber(turn.wallTokensPerSecond),
             stop_reason: nullable(turn.stopReason),
             response_id: nullable(turn.responseId),
             response_model: nullable(turn.responseModel),
             tool_calls: turn.toolCalls ?? 0,
-            context_tokens_after: nullable(turn.contextTokensAfter),
-            received_text_chars: nullable(turn.receivedTextChars),
-            received_thinking_chars: nullable(turn.receivedThinkingChars),
+            context_tokens_after: nullableInteger(turn.contextTokensAfter),
+            received_text_chars: nullableInteger(turn.receivedTextChars),
+            received_thinking_chars: nullableInteger(turn.receivedThinkingChars),
             error_code: nullable(turn.errorCode),
             error_message: sanitizeError(turn.errorMessage)
         });
@@ -478,17 +482,17 @@ export class SqliteAgentObserver implements AgentObserver {
     toolStarted(tool: AgentToolStarted): void {
         this.write("tool.started", SQL.insertTool, {
             tool_span_id: tool.toolSpanId,
-            app_instance_id: tool.appInstanceId,
+            app_instance_id: this.appInstanceId,
             session_id: tool.sessionId,
             run_id: tool.runId,
             turn_id: nullable(tool.turnId),
-            turn_index: nullable(tool.turnIndex),
-            step_index: tool.stepIndex,
+            turn_index: nullableInteger(tool.turnIndex),
+            step_index: Math.round(tool.stepIndex),
             tool_call_id: nullable(tool.toolCallId),
             tool_name: tool.toolName,
             tool_category: tool.toolCategory,
-            started_at_ms: tool.startedAtMs,
-            args_bytes: nullable(tool.argsBytes),
+            started_at_ms: Math.round(tool.startedAtMs),
+            args_bytes: nullableInteger(tool.argsBytes),
             args_hash: nullable(tool.argsHash),
             detail_json: jsonDetail(tool.detail)
         });
@@ -498,23 +502,24 @@ export class SqliteAgentObserver implements AgentObserver {
         const permissionWaitMs = tool.permissionWaitMs ?? 0;
         this.write("tool.finished", SQL.updateTool, {
             tool_span_id: toolSpanId,
-            ended_at_ms: tool.endedAtMs,
-            duration_ms: tool.durationMs,
+            ended_at_ms: Math.round(tool.endedAtMs),
+            duration_ms: Math.round(tool.durationMs),
             outcome: tool.outcome,
             permission_requests: tool.permissionRequests ?? 0,
-            permission_wait_ms: permissionWaitMs,
-            execution_ms: tool.executionMs
-                ?? Math.max(0, tool.durationMs - permissionWaitMs),
+            permission_wait_ms: Math.round(permissionWaitMs),
+            execution_ms: tool.executionMs !== undefined
+                ? Math.round(tool.executionMs)
+                : Math.round(Math.max(0, tool.durationMs - permissionWaitMs)),
             is_error: toInteger(tool.isError),
             end_reason: nullable(tool.endReason),
             error_code: nullable(tool.errorCode),
             error_message: sanitizeError(tool.errorMessage),
-            output_chars: nullable(tool.outputChars),
-            output_bytes: nullable(tool.outputBytes),
+            output_chars: nullableInteger(tool.outputChars),
+            output_bytes: nullableInteger(tool.outputBytes),
             truncated: toInteger(tool.truncated),
-            image_count: tool.imageCount ?? 0,
-            repeat_index: tool.repeatIndex ?? 0,
-            repeat_group_size: tool.repeatGroupSize ?? 1,
+            image_count: Math.round(tool.imageCount ?? 0),
+            repeat_index: Math.round(tool.repeatIndex ?? 0),
+            repeat_group_size: Math.round(tool.repeatGroupSize ?? 1),
             detail_json: jsonDetail(tool.detail)
         });
     }
@@ -522,18 +527,18 @@ export class SqliteAgentObserver implements AgentObserver {
     heartbeat(runId: string, tsMs: number): void {
         this.write("run.heartbeat", SQL.updateHeartbeat, {
             run_id: runId,
-            ts_ms: tsMs
+            ts_ms: Math.round(tsMs)
         });
     }
 
     event(event: AgentEvent): void {
         this.write("event", SQL.insertEvent, {
-            app_instance_id: event.appInstanceId,
+            app_instance_id: this.appInstanceId,
             session_id: nullable(event.sessionId),
             run_id: nullable(event.runId),
             turn_id: nullable(event.turnId),
             tool_span_id: nullable(event.toolSpanId),
-            ts_ms: event.tsMs,
+            ts_ms: Math.round(event.tsMs),
             event: event.event,
             detail_json: jsonDetail(event.detail)
         });
@@ -548,6 +553,7 @@ export class SqliteAgentObserver implements AgentObserver {
             return;
         }
         this.closed = true;
+        clearInterval(this.maintenanceTimer);
         this.statements.clear();
         try {
             this.database.close();
@@ -577,38 +583,42 @@ export class SqliteAgentObserver implements AgentObserver {
         });
     }
 
-    private maintain(): void {
+    private maintain(recoverInterrupted: boolean): void {
         try {
             const now = this.now();
             const cutoff = now - this.retentionDays * DAY_MS;
-            const running = this.statement(SQL.selectRunningRuns).all() as unknown as RunningRunRow[];
+            const running = recoverInterrupted
+                ? this.statement(SQL.selectRunningRuns).all() as unknown as RunningRunRow[]
+                : [];
             let deleted = 0;
 
             this.database.exec("BEGIN IMMEDIATE");
             try {
-                for (const run of running) {
-                    this.statement(SQL.recoverRun).run({
-                        run_id: run.run_id,
-                        now
-                    });
-                    this.statement(SQL.insertEvent).run({
-                        app_instance_id: this.appInstanceId,
-                        session_id: run.session_id,
-                        run_id: run.run_id,
-                        turn_id: null,
-                        tool_span_id: null,
-                        ts_ms: now,
-                        event: "run.crashed",
-                        detail_json: jsonDetail({
-                            previousAppInstanceId: run.app_instance_id,
-                            startedAtMs: Number(run.started_at_ms),
-                            lastHeartbeatMs: Number(run.last_heartbeat_ms)
-                        })
-                    });
+                if (recoverInterrupted) {
+                    for (const run of running) {
+                        this.statement(SQL.recoverRun).run({
+                            run_id: run.run_id,
+                            now
+                        });
+                        this.statement(SQL.insertEvent).run({
+                            app_instance_id: this.appInstanceId,
+                            session_id: run.session_id,
+                            run_id: run.run_id,
+                            turn_id: null,
+                            tool_span_id: null,
+                            ts_ms: now,
+                            event: "run.crashed",
+                            detail_json: jsonDetail({
+                                previousAppInstanceId: run.app_instance_id,
+                                startedAtMs: Number(run.started_at_ms),
+                                lastHeartbeatMs: Number(run.last_heartbeat_ms)
+                            })
+                        });
+                    }
+                    this.statement(SQL.recoverTurn).run({ now });
+                    this.statement(SQL.recoverTool).run({ now });
                 }
 
-                this.statement(SQL.recoverTurn).run({ now });
-                this.statement(SQL.recoverTool).run({ now });
                 const prunedRuns = this.statement(SQL.pruneRuns).run({ cutoff });
                 const prunedEvents = this.statement(SQL.pruneEvents).run({ cutoff });
                 deleted = Number(prunedRuns.changes) + Number(prunedEvents.changes);
@@ -740,6 +750,17 @@ function nullable<T>(value: T | undefined): T | null {
     return value ?? null;
 }
 
+function nullableNumber(value: number | undefined): number | null {
+    return value === undefined || !Number.isFinite(value) ? null : value;
+}
+
+function nullableInteger(value: number | undefined): number | null {
+    if (value === undefined || !Number.isFinite(value)) {
+        return null;
+    }
+    return Math.round(value);
+}
+
 function toInteger(value: boolean | undefined): number {
     return value === true ? 1 : 0;
 }
@@ -774,6 +795,9 @@ function sanitizeError(value: string | undefined): string | null {
     }
     const sanitized = value
         .slice(0, ERROR_MESSAGE_MAX_LENGTH)
+        .replace(/https?:\/\/[^\s"'<>]+/gi, "[url]")
+        .replace(/\b[A-Za-z]:\\[^\s"'<>]+/g, "[path]")
+        .replace(/\/(?:Users|home|var|tmp)\/[^\s"'<>]+/g, "[path]")
         .replace(
             /\b(api[_-]?key|access[_-]?token|refresh[_-]?token|password)\b\s*[:=]\s*[^\s,;]+/gi,
             "$1=[redacted]"

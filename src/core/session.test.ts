@@ -14,6 +14,14 @@ import { SESSION_NAME_TIMEOUT_MS } from "./session/naming.ts";
 import { Jarvix } from "./index.ts";
 import type { Language } from "../protocol/config.ts";
 import { providerConfigSchema } from "../protocol/providers.ts";
+import {
+    noopAgentObserver,
+    type AgentObserver,
+    type AgentRunFinished,
+    type AgentRunStarted,
+    type AgentTurnFinished,
+    type AgentTurnStarted
+} from "./observability/index.ts";
 import { SESSION_NAME_MAX_LENGTH } from "../protocol/session.ts";
 
 const home = vi.hoisted(() => ({ path: "" }));
@@ -338,6 +346,85 @@ test("renames sessions manually and from the first user prompt", async () => {
     });
     expect(loadSession(session.meta.id, directory)?.meta.name).toBe("Focused title");
     expect(renamed).toEqual(["Manual title", "Focused title"]);
+});
+
+test("records automatic naming as a separate observed run", async () => {
+    home.path = join(base, "naming-observability-home");
+    const runsStarted: AgentRunStarted[] = [];
+    const runsFinished: AgentRunFinished[] = [];
+    const turnsStarted: AgentTurnStarted[] = [];
+    const turnsFinished: AgentTurnFinished[] = [];
+    const observer: AgentObserver = {
+        ...noopAgentObserver,
+        runStarted: (run) => {
+            runsStarted.push(run);
+        },
+        runFinished: (_runId, run) => {
+            runsFinished.push(run);
+        },
+        turnStarted: (turn) => {
+            turnsStarted.push(turn);
+        },
+        turnFinished: (_turnId, turn) => {
+            turnsFinished.push(turn);
+        }
+    };
+    const jarvix = new Jarvix({
+        llm: {
+            getModel: () => MODEL,
+            stream: () => (async function* (): AsyncIterable<LlmStreamEvent> {
+                yield { type: "text.delta", index: 0, delta: "Naming run" };
+                await new Promise((resolve) => setTimeout(resolve, 3));
+                yield {
+                    type: "done",
+                    message: {
+                        ...assistantMessage("Naming run"),
+                        usage: {
+                            inputTokens: 3,
+                            outputTokens: 5,
+                            cacheReadTokens: 1,
+                            cacheWriteTokens: 0,
+                            totalTokens: 9,
+                            cost: 0.0001
+                        }
+                    }
+                };
+            })()
+        },
+        config: TEST_CONFIG,
+        observer
+    });
+    const session = jarvix.createSession({}, SESSION_NAME);
+
+    expect(await jarvix.autoNameSession(session.meta.id, "Name this session"))
+        .toBe("Naming run");
+    expect(runsStarted).toHaveLength(1);
+    expect(runsStarted[0]).toMatchObject({
+        sessionId: session.meta.id,
+        runType: "naming",
+        promptChars: "Name this session".length
+    });
+    expect(turnsStarted).toHaveLength(1);
+    expect(turnsStarted[0]).toMatchObject({
+        runId: runsStarted[0]?.runId,
+        turnKind: "naming",
+        turnIndex: 0
+    });
+    expect(turnsFinished[0]).toMatchObject({
+        outcome: "completed",
+        firstTokenKind: "text",
+        inputTokens: 3,
+        outputTokens: 5
+    });
+    expect(runsFinished[0]).toMatchObject({
+        outcome: "completed",
+        llmTurns: 1,
+        toolCalls: 0,
+        agentSteps: 0,
+        inputTokens: 3,
+        outputTokens: 5,
+        finalStopReason: "stop"
+    });
 });
 
 test("names released sessions without loading their full history", async () => {

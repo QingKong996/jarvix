@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import type { LlmAdapter } from "./llm/index.ts";
 import { i18n } from "../i18n/index.ts";
 import { type JarvixLogger, noopLogger } from "./logger.ts";
@@ -17,6 +18,10 @@ import {
     DEFAULT_PERMISSION_MODE,
     type PermissionMode
 } from "../protocol/permission.ts";
+import {
+    noopAgentObserver,
+    type AgentObserver
+} from "./observability/index.ts";
 import type { SandboxPreflight } from "./permissions/sandbox-launch.ts";
 import type { ToolManager } from "../runtime/tools/tool-manager.ts";
 import {
@@ -28,7 +33,7 @@ import { workingDirectoriesFor } from "./session/directories.ts";
 import { SessionManager } from "./session/manager.ts";
 import type { ContextManagerFactory } from "./session/runtime/context-manager.ts";
 import type { Session } from "./session/runtime/session.ts";
-import { generateSessionName } from "./session/naming.ts";
+import { generateSessionNameResult } from "./session/naming.ts";
 
 export type JarvixOptions = {
     llm: LlmAdapter;
@@ -37,6 +42,7 @@ export type JarvixOptions = {
     contextManagerFactory?: ContextManagerFactory;
     toolManagers?: readonly ToolManager[];
     logger?: JarvixLogger;
+    observer?: AgentObserver;
 };
 
 export class Jarvix {
@@ -45,16 +51,19 @@ export class Jarvix {
     private readonly llm: LlmAdapter;
     private readonly sessions: SessionManager;
     private readonly logger: JarvixLogger;
+    private readonly observer: AgentObserver;
 
     constructor(options: JarvixOptions) {
         this.config = options.config ?? {};
         this.llm = options.llm;
         this.logger = options.logger ?? noopLogger;
+        this.observer = options.observer ?? noopAgentObserver;
         this.sessions = new SessionManager(
             options.sandboxPreflight,
             options.contextManagerFactory,
             options.toolManagers,
-            this.logger
+            this.logger,
+            this.observer
         );
         this.logger.info("Jarvix runtime initialized", {
             providerCount: this.config.providers?.length ?? 0,
@@ -190,6 +199,7 @@ export class Jarvix {
 
     async autoNameSession(sessionId: string, firstPrompt?: string): Promise<string> {
         const startedAt = performance.now();
+        const startedAtMs = Date.now();
         const { currentName, prompt } = this.sessions.namingContext(
             sessionId,
             firstPrompt
@@ -201,21 +211,157 @@ export class Jarvix {
             throw new Error("The session has no user prompt to name");
         }
 
+        const runId = `run_${randomUUID()}`;
+        const turnId = `${runId}:n0`;
+        const selectedModel = this.config.selectedModel;
+        let turnFinished = false;
+        let runFinished = false;
+        this.observer.runStarted({
+            runId,
+            sessionId,
+            runType: "naming",
+            startedAtMs,
+            lastHeartbeatMs: startedAtMs,
+            provider: selectedModel?.provider,
+            model: selectedModel?.id,
+            promptChars: prompt.length,
+            promptHash: hashPrompt(prompt)
+        });
+        this.observer.turnStarted({
+            turnId,
+            sessionId,
+            runId,
+            turnKind: "naming",
+            turnIndex: 0,
+            startedAtMs,
+            provider: selectedModel?.provider,
+            model: selectedModel?.id,
+            messageCount: 1
+        });
+
         try {
-            const name = await generateSessionName(this.llm, this.config, prompt);
-            const update = this.sessions.renameIfUnchanged(sessionId, currentName, name);
+            const result = await generateSessionNameResult(
+                this.llm,
+                this.config,
+                prompt
+            );
+            const endedAtMs = Date.now();
+            const durationMs = Math.round(performance.now() - startedAt);
+            const usage = result.usage;
+            this.observer.turnFinished(turnId, {
+                endedAtMs,
+                durationMs: result.durationMs,
+                outcome: "completed",
+                ttftMs: result.ttftMs,
+                firstTokenKind: result.ttftMs === undefined ? undefined : "text",
+                generationMs: result.generationMs,
+                inputTokens: usage?.inputTokens,
+                outputTokens: usage?.outputTokens,
+                cacheReadTokens: usage?.cacheReadTokens,
+                cacheWriteTokens: usage?.cacheWriteTokens,
+                reasoningTokens: usage?.reasoningTokens,
+                costUsd: usage?.cost,
+                tokensPerSecond: tokensPerSecond(usage?.outputTokens, result.generationMs),
+                wallTokensPerSecond: tokensPerSecond(usage?.outputTokens, result.durationMs),
+                stopReason: result.stopReason,
+                responseId: result.responseId,
+                responseModel: result.responseModel,
+                toolCalls: 0,
+                receivedTextChars: result.receivedTextChars
+            });
+            turnFinished = true;
+
+            const update = this.sessions.renameIfUnchanged(
+                sessionId,
+                currentName,
+                result.name
+            );
             if (update.renamed) {
                 this.emit(sessionId, { type: "session.renamed", name: update.name });
             }
+            this.observer.runFinished(runId, {
+                endedAtMs: Date.now(),
+                durationMs,
+                outcome: "completed",
+                provider: selectedModel?.provider,
+                model: selectedModel?.id,
+                activeDurationMs: durationMs,
+                llmTurns: 1,
+                toolCalls: 0,
+                agentSteps: 0,
+                llmDurationMs: result.durationMs,
+                ttftMs: result.ttftMs,
+                inputTokens: usage?.inputTokens,
+                outputTokens: usage?.outputTokens,
+                cacheReadTokens: usage?.cacheReadTokens,
+                cacheWriteTokens: usage?.cacheWriteTokens,
+                reasoningTokens: usage?.reasoningTokens,
+                costUsd: usage?.cost,
+                tokensPerSecond: tokensPerSecond(usage?.outputTokens, result.generationMs),
+                wallTokensPerSecond: tokensPerSecond(usage?.outputTokens, durationMs),
+                finalStopReason: result.stopReason,
+                toolSequenceJson: "[]"
+            });
+            runFinished = true;
             this.logger.info("Session auto-naming completed", {
                 sessionId,
+                runId,
                 renamed: update.renamed,
                 durationMs: elapsedMs(startedAt)
             });
             return update.name;
         } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            const failedAtModelResolve = message === "No model configured"
+                || message.startsWith("Model not found:");
+            const timedOut = /timed out/i.test(message);
+            const endedAtMs = Date.now();
+            const durationMs = Math.round(performance.now() - startedAt);
+            if (!turnFinished) {
+                this.observer.turnFinished(turnId, {
+                    endedAtMs,
+                    durationMs,
+                    outcome: "error",
+                    toolCalls: 0,
+                    errorCode: failedAtModelResolve
+                        ? "naming_model_resolve"
+                        : timedOut
+                            ? "naming_timeout"
+                            : "naming_failed",
+                    errorMessage: message
+                });
+                turnFinished = true;
+            }
+            if (!runFinished) {
+                this.observer.runFinished(runId, {
+                    endedAtMs,
+                    durationMs,
+                    outcome: "failed",
+                    provider: selectedModel?.provider,
+                    model: selectedModel?.id,
+                    activeDurationMs: durationMs,
+                    errorStage: failedAtModelResolve
+                        ? "model_resolve"
+                        : timedOut
+                            ? "naming_timeout"
+                            : "naming",
+                    errorCode: failedAtModelResolve
+                        ? "naming_model_resolve"
+                        : timedOut
+                            ? "naming_timeout"
+                            : "naming_failed",
+                    errorMessage: message,
+                    llmTurns: failedAtModelResolve ? 0 : 1,
+                    llmDurationMs: failedAtModelResolve ? 0 : durationMs,
+                    toolCalls: 0,
+                    agentSteps: 0,
+                    toolSequenceJson: "[]"
+                });
+                runFinished = true;
+            }
             this.logger.error("Session auto-naming failed", error, {
                 sessionId,
+                runId,
                 durationMs: elapsedMs(startedAt)
             });
             throw error;
@@ -301,4 +447,18 @@ function selectedModelLabel(config: JarvixConfig): string | null {
 
 function elapsedMs(startedAt: number): number {
     return Math.round((performance.now() - startedAt) * 10) / 10;
+}
+
+function hashPrompt(prompt: string): string {
+    return createHash("sha256").update(prompt).digest("hex").slice(0, 16);
+}
+
+function tokensPerSecond(
+    tokens: number | undefined,
+    durationMs: number | undefined
+): number | undefined {
+    if (tokens === undefined || durationMs === undefined || durationMs <= 0) {
+        return undefined;
+    }
+    return Math.round((tokens / (durationMs / 1_000)) * 100) / 100;
 }
