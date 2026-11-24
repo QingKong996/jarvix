@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { expect, test, vi } from "vitest";
+import { expect, test } from "vitest";
 import {
     createSqliteAgentObserver,
     SqliteAgentObserver
@@ -230,8 +230,8 @@ test("persists run, turn, and tool records", () => {
         expect(
             database.prepare(
                 "SELECT value FROM meta WHERE key = 'retention_days'"
-            ).get()?.value
-        ).toBe("90");
+            ).get()
+        ).toBeUndefined();
 
     } finally {
         database.close();
@@ -400,39 +400,6 @@ test("migrates a version 1 database without losing existing records", () => {
     }
 });
 
-test("does not recover active runs during periodic maintenance", () => {
-    vi.useFakeTimers();
-    const { directory, databasePath } = temporaryDatabase();
-    const observer = new SqliteAgentObserver({
-        databasePath,
-        appVersion: "test",
-        now: () => 10_000
-    });
-    try {
-        observer.runStarted({
-            runId: "run-active",
-            sessionId: "session-1",
-            runType: "prompt",
-            startedAtMs: 9_000
-        });
-        vi.advanceTimersByTime(DAY_MS);
-    } finally {
-        observer.close();
-        vi.useRealTimers();
-    }
-
-    const database = new DatabaseSync(databasePath, { readOnly: true });
-    try {
-        const run = database.prepare(
-            "SELECT outcome FROM runs WHERE run_id = 'run-active'"
-        ).get();
-        expect(run?.outcome).toBe("running");
-    } finally {
-        database.close();
-        rmSync(directory, { recursive: true, force: true });
-    }
-});
-
 test("fails open when the database is closed or unavailable", () => {
     const { directory, databasePath } = temporaryDatabase();
     const observer = new SqliteAgentObserver({
@@ -493,7 +460,10 @@ test("redacts credentials, paths, and URLs from errors", () => {
             errorCode: "llm_stream_error",
             errorMessage: [
                 "request failed at C:\\Users\\secret\\project.txt",
+                "remote \\\\server\\share\\private.txt",
+                "contact user@example.com",
                 "api_key=" + "plain-secret-value",
+                "x-api-key=" + "header-secret-value",
                 "https://example.com/private"
             ].join(" "),
             llmTurns: 1,
@@ -510,9 +480,13 @@ test("redacts credentials, paths, and URLs from errors", () => {
             "SELECT error_message FROM runs WHERE run_id = 'run-error'"
         ).get();
         expect(run?.error_message).toContain("[path]");
+        expect(run?.error_message).toContain("[email]");
         expect(run?.error_message).toContain("api_key=[redacted]");
+        expect(run?.error_message).toContain("x-api-key=[redacted]");
         expect(run?.error_message).toContain("[url]");
         expect(run?.error_message).not.toContain("plain-secret-value");
+        expect(run?.error_message).not.toContain("header-secret-value");
+        expect(run?.error_message).not.toContain("user@example.com");
         expect(run?.error_message).not.toContain("example.com");
     } finally {
         database.close();
@@ -563,15 +537,14 @@ test("persists observer write failure counters", () => {
     }
 });
 
-test("prunes expired runs and cascades turns and tools", () => {
+test("keeps old runs and child rows across restarts", () => {
     const { directory, databasePath } = temporaryDatabase();
     const now = Date.UTC(2026, 10, 24);
     const old = now - 40 * DAY_MS;
     const first = new SqliteAgentObserver({
         databasePath,
         appVersion: "test",
-        now: () => now,
-        retentionDays: 30
+        now: () => now
     });
 
     try {
@@ -626,8 +599,7 @@ test("prunes expired runs and cascades turns and tools", () => {
     const second = new SqliteAgentObserver({
         databasePath,
         appVersion: "test",
-        now: () => now,
-        retentionDays: 30
+        now: () => now
     });
     second.close();
 
@@ -635,13 +607,13 @@ test("prunes expired runs and cascades turns and tools", () => {
     try {
         expect(
             database.prepare("SELECT count(*) AS count FROM runs").get()?.count
-        ).toBe(0);
+        ).toBe(1);
         expect(
             database.prepare("SELECT count(*) AS count FROM turns").get()?.count
-        ).toBe(0);
+        ).toBe(1);
         expect(
             database.prepare("SELECT count(*) AS count FROM tools").get()?.count
-        ).toBe(0);
+        ).toBe(1);
     } finally {
         database.close();
         rmSync(directory, { recursive: true, force: true });

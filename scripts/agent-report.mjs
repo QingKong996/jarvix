@@ -9,7 +9,6 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
 const MIN_P95_SAMPLES = 20;
 const MAX_SLOW_RUNS = 10;
 const MAX_DAILY_ROWS = 366;
-const DEFAULT_RETENTION_DAYS = 90;
 
 const options = parseArguments(process.argv.slice(2));
 if (options.help) {
@@ -37,23 +36,11 @@ try {
         );
     }
     const meta = readMeta(database);
-    const retentionDays = positiveNumberOrDefault(
-        meta.retention_days,
-        DEFAULT_RETENTION_DAYS
-    );
-    const effectiveDays = Math.min(options.days, retentionDays);
-    if (effectiveDays !== options.days) {
-        console.error(
-            `Requested ${options.days} days; report window capped at ${effectiveDays} days by retention settings.`
-        );
-    }
-    const sinceMs = Date.now() - effectiveDays * DAY_MS;
-    const previousSinceMs = sinceMs - effectiveDays * DAY_MS;
+    const sinceMs = Date.now() - options.days * DAY_MS;
+    const previousSinceMs = sinceMs - options.days * DAY_MS;
     report = collectReport(database, {
         databasePath,
-        days: effectiveDays,
-        requestedDays: options.days,
-        retentionDays,
+        days: options.days,
         meta,
         sinceMs,
         previousSinceMs
@@ -77,7 +64,8 @@ function collectReport(database, window) {
     );
     const turns = database.prepare(`
         SELECT
-            t.turn_id, t.run_id, t.turn_kind, t.provider, t.model, t.outcome,
+            t.turn_id, t.run_id, t.turn_index, t.turn_kind, t.provider,
+            t.model, t.outcome, t.started_at_ms, t.ended_at_ms,
             t.duration_ms, t.ttft_ms, t.first_token_kind, t.input_tokens,
             t.output_tokens, t.cache_read_tokens, t.cache_write_tokens,
             t.reasoning_tokens, t.cost_usd, t.tokens_per_second,
@@ -93,14 +81,17 @@ function collectReport(database, window) {
     `).all(window.sinceMs, Number.MAX_SAFE_INTEGER);
     const tools = database.prepare(`
         SELECT
-            t.tool_span_id, t.run_id, t.turn_id, t.step_index, t.tool_name,
-            t.tool_category, t.started_at_ms,
+            t.tool_span_id, t.run_id, t.turn_id, t.turn_index, t.step_index,
+            t.tool_name, t.tool_category, t.started_at_ms,
             t.ended_at_ms, t.duration_ms, t.outcome, t.permission_requests,
             t.permission_wait_ms, t.execution_ms, t.is_error, t.end_reason,
             t.error_code, t.output_chars, t.output_bytes, t.image_count,
-            t.truncated, t.exit_code, t.repeat_index, t.repeat_group_size
+            t.truncated, t.exit_code, t.repeat_index, t.repeat_group_size,
+            tu.started_at_ms AS turn_started_at_ms,
+            tu.ended_at_ms AS turn_ended_at_ms
         FROM tools t
         JOIN runs r ON r.run_id = t.run_id
+        LEFT JOIN turns tu ON tu.turn_id = t.turn_id
         WHERE r.started_at_ms >= ? AND r.started_at_ms < ?
         ORDER BY t.started_at_ms DESC
     `).all(window.sinceMs, Number.MAX_SAFE_INTEGER);
@@ -130,9 +121,19 @@ function collectReport(database, window) {
     const toolSummary = toolMetrics(completedTools);
     const attemptSummary = llmAttemptMetrics(llmAttempts);
     const interactionSummary = interactionMetrics(finishedPromptRuns);
+    const stepTiming = stepTimingMetrics(
+        turns,
+        completedTools,
+        new Set(finishedPromptRuns.map((run) => run.run_id))
+    );
     const modelSegments = modelRunMetrics(
         finishedPromptRuns,
         previousPromptRuns
+    );
+    const reportedLlmAttempts = sum(
+        turns
+            .filter((turn) => turn.outcome !== "running")
+            .map((turn) => turn.llm_http_attempts)
     );
     const dataQuality = {
         promptRunsMissingTtft: missingMetric(finishedPromptRuns, "ttft_ms"),
@@ -154,6 +155,12 @@ function collectReport(database, window) {
             finishedPromptRuns,
             "toolset_hash"
         ),
+        llmAttemptRows: llmAttempts.length,
+        reportedLlmAttempts,
+        missingLlmAttemptRows: Math.max(
+            0,
+            reportedLlmAttempts - llmAttempts.length
+        ),
         mainTurnsMissingTtft: missingMetric(mainTurns, "ttft_ms"),
         mainTurnsMissingUsage: missingMetric(mainTurns, "output_tokens"),
         runsStillRunning: runs.filter((run) => run.outcome === "running").length,
@@ -166,8 +173,6 @@ function collectReport(database, window) {
         generated_at: new Date().toISOString(),
         window: {
             days: window.days,
-            requestedDays: window.requestedDays,
-            retentionDays: window.retentionDays,
             since: new Date(window.sinceMs).toISOString(),
             previousSince: new Date(window.previousSinceMs).toISOString(),
             database: window.databasePath
@@ -223,10 +228,12 @@ function collectReport(database, window) {
             interaction: interactionSummary,
             attempts: attemptSummary,
             modelSegments,
+            stepTiming,
             dataQuality
         }),
         daily: dailyMetrics(promptRuns),
         interaction: interactionSummary,
+        stepTiming,
         llmAttempts: attemptSummary,
         llmByModel: llmByModel(completedMainTurns),
         firstTokenKinds: countBy(
@@ -276,11 +283,6 @@ function readMeta(database) {
         database.prepare("SELECT key, value FROM meta").all()
             .map((row) => [row.key, row.value])
     );
-}
-
-function positiveNumberOrDefault(value, fallback) {
-    const number = Number(value);
-    return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
 function promptRunMetrics(runs, tools) {
@@ -557,6 +559,97 @@ function interactionMetrics(runs) {
     };
 }
 
+function stepTimingMetrics(turns, tools, runIds) {
+    const runs = new Map();
+    for (const turn of turns) {
+        if (
+            turn.turn_kind !== "main"
+            || turn.outcome === "running"
+            || !runIds.has(turn.run_id)
+        ) {
+            continue;
+        }
+        const run = runs.get(turn.run_id) ?? { turns: [], tools: [] };
+        run.turns.push(turn);
+        runs.set(turn.run_id, run);
+    }
+    for (const tool of tools) {
+        if (!runIds.has(tool.run_id) || !tool.turn_id) {
+            continue;
+        }
+        const run = runs.get(tool.run_id) ?? { turns: [], tools: [] };
+        run.tools.push(tool);
+        runs.set(tool.run_id, run);
+    }
+
+    const dispatchGaps = [];
+    const interToolGaps = [];
+    const resumeGaps = [];
+    for (const run of runs.values()) {
+        const mainTurns = [...run.turns].sort(
+            (left, right) =>
+                Number(left.turn_index) - Number(right.turn_index)
+        );
+        const toolsByTurn = new Map();
+        for (const tool of [...run.tools].sort(
+            (left, right) =>
+                Number(left.step_index) - Number(right.step_index)
+        )) {
+            const turnTools = toolsByTurn.get(tool.turn_id) ?? [];
+            turnTools.push(tool);
+            toolsByTurn.set(tool.turn_id, turnTools);
+        }
+
+        for (const [turnIndex, turn] of mainTurns.entries()) {
+            const turnTools = toolsByTurn.get(turn.turn_id) ?? [];
+            if (turnTools.length === 0) {
+                continue;
+            }
+            const first = turnTools[0];
+            if (turn.ended_at_ms !== null && first.started_at_ms !== null) {
+                const gap = Number(first.started_at_ms) - Number(turn.ended_at_ms);
+                if (gap >= 0) {
+                    dispatchGaps.push(gap);
+                }
+            }
+            for (let index = 1; index < turnTools.length; index += 1) {
+                const previous = turnTools[index - 1];
+                const current = turnTools[index];
+                if (
+                    previous.ended_at_ms !== null
+                    && current.started_at_ms !== null
+                ) {
+                    const gap =
+                        Number(current.started_at_ms)
+                        - Number(previous.ended_at_ms);
+                    if (gap >= 0) {
+                        interToolGaps.push(gap);
+                    }
+                }
+            }
+            const nextTurn = mainTurns[turnIndex + 1];
+            const last = turnTools.at(-1);
+            if (
+                nextTurn
+                && last?.ended_at_ms !== null
+                && nextTurn.started_at_ms !== null
+            ) {
+                const gap =
+                    Number(nextTurn.started_at_ms)
+                    - Number(last.ended_at_ms);
+                if (gap >= 0) {
+                    resumeGaps.push(gap);
+                }
+            }
+        }
+    }
+    return {
+        toolDispatchMs: describe(dispatchGaps),
+        interToolGapMs: describe(interToolGaps),
+        nextTurnGapMs: describe(resumeGaps)
+    };
+}
+
 function llmAttemptMetrics(attempts) {
     const finished = attempts.filter((attempt) => attempt.outcome !== "running");
     const byTurn = new Map();
@@ -576,6 +669,40 @@ function llmAttemptMetrics(attempts) {
             && Number(first.http_status) >= 200
             && Number(first.http_status) < 400;
     }).length;
+    const retryGaps = [];
+    const retryAfterAdvisories = [];
+    let retryAfterSamples = 0;
+    let retryAfterCovered = 0;
+    for (const items of turns) {
+        const ordered = [...items].sort(
+            (left, right) =>
+                Number(left.attempt_index) - Number(right.attempt_index)
+        );
+        for (let index = 1; index < ordered.length; index += 1) {
+            const previous = ordered[index - 1];
+            const current = ordered[index];
+            if (
+                previous.ended_at_ms === null
+                || current.started_at_ms === null
+            ) {
+                continue;
+            }
+            const gap =
+                Number(current.started_at_ms) - Number(previous.ended_at_ms);
+            if (gap < 0) {
+                continue;
+            }
+            retryGaps.push(gap);
+            if (previous.retry_after_ms !== null) {
+                const advisory = Number(previous.retry_after_ms);
+                retryAfterSamples += 1;
+                retryAfterAdvisories.push(advisory);
+                if (gap >= advisory * 0.9) {
+                    retryAfterCovered += 1;
+                }
+            }
+        }
+    }
     return {
         attempts: attempts.length,
         finished: finished.length,
@@ -593,6 +720,13 @@ function llmAttemptMetrics(attempts) {
         errorRate: rateOrNull(
             finished.filter((attempt) => attempt.outcome === "error").length,
             finished.length
+        ),
+        retryGapMs: describe(retryGaps),
+        retryAfterMs: describe(retryAfterAdvisories),
+        retryAfterSamples,
+        retryAfterCoverageRate: rateOrNull(
+            retryAfterCovered,
+            retryAfterSamples
         ),
         retryingTurnRate: rateOrNull(retryingTurns, turns.length),
         firstAttemptSuccessRate: rateOrNull(
@@ -692,6 +826,7 @@ function buildFindings({
     interaction,
     attempts,
     modelSegments,
+    stepTiming,
     dataQuality
 }) {
     const findings = [];
@@ -795,6 +930,39 @@ function buildFindings({
             "fast_follow_up",
             "超过 30% 的完成请求在 60 秒内收到后续 Prompt，可能存在未满足需求或正常多轮交互。",
             interaction.fastFollowUpRate
+        );
+    }
+    if (
+        stepTiming.nextTurnGapMs.n >= 10
+        && stepTiming.nextTurnGapMs.p50 > 1_000
+    ) {
+        add(
+            "warning",
+            "turn_resume_gap",
+            "工具结束到下一轮 LLM 开始的 p50 空档超过 1 秒，检查结果落库、事件桥和调度开销。",
+            stepTiming.nextTurnGapMs.p50
+        );
+    }
+    if (
+        stepTiming.toolDispatchMs.n >= 10
+        && stepTiming.toolDispatchMs.p50 > 500
+    ) {
+        add(
+            "info",
+            "tool_dispatch_gap",
+            "LLM Turn 结束到工具启动的 p50 空档超过 500 ms。",
+            stepTiming.toolDispatchMs.p50
+        );
+    }
+    if (
+        dataQuality.reportedLlmAttempts >= 20
+        && dataQuality.missingLlmAttemptRows > 0
+    ) {
+        add(
+            "warning",
+            "attempt_data_gap",
+            "Turn 记录的 HTTP Attempt 数多于 Attempt 明细行，观测数据可能发生丢失。",
+            dataQuality.missingLlmAttemptRows
         );
     }
     for (const model of modelSegments) {
@@ -1040,11 +1208,7 @@ function renderMarkdown(report) {
     lines.push("# Agent observability report");
     lines.push("");
     lines.push(`- 时间范围：最近 ${report.window.days} 天（${report.window.since} 起）`);
-    if (report.window.days !== report.window.requestedDays) {
-        lines.push(`- 请求窗口：${report.window.requestedDays} 天；受保留策略限制为 ${report.window.days} 天`);
-    }
     lines.push(`- 对比窗口：${report.window.previousSince} 至 ${report.window.since}`);
-    lines.push(`- 数据保留：${report.window.retentionDays} 天`);
     lines.push(`- 数据库：\`${report.window.database}\``);
     lines.push(`- 生成时间：${report.generated_at}`);
     lines.push("");
@@ -1138,6 +1302,14 @@ function renderMarkdown(report) {
     lines.push(`| 60 秒内后续 Prompt | ${interaction.fastFollowUpRate === null ? "-" : pct(interaction.fastFollowUpRate)} (${interaction.fastFollowUpComparable} 个可比较 Run) |`);
     lines.push(`| 重复 Prompt 占比 | ${interaction.repeatPromptRate === null ? "-" : pct(interaction.repeatPromptRate)} |`);
     lines.push("");
+    lines.push("## 步骤调度空档");
+    lines.push("");
+    lines.push("| 阶段 | p50 / p95 |");
+    lines.push("| --- | ---: |");
+    lines.push(`| LLM Turn 结束 → 首个工具启动 | ${statMs(report.stepTiming.toolDispatchMs)} |`);
+    lines.push(`| 工具结束 → 下一个工具启动 | ${statMs(report.stepTiming.interToolGapMs)} |`);
+    lines.push(`| 最后一个工具结束 → 下一轮 LLM | ${statMs(report.stepTiming.nextTurnGapMs)} |`);
+    lines.push("");
     lines.push("## 每日趋势");
     lines.push("");
     lines.push("| 日期 | Runs | 运行中 | 完成率 | 失败率 | 时长 p50 | TTFT p50 | 提交→首 Token p50 | TPS p50 | 工具错误率 | 权限等待占比 | 成本/Run |");
@@ -1192,6 +1364,9 @@ function renderMarkdown(report) {
     lines.push(`| 首次 Attempt 成功率 | ${attempts.firstAttemptSuccessRate === null ? "-" : pct(attempts.firstAttemptSuccessRate)} |`);
     lines.push(`| 发生重试的 Turn 占比 | ${attempts.retryingTurnRate === null ? "-" : pct(attempts.retryingTurnRate)} |`);
     lines.push(`| Attempt 错误率 | ${attempts.errorRate === null ? "-" : pct(attempts.errorRate)} |`);
+    lines.push(`| 重试间真实等待 p50 / p95 | ${statMs(attempts.retryGapMs)} |`);
+    lines.push(`| Retry-After 建议值 p50 / p95 | ${statMs(attempts.retryAfterMs)} |`);
+    lines.push(`| 覆盖 Retry-After（±10%） | ${attempts.retryAfterCoverageRate === null ? "-" : pct(attempts.retryAfterCoverageRate)} (${attempts.retryAfterSamples} 个样本) |`);
     lines.push(`| 状态码分布 | ${formatCounts(attempts.byStatus)} |`);
     lines.push(`| 错误码分布 | ${formatCounts(attempts.byErrorCode)} |`);
     lines.push("");
@@ -1242,6 +1417,7 @@ function renderMarkdown(report) {
     lines.push(`- Prompt Run 缺少 App Version：${report.dataQuality.promptRunsMissingAppVersion.count}/${report.dataQuality.promptRunsMissingAppVersion.total}`);
     lines.push(`- Prompt Run 缺少 System Prompt Hash：${report.dataQuality.promptRunsMissingPromptHash.count}/${report.dataQuality.promptRunsMissingPromptHash.total}`);
     lines.push(`- Prompt Run 缺少 Toolset Hash：${report.dataQuality.promptRunsMissingToolsetHash.count}/${report.dataQuality.promptRunsMissingToolsetHash.total}`);
+    lines.push(`- LLM Attempt 明细 / Turn 上报数：${report.dataQuality.llmAttemptRows}/${report.dataQuality.reportedLlmAttempts}，缺少 ${report.dataQuality.missingLlmAttemptRows}`);
     lines.push(`- Main Turn 缺少 TTFT：${report.dataQuality.mainTurnsMissingTtft.count}/${report.dataQuality.mainTurnsMissingTtft.total}`);
     lines.push(`- Main Turn 缺少 Token Usage：${report.dataQuality.mainTurnsMissingUsage.count}/${report.dataQuality.mainTurnsMissingUsage.total}`);
     lines.push(`- 仍未结束：Run ${report.dataQuality.runsStillRunning}，Turn ${report.dataQuality.turnsStillRunning}，Tool ${report.dataQuality.toolsStillRunning}`);
@@ -1386,7 +1562,7 @@ function printHelp() {
     console.log(`Usage: node scripts/agent-report.mjs [options]
 
 Options:
-  --days <n>          Reporting window in days (default: 7, capped by retention)
+  --days <n>          Reporting window in days (default: 7)
   --format <format>   markdown or json (default: markdown)
   --db <path>         SQLite database path
   -h, --help          Show this help

@@ -80,10 +80,10 @@ test("renders JSON and Markdown reports from a version 3 database", () => {
             stepIndex: 0,
             toolName: "exec_command",
             toolCategory: "shell",
-            startedAtMs: now - 8_000
+            startedAtMs: now - 7_900
         });
         observer.toolFinished("tool_report_ok", {
-            endedAtMs: now - 7_500,
+            endedAtMs: now - 7_400,
             durationMs: 500,
             outcome: "success",
             outputChars: 100,
@@ -92,8 +92,8 @@ test("renders JSON and Markdown reports from a version 3 database", () => {
             repeatIndex: 1
         });
         observer.turnFinished("turn_report_ok", {
-            endedAtMs: now - 7_000,
-            durationMs: 2_000,
+            endedAtMs: now - 8_000,
+            durationMs: 1_000,
             outcome: "completed",
             ttftMs: 250,
             outputTokens: 100,
@@ -105,11 +105,30 @@ test("renders JSON and Markdown reports from a version 3 database", () => {
             retryAfterMs: 100,
             providerHttpStatus: 200
         });
+        observer.turnStarted({
+            turnId: "turn_report_resume",
+            sessionId: "session-report",
+            runId: "run_report_ok",
+            turnKind: "main",
+            turnIndex: 1,
+            startedAtMs: now - 7_000,
+            provider: "test",
+            model: "test-model"
+        });
+        observer.turnFinished("turn_report_resume", {
+            endedAtMs: now - 6_500,
+            durationMs: 500,
+            outcome: "completed",
+            ttftMs: 100,
+            outputTokens: 20,
+            tokensPerSecond: 50,
+            toolCalls: 0
+        });
         observer.runFinished("run_report_ok", {
             endedAtMs: now - 5_000,
             durationMs: 5_000,
             outcome: "completed",
-            llmTurns: 1,
+            llmTurns: 2,
             toolCalls: 1,
             agentSteps: 2,
             submitToFirstTokenMs: 750,
@@ -189,10 +208,17 @@ test("renders JSON and Markdown reports from a version 3 database", () => {
                 fastFollowUpComparable: number;
                 fastFollowUpRate: number;
             };
+            stepTiming: {
+                toolDispatchMs: { n: number; p50: number };
+                interToolGapMs: { n: number };
+                nextTurnGapMs: { n: number; p50: number };
+            };
             llmAttempts: {
                 attempts: number;
                 firstAttemptSuccessRate: number;
                 byStatus: { key: string; count: number }[];
+                retryGapMs: { n: number; p50: number };
+                retryAfterCoverageRate: number;
             };
             tools: {
                 byName: { truncatedRate: number; repeatRate: number }[];
@@ -226,7 +252,12 @@ test("renders JSON and Markdown reports from a version 3 database", () => {
         });
         expect(report.llmAttempts).toMatchObject({
             attempts: 2,
-            firstAttemptSuccessRate: 0
+            firstAttemptSuccessRate: 0,
+            retryAfterCoverageRate: 1
+        });
+        expect(report.llmAttempts.retryGapMs).toMatchObject({
+            n: 1,
+            p50: 100
         });
         expect(report.llmAttempts.byStatus).toEqual(expect.arrayContaining([
             { key: "429", count: 1 },
@@ -239,6 +270,14 @@ test("renders JSON and Markdown reports from a version 3 database", () => {
         expect(report.observerHealth).toEqual({
             writeErrors: 0,
             droppedWrites: 0
+        });
+        expect(report.stepTiming.toolDispatchMs).toMatchObject({
+            n: 1,
+            p50: 100
+        });
+        expect(report.stepTiming.nextTurnGapMs).toMatchObject({
+            n: 1,
+            p50: 400
         });
         expect(report.daily).toHaveLength(1);
 
@@ -259,6 +298,7 @@ test("renders JSON and Markdown reports from a version 3 database", () => {
         expect(markdown).toContain("## 按模型环比");
         expect(markdown).toContain("## LLM HTTP 尝试");
         expect(markdown).toContain("## 交互反复代理指标");
+        expect(markdown).toContain("## 步骤调度空档");
         expect(markdown).toContain("提交→首 Token p50 / p95");
         expect(markdown).not.toContain("undefined");
     } finally {
