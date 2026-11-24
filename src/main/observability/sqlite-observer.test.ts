@@ -7,6 +7,10 @@ import {
     createSqliteAgentObserver,
     SqliteAgentObserver
 } from "./sqlite-observer.ts";
+import {
+    AGENT_DATABASE_VERSION,
+    AGENT_SCHEMA_V1
+} from "./schema.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -23,6 +27,7 @@ test("persists run, turn, and tool records", () => {
     const observer = new SqliteAgentObserver({
         databasePath,
         appVersion: "test",
+        buildId: "build-1",
         appInstanceId: "app-1",
         now: () => 10_000
     });
@@ -40,7 +45,11 @@ test("persists run, turn, and tool records", () => {
             historyMessagesAtStart: 3,
             contextWindow: 200_000,
             contextTokensStart: 1_200,
-            maxRounds: 32
+            maxRounds: 32,
+            reasoningLevel: "high",
+            systemPromptHash: "prompt-hash",
+            toolsetHash: "toolset-hash",
+            toolCount: 4
         });
         observer.turnStarted({
             turnId: "turn-1",
@@ -102,7 +111,12 @@ test("persists run, turn, and tool records", () => {
             stopReason: "toolUse",
             responseId: "resp-1",
             toolCalls: 1,
-            contextTokensAfter: 1_400
+            contextTokensAfter: 1_400,
+            llmHttpAttempts: 2,
+            llmRetries: 1,
+            rateLimitResponses: 1,
+            retryAfterMs: 250,
+            providerHttpStatus: 200
         });
         observer.runFinished("run-1", {
             endedAtMs: 3_000,
@@ -123,7 +137,13 @@ test("persists run, turn, and tool records", () => {
             costUsd: 0.01,
             tokensPerSecond: 50,
             wallTokensPerSecond: 25,
-            finalStopReason: "stop"
+            finalStopReason: "stop",
+            submitToFirstTokenMs: 900,
+            llmHttpAttempts: 2,
+            llmRetries: 1,
+            rateLimitResponses: 1,
+            retryAfterMs: 250,
+            providerHttpStatus: 200
         });
 
         expect(observer.stats()).toEqual({
@@ -143,12 +163,29 @@ test("persists run, turn, and tool records", () => {
         expect(run?.active_duration_ms).toBe(1_999);
         expect(run?.tool_execution_ms).toBe(799);
         expect(run?.tool_sequence_json).toBe("[\"exec_command\"]");
+        expect(run?.app_version).toBe("test");
+        expect(run?.build_id).toBe("build-1");
+        expect(run?.reasoning_level).toBe("high");
+        expect(run?.system_prompt_hash).toBe("prompt-hash");
+        expect(run?.toolset_hash).toBe("toolset-hash");
+        expect(run?.tool_count).toBe(4);
+        expect(run?.submit_to_first_token_ms).toBe(900);
+        expect(run?.llm_http_attempts).toBe(2);
+        expect(run?.llm_retries).toBe(1);
+        expect(run?.rate_limit_responses).toBe(1);
+        expect(run?.retry_after_ms).toBe(250);
+        expect(run?.provider_http_status).toBe(200);
 
         const turn = database.prepare("SELECT * FROM turns WHERE turn_id = ?").get("turn-1");
         expect(turn?.outcome).toBe("completed");
         expect(turn?.ttft_ms).toBe(250);
         expect(turn?.duration_ms).toBe(1_501);
         expect(turn?.tokens_per_second).toBe(50);
+        expect(turn?.llm_http_attempts).toBe(2);
+        expect(turn?.llm_retries).toBe(1);
+        expect(turn?.rate_limit_responses).toBe(1);
+        expect(turn?.retry_after_ms).toBe(250);
+        expect(turn?.provider_http_status).toBe(200);
 
         const tool = database.prepare("SELECT * FROM tools WHERE tool_span_id = ?").get("tool-1");
         expect(tool?.outcome).toBe("success");
@@ -160,7 +197,8 @@ test("persists run, turn, and tool records", () => {
         const schemaVersion = database.prepare(
             "SELECT value FROM meta WHERE key = 'schema_version'"
         ).get();
-        expect(schemaVersion?.value).toBe("1");
+        expect(schemaVersion?.value).toBe(String(AGENT_DATABASE_VERSION));
+
     } finally {
         database.close();
         rmSync(directory, { recursive: true, force: true });
@@ -234,6 +272,86 @@ test("marks interrupted records as crashed on startup", () => {
         ).get();
         expect(event?.run_id).toBe("run-1");
         expect(event?.app_instance_id).toBe("app-2");
+    } finally {
+        database.close();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test("migrates a version 1 database without losing existing records", () => {
+    const { directory, databasePath } = temporaryDatabase();
+    const legacy = new DatabaseSync(databasePath, {
+        enableForeignKeyConstraints: true
+    });
+    try {
+        legacy.exec(AGENT_SCHEMA_V1);
+        legacy.exec("PRAGMA user_version = 1");
+        legacy.prepare(`
+            INSERT INTO runs (
+                run_id, app_instance_id, session_id, run_type, started_at_ms,
+                last_heartbeat_ms, outcome, llm_turns, tool_calls, agent_steps
+            ) VALUES (?, ?, ?, 'prompt', ?, ?, 'completed', 1, 0, 1)
+        `).run("run-v1", "app-v1", "session-v1", 9_000, 9_500);
+        legacy.prepare(`
+            INSERT INTO turns (
+                turn_id, app_instance_id, session_id, run_id, turn_kind,
+                started_at_ms, outcome
+            ) VALUES (?, ?, ?, ?, 'main', ?, 'completed')
+        `).run("turn-v1", "app-v1", "session-v1", "run-v1", 9_000);
+    } finally {
+        legacy.close();
+    }
+
+    const observer = new SqliteAgentObserver({
+        databasePath,
+        appVersion: "test",
+        appInstanceId: "app-v2",
+        now: () => 10_000
+    });
+    observer.close();
+
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+        expect(
+            database.prepare("PRAGMA user_version").get()?.user_version
+        ).toBe(AGENT_DATABASE_VERSION);
+        const runColumns = database.prepare("PRAGMA table_info(runs)").all()
+            .map((column) => column.name);
+        expect(runColumns).toEqual(expect.arrayContaining([
+            "app_version",
+            "build_id",
+            "reasoning_level",
+            "system_prompt_hash",
+            "toolset_hash",
+            "tool_count",
+            "submit_to_first_token_ms",
+            "llm_http_attempts",
+            "llm_retries",
+            "rate_limit_responses",
+            "retry_after_ms",
+            "provider_http_status"
+        ]));
+        const turnColumns = database.prepare("PRAGMA table_info(turns)").all()
+            .map((column) => column.name);
+        expect(turnColumns).toEqual(expect.arrayContaining([
+            "llm_http_attempts",
+            "llm_retries",
+            "rate_limit_responses",
+            "retry_after_ms",
+            "provider_http_status"
+        ]));
+
+        const run = database.prepare(
+            "SELECT * FROM runs WHERE run_id = 'run-v1'"
+        ).get();
+        expect(run?.outcome).toBe("completed");
+        expect(run?.llm_http_attempts).toBe(0);
+        expect(run?.app_version).toBeNull();
+        const turn = database.prepare(
+            "SELECT * FROM turns WHERE turn_id = 'turn-v1'"
+        ).get();
+        expect(turn?.outcome).toBe("completed");
+        expect(turn?.llm_http_attempts).toBe(0);
     } finally {
         database.close();
         rmSync(directory, { recursive: true, force: true });

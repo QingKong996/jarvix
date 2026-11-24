@@ -266,11 +266,7 @@ export class ToolCallRunner {
                 isError: result.isError,
                 endReason: result.endReason,
                 errorCode: result.isError
-                    ? unknownTool
-                        ? "tool_unknown"
-                        : signal.aborted
-                            ? "tool_cancelled"
-                            : "tool_failed"
+                    ? toolErrorCode(result, unknownTool, signal.aborted)
                     : undefined,
                 outputChars: outputText.length,
                 outputBytes: Buffer.byteLength(outputText, "utf8"),
@@ -524,6 +520,45 @@ function toolDetail(result: ToolExecutionResult): Record<string, unknown> {
         detail.imageCount = result.images.length;
     }
     return detail;
+}
+
+function toolErrorCode(
+    result: ToolExecutionResult,
+    unknownTool: boolean,
+    aborted: boolean
+): string {
+    if (unknownTool) {
+        return "tool_unknown";
+    }
+    if (aborted) {
+        return "tool_cancelled";
+    }
+    const status = "status" in result.data && typeof result.data.status === "string"
+        ? result.data.status
+        : undefined;
+    if (status === "timed_out") {
+        return "tool_timeout";
+    }
+    const output = toolResultContentText(result.content);
+    if (/permission|denied|not allowed|access is restricted/i.test(output)) {
+        return "tool_permission_denied";
+    }
+    if (/not found|does not exist|unknown path/i.test(output)) {
+        return "tool_not_found";
+    }
+    if (/invalid (?:argument|parameter)|invalid json|malformed/i.test(output)) {
+        return "tool_invalid_arguments";
+    }
+    if (/timed? ?out|timeout/i.test(output)) {
+        return "tool_timeout";
+    }
+    if (/truncat/i.test(output)) {
+        return "tool_output_truncated";
+    }
+    if (output.trim().length === 0) {
+        return "tool_empty_result";
+    }
+    return "tool_failed";
 }
 
 function toolResultContent(

@@ -19,9 +19,18 @@ export type LlmRequest = {
     apiKey?: string;
     tools?: readonly LlmToolDefinition[];
     signal?: AbortSignal;
+    /** Called immediately before one provider HTTP attempt, including internal retries. */
+    onProviderRequest?: () => void;
+    /** Called for every provider HTTP response, including retry responses. */
+    onProviderResponse?: (response: LlmProviderResponse) => void;
 };
 
 export type LlmStream = AsyncIterable<LlmStreamEvent>;
+
+export type LlmProviderResponse = {
+    status: number;
+    retryAfterMs?: number;
+};
 
 /** Provider-neutral LLM backend. Other modules depend on this contract, never on a concrete backend. */
 export interface LlmAdapter {

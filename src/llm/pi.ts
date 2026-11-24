@@ -3,6 +3,7 @@ import type {
     AssistantMessage,
     AssistantMessageEvent,
     Context,
+    FetchFunction,
     ImageContent,
     JsonObject,
     JsonValue,
@@ -34,11 +35,13 @@ export type PiAdapterOptions = {
     /** Model collection to talk to. Defaults to every built-in pi provider. */
     models?: Models;
     providers?: () => readonly ProviderConfig[] | undefined;
+    fetch?: FetchFunction;
 };
 
 /** Exposes pi-ai through the unified [`LlmAdapter`] contract. */
 export function createPiAdapter(options: PiAdapterOptions = {}): LlmAdapter {
     const models = options.models ?? builtinModels();
+    const baseFetch = options.fetch ?? globalThis.fetch;
     let previous: readonly ProviderConfig[] | undefined;
     let configured: Models | undefined;
     function collection(provider: string): Models {
@@ -70,11 +73,54 @@ export function createPiAdapter(options: PiAdapterOptions = {}): LlmAdapter {
                     reasoning: request.reasoning === "none" ? undefined : request.reasoning,
                     temperature: request.temperature,
                     maxTokens: request.maxTokens,
-                    signal: request.signal
+                    signal: request.signal,
+                    fetch: instrumentedFetch(request, baseFetch)
                 })
             );
         }
     };
+}
+
+function instrumentedFetch(
+    request: LlmRequest,
+    fallback: FetchFunction
+): FetchFunction | undefined {
+    if (!request.onProviderRequest && !request.onProviderResponse) {
+        return undefined;
+    }
+    return async (input, init) => {
+        notify(request.onProviderRequest);
+        const response = await fallback(input, init);
+        notify(() => request.onProviderResponse?.({
+            status: response.status,
+            retryAfterMs: retryAfterMs(response.headers)
+        }));
+        return response;
+    };
+}
+
+function notify(callback: (() => void) | undefined): void {
+    try {
+        callback?.();
+    } catch {
+        // Observability callbacks must never affect provider requests.
+    }
+}
+
+function retryAfterMs(headers: Headers): number | undefined {
+    const milliseconds = Number.parseFloat(headers.get("retry-after-ms") ?? "");
+    if (Number.isFinite(milliseconds) && milliseconds >= 0) {
+        return Math.round(milliseconds);
+    }
+    const seconds = Number.parseFloat(headers.get("retry-after") ?? "");
+    if (Number.isFinite(seconds) && seconds >= 0) {
+        return Math.round(seconds * 1_000);
+    }
+    const date = Date.parse(headers.get("retry-after") ?? "");
+    if (!Number.isNaN(date)) {
+        return Math.max(0, date - Date.now());
+    }
+    return undefined;
 }
 
 function toModelInfo(model: Model<Api>): LlmModelInfo {

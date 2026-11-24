@@ -28,12 +28,15 @@ const SQL = {
             run_id, app_instance_id, session_id, run_type, provider, model,
             permission, started_at_ms, last_heartbeat_ms, outcome, prompt_chars,
             prompt_hash, history_messages_at_start, context_window,
-            context_tokens_start, max_rounds
+            context_tokens_start, max_rounds, app_version, build_id,
+            reasoning_level, system_prompt_hash, toolset_hash, tool_count
         ) VALUES (
             :run_id, :app_instance_id, :session_id, :run_type, :provider, :model,
             :permission, :started_at_ms, :last_heartbeat_ms, 'running',
             :prompt_chars, :prompt_hash, :history_messages_at_start,
-            :context_window, :context_tokens_start, :max_rounds
+            :context_window, :context_tokens_start, :max_rounds, :app_version,
+            :build_id, :reasoning_level, :system_prompt_hash, :toolset_hash,
+            :tool_count
         )
         ON CONFLICT(run_id) DO UPDATE SET
             provider = COALESCE(excluded.provider, runs.provider),
@@ -51,6 +54,18 @@ const SQL = {
                 runs.context_tokens_start
             ),
             max_rounds = COALESCE(excluded.max_rounds, runs.max_rounds),
+            app_version = COALESCE(excluded.app_version, runs.app_version),
+            build_id = COALESCE(excluded.build_id, runs.build_id),
+            reasoning_level = COALESCE(
+                excluded.reasoning_level,
+                runs.reasoning_level
+            ),
+            system_prompt_hash = COALESCE(
+                excluded.system_prompt_hash,
+                runs.system_prompt_hash
+            ),
+            toolset_hash = COALESCE(excluded.toolset_hash, runs.toolset_hash),
+            tool_count = COALESCE(excluded.tool_count, runs.tool_count),
             last_heartbeat_ms = MAX(
                 runs.last_heartbeat_ms,
                 excluded.last_heartbeat_ms
@@ -109,7 +124,19 @@ const SQL = {
                 wall_tokens_per_second
             ),
             final_stop_reason = COALESCE(:final_stop_reason, final_stop_reason),
-            tool_sequence_json = COALESCE(:tool_sequence_json, tool_sequence_json)
+            tool_sequence_json = COALESCE(:tool_sequence_json, tool_sequence_json),
+            submit_to_first_token_ms = COALESCE(
+                :submit_to_first_token_ms,
+                submit_to_first_token_ms
+            ),
+            llm_http_attempts = :llm_http_attempts,
+            llm_retries = :llm_retries,
+            rate_limit_responses = :rate_limit_responses,
+            retry_after_ms = :retry_after_ms,
+            provider_http_status = COALESCE(
+                :provider_http_status,
+                provider_http_status
+            )
         WHERE run_id = :run_id
     `,
     insertTurn: `
@@ -166,6 +193,14 @@ const SQL = {
             received_thinking_chars = COALESCE(
                 :received_thinking_chars,
                 received_thinking_chars
+            ),
+            llm_http_attempts = :llm_http_attempts,
+            llm_retries = :llm_retries,
+            rate_limit_responses = :rate_limit_responses,
+            retry_after_ms = :retry_after_ms,
+            provider_http_status = COALESCE(
+                :provider_http_status,
+                provider_http_status
             ),
             error_code = COALESCE(:error_code, error_code),
             error_message = COALESCE(:error_message, error_message)
@@ -305,6 +340,7 @@ type RunningRunRow = {
 export type SqliteObserverOptions = {
     databasePath: string;
     appVersion: string;
+    buildId?: string;
     appInstanceId?: string;
     logger?: JarvixLogger;
     now?: () => number;
@@ -315,6 +351,8 @@ export type SqliteObserverOptions = {
 export class SqliteAgentObserver implements AgentObserver {
     private readonly database: DatabaseSync;
     private readonly databasePath: string;
+    private readonly appVersion: string;
+    private readonly buildId: string;
     private readonly appInstanceId: string;
     private readonly logger: JarvixLogger;
     private readonly now: () => number;
@@ -329,6 +367,8 @@ export class SqliteAgentObserver implements AgentObserver {
 
     constructor(options: SqliteObserverOptions) {
         this.databasePath = options.databasePath;
+        this.appVersion = options.appVersion;
+        this.buildId = options.buildId ?? options.appVersion;
         this.appInstanceId = options.appInstanceId ?? randomUUID();
         this.logger = options.logger ?? noopLogger;
         this.now = options.now ?? Date.now;
@@ -381,7 +421,13 @@ export class SqliteAgentObserver implements AgentObserver {
             history_messages_at_start: nullableInteger(run.historyMessagesAtStart),
             context_window: nullableInteger(run.contextWindow),
             context_tokens_start: nullableInteger(run.contextTokensStart),
-            max_rounds: nullableInteger(run.maxRounds)
+            max_rounds: nullableInteger(run.maxRounds),
+            app_version: this.appVersion,
+            build_id: this.buildId,
+            reasoning_level: nullable(run.reasoningLevel),
+            system_prompt_hash: nullable(run.systemPromptHash),
+            toolset_hash: nullable(run.toolsetHash),
+            tool_count: nullableInteger(run.toolCount)
         });
     }
 
@@ -430,7 +476,13 @@ export class SqliteAgentObserver implements AgentObserver {
             tokens_per_second: nullableNumber(run.tokensPerSecond),
             wall_tokens_per_second: nullableNumber(run.wallTokensPerSecond),
             final_stop_reason: nullable(run.finalStopReason),
-            tool_sequence_json: jsonText(run.toolSequenceJson)
+            tool_sequence_json: jsonText(run.toolSequenceJson),
+            submit_to_first_token_ms: nullableInteger(run.submitToFirstTokenMs),
+            llm_http_attempts: Math.round(run.llmHttpAttempts ?? 0),
+            llm_retries: Math.round(run.llmRetries ?? 0),
+            rate_limit_responses: Math.round(run.rateLimitResponses ?? 0),
+            retry_after_ms: Math.round(run.retryAfterMs ?? 0),
+            provider_http_status: nullableInteger(run.providerHttpStatus)
         });
     }
 
@@ -474,6 +526,11 @@ export class SqliteAgentObserver implements AgentObserver {
             context_tokens_after: nullableInteger(turn.contextTokensAfter),
             received_text_chars: nullableInteger(turn.receivedTextChars),
             received_thinking_chars: nullableInteger(turn.receivedThinkingChars),
+            llm_http_attempts: Math.round(turn.llmHttpAttempts ?? 0),
+            llm_retries: Math.round(turn.llmRetries ?? 0),
+            rate_limit_responses: Math.round(turn.rateLimitResponses ?? 0),
+            retry_after_ms: Math.round(turn.retryAfterMs ?? 0),
+            provider_http_status: nullableInteger(turn.providerHttpStatus),
             error_code: nullable(turn.errorCode),
             error_message: sanitizeError(turn.errorMessage)
         });

@@ -9,7 +9,7 @@ import type {
     LlmUsage,
     LlmUserMessage
 } from "../../../protocol/llm.ts";
-import type { LlmRequest } from "../../llm/index.ts";
+import type { LlmProviderResponse, LlmRequest } from "../../llm/index.ts";
 import type { JarvixContextUsage } from "../../../protocol/context-usage.ts";
 import type { JarvixProviderContext } from "../../../protocol/provider-context.ts";
 import type {
@@ -72,6 +72,7 @@ type TurnContext = {
     runtime: SessionRuntime;
     signal: AbortSignal;
     contextWindow: number;
+    requestStartedAt: number;
     request: Omit<LlmRequest, "messages" | "signal" | "tools">;
     run: RunTelemetry;
 };
@@ -82,6 +83,10 @@ type RunTelemetry = {
     model: string | undefined;
     contextWindow: number | undefined;
     contextTokensStart: number | undefined;
+    reasoningLevel: string | undefined;
+    systemPromptHash: string | undefined;
+    toolsetHash: string | undefined;
+    toolCount: number | undefined;
     llmTurns: number;
     agentSteps: number;
     mainTurnIndex: number;
@@ -113,6 +118,12 @@ type RunTelemetry = {
     toolKeys: Map<string, number>;
     toolStepIndex: number;
     injectedPrompts: number;
+    submitToFirstTokenMs: number | null;
+    llmHttpAttempts: number;
+    llmRetries: number;
+    rateLimitResponses: number;
+    retryAfterMs: number;
+    providerHttpStatus: number | undefined;
     maxRoundsHit?: boolean;
     failure: RunFailure | null;
     heartbeat: ReturnType<typeof setInterval> | null;
@@ -211,6 +222,10 @@ export class Session {
             model: selectedModel?.id,
             contextWindow: undefined,
             contextTokensStart: undefined,
+            reasoningLevel: undefined,
+            systemPromptHash: undefined,
+            toolsetHash: undefined,
+            toolCount: undefined,
             llmTurns: 0,
             agentSteps: 0,
             mainTurnIndex: 0,
@@ -242,6 +257,12 @@ export class Session {
             toolKeys: new Map(),
             toolStepIndex: 0,
             injectedPrompts: 0,
+            submitToFirstTokenMs: null,
+            llmHttpAttempts: 0,
+            llmRetries: 0,
+            rateLimitResponses: 0,
+            retryAfterMs: 0,
+            providerHttpStatus: undefined,
             failure: null,
             heartbeat: null
         };
@@ -267,7 +288,11 @@ export class Session {
                 historyMessagesAtStart,
                 contextWindow: run.contextWindow,
                 contextTokensStart: run.contextTokensStart,
-                maxRounds: MAX_TOOL_ROUNDS
+                maxRounds: MAX_TOOL_ROUNDS,
+                reasoningLevel: run.reasoningLevel,
+                systemPromptHash: run.systemPromptHash,
+                toolsetHash: run.toolsetHash,
+                toolCount: run.toolCount
             });
             run.heartbeat = setInterval(() => {
                 this.observer.heartbeat(run.runId, Date.now());
@@ -312,6 +337,15 @@ export class Session {
             run.provider = selection.provider;
             run.model = selection.id;
             run.contextWindow = definition.contextWindow;
+            const reasoning = resolveReasoningLevel(
+                definition,
+                runtime.config.reasoning
+            );
+            const registeredTools = this.registeredTools();
+            run.reasoningLevel = reasoning;
+            run.systemPromptHash = hashText(this.contextManager.systemPrompt);
+            run.toolsetHash = hashToolset(registeredTools);
+            run.toolCount = registeredTools.length;
             const provider = runtime.config.providers?.find((item) => item.id === selection.provider);
             const model = runtime.llm.getModel(selection.provider, selection.id);
             if (!model) {
@@ -336,16 +370,16 @@ export class Session {
                 runtime,
                 signal,
                 contextWindow: definition.contextWindow,
+                requestStartedAt: startedAt,
                 request: {
                     model,
                     systemPrompt: this.contextManager.systemPrompt,
-                    reasoning: resolveReasoningLevel(definition, runtime.config.reasoning),
+                    reasoning,
                     apiKey: provider?.apiKey,
                     maxTokens: definition.maxTokens
                 },
                 run
             };
-
             stage = "compaction";
             await this.compactContextIfNeeded(turn);
             this.emitContextUsage(turn);
@@ -461,7 +495,13 @@ export class Session {
                     ? rate(run.outputTokens, durationMs)
                     : undefined,
                 finalStopReason: run.finalStopReason ?? undefined,
-                toolSequenceJson: JSON.stringify(run.toolNames)
+                toolSequenceJson: JSON.stringify(run.toolNames),
+                submitToFirstTokenMs: run.submitToFirstTokenMs ?? undefined,
+                llmHttpAttempts: run.llmHttpAttempts,
+                llmRetries: run.llmRetries,
+                rateLimitResponses: run.rateLimitResponses,
+                retryAfterMs: run.retryAfterMs,
+                providerHttpStatus: run.providerHttpStatus
             });
             if (this.activeRun === run) {
                 this.activeRun = null;
@@ -603,13 +643,20 @@ export class Session {
         let receivedThinkingChars = 0;
         let turnError: unknown;
         let turnOutcome: AgentTurnOutcome = "error";
+        const provider = createProviderTelemetry();
         this.streamOpen = true;
         try {
             for await (const event of runtime.llm.stream({
                 ...turn.request,
                 tools: this.registeredTools(),
                 messages,
-                signal
+                signal,
+                onProviderRequest: () => {
+                    provider.attempts += 1;
+                },
+                onProviderResponse: (response) => {
+                    recordProviderResponse(provider, response);
+                }
             })) {
                 if (signal.aborted) {
                     break;
@@ -685,7 +732,7 @@ export class Session {
                 run.failure = {
                     stage: "llm_stream",
                     code: streamErrorReported
-                        ? "llm_stream_error"
+                        ? llmFailureCode(streamErrorMessage)
                         : "llm_no_completion",
                     message: streamErrorMessage
                         ?? "Model response ended without a completion event"
@@ -720,6 +767,11 @@ export class Session {
                 ),
                 receivedTextChars,
                 receivedThinkingChars,
+                llmHttpAttempts: provider.attempts,
+                llmRetries: Math.max(0, provider.attempts - 1),
+                rateLimitResponses: provider.rateLimitResponses,
+                retryAfterMs: provider.retryAfterMs,
+                providerHttpStatus: provider.providerHttpStatus,
                 errorCode: turnOutcome === "error"
                     ? run.failure?.code ?? "llm_turn_failed"
                     : undefined,
@@ -731,6 +783,22 @@ export class Session {
             if (turnIndex === 0 && run.ttftMs === null && ttftMs !== undefined) {
                 run.ttftMs = ttftMs;
             }
+            if (
+                turnIndex === 0
+                && run.submitToFirstTokenMs === null
+                && firstTokenAt !== null
+            ) {
+                run.submitToFirstTokenMs = Math.max(
+                    0,
+                    Math.round(firstTokenAt - turn.requestStartedAt)
+                );
+            }
+            run.llmHttpAttempts += provider.attempts;
+            run.llmRetries += Math.max(0, provider.attempts - 1);
+            run.rateLimitResponses += provider.rateLimitResponses;
+            run.retryAfterMs += provider.retryAfterMs;
+            run.providerHttpStatus = provider.providerHttpStatus
+                ?? run.providerHttpStatus;
             if (usage) {
                 recordUsage(run, usage);
                 run.generationMs += usage.outputTokens > 0
@@ -749,7 +817,7 @@ export class Session {
             run.failure ??= {
                 stage: "llm_stream",
                 code: streamErrorReported
-                    ? "llm_stream_error"
+                    ? llmFailureCode(streamErrorMessage)
                     : "llm_no_completion",
                 message: streamErrorMessage
                     ?? "Model response ended without a completion event"
@@ -1161,6 +1229,7 @@ export class Session {
         let receivedThinkingChars = 0;
         let turnError: unknown;
         let turnOutcome: AgentTurnOutcome = "error";
+        const provider = createProviderTelemetry();
         const request = {
             ...turn.request,
             systemPrompt: CONTEXT_COMPACTION_SYSTEM_PROMPT,
@@ -1175,7 +1244,16 @@ export class Session {
                 CONTEXT_COMPACTION_BLOCK_TOKENS,
                 turn.request.maxTokens ?? CONTEXT_COMPACTION_BLOCK_TOKENS
             ),
-            signal: turn.signal
+            signal: turn.signal,
+            onProviderRequest: () => {
+                provider.attempts += 1;
+            },
+            onProviderResponse: (response: {
+                status: number;
+                retryAfterMs?: number;
+            }) => {
+                recordProviderResponse(provider, response);
+            }
         };
 
         this.streamOpen = true;
@@ -1276,6 +1354,11 @@ export class Session {
                 toolCalls: 0,
                 receivedTextChars,
                 receivedThinkingChars,
+                llmHttpAttempts: provider.attempts,
+                llmRetries: Math.max(0, provider.attempts - 1),
+                rateLimitResponses: provider.rateLimitResponses,
+                retryAfterMs: provider.retryAfterMs,
+                providerHttpStatus: provider.providerHttpStatus,
                 errorCode: turnOutcome === "error"
                     ? "compaction_failed"
                     : undefined,
@@ -1284,6 +1367,12 @@ export class Session {
                     : undefined
             });
             run.llmDurationMs += durationMs;
+            run.llmHttpAttempts += provider.attempts;
+            run.llmRetries += Math.max(0, provider.attempts - 1);
+            run.rateLimitResponses += provider.rateLimitResponses;
+            run.retryAfterMs += provider.retryAfterMs;
+            run.providerHttpStatus = provider.providerHttpStatus
+                ?? run.providerHttpStatus;
             if (usage) {
                 recordUsage(run, usage);
                 run.generationMs += usage.outputTokens > 0
@@ -1485,6 +1574,71 @@ function stableJson(value: unknown): string {
     return `{${entries.join(",")}}`;
 }
 
+type ProviderTelemetry = {
+    attempts: number;
+    rateLimitResponses: number;
+    retryAfterMs: number;
+    providerHttpStatus: number | undefined;
+};
+
+function createProviderTelemetry(): ProviderTelemetry {
+    return {
+        attempts: 0,
+        rateLimitResponses: 0,
+        retryAfterMs: 0,
+        providerHttpStatus: undefined
+    };
+}
+
+function recordProviderResponse(
+    telemetry: ProviderTelemetry,
+    response: LlmProviderResponse
+): void {
+    telemetry.providerHttpStatus = response.status;
+    if (response.status === 429) {
+        telemetry.rateLimitResponses += 1;
+    }
+    if (response.retryAfterMs !== undefined) {
+        telemetry.retryAfterMs += response.retryAfterMs;
+    }
+}
+
+function hashText(value: string): string {
+    return createHash("sha256").update(value).digest("hex").slice(0, 16);
+}
+
+function hashToolset(
+    tools: readonly {
+        name: string;
+        description: string;
+        parameters: Record<string, unknown>;
+    }[]
+): string {
+    return hashText(stableJson(tools));
+}
+
+function llmFailureCode(message: string | undefined): string {
+    if (!message) {
+        return "llm_stream_error";
+    }
+    if (/rate.?limit|too many requests|quota|usage limit|\b429\b/i.test(message)) {
+        return "llm_rate_limited";
+    }
+    if (/unauthorized|forbidden|invalid api key|authentication|\b401\b|\b403\b/i.test(message)) {
+        return "llm_auth";
+    }
+    if (/context (?:window|length)|too many tokens|maximum.*tokens|prompt is too long/i.test(message)) {
+        return "llm_context_overflow";
+    }
+    if (/timed? ?out|timeout|ETIMEDOUT/i.test(message)) {
+        return "llm_timeout";
+    }
+    if (/ECONN|ENOTFOUND|network|fetch failed|socket hang up/i.test(message)) {
+        return "llm_network";
+    }
+    return "llm_stream_error";
+}
+
 function failureFor(stage: string, error: unknown): RunFailure {
     const message = errorMessage(error) ?? "Unknown error";
     if (/Failed to persist session|after 2 attempts/.test(message)) {
@@ -1502,7 +1656,7 @@ function failureFor(stage: string, error: unknown): RunFailure {
             ? "model_not_found"
             : "model_not_configured";
     } else if (stage === "llm_stream") {
-        code = "llm_stream_error";
+        code = llmFailureCode(message);
     } else if (stage === "compaction") {
         code = "compaction_failed";
     } else if (stage === "persistence") {

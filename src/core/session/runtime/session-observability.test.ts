@@ -103,10 +103,17 @@ test("records structured prompt, turn, and tool telemetry", async () => {
     let requestIndex = 0;
     const llm: LlmAdapter = {
         getModel: () => ({ ...MODEL }),
-        stream(_request: LlmRequest): AsyncIterable<LlmStreamEvent> {
+        stream(request: LlmRequest): AsyncIterable<LlmStreamEvent> {
             const response = requestIndex === 0 ? firstMessage : secondMessage;
             requestIndex += 1;
             return (async function* (): AsyncIterable<LlmStreamEvent> {
+                request.onProviderRequest?.();
+                request.onProviderResponse?.({
+                    status: 429,
+                    retryAfterMs: 50
+                });
+                request.onProviderRequest?.();
+                request.onProviderResponse?.({ status: 200 });
                 if (response === firstMessage) {
                     yield { type: "toolCall.start", index: 0 };
                 } else {
@@ -168,9 +175,12 @@ test("records structured prompt, turn, and tool telemetry", async () => {
         permission: meta.permission,
         promptChars: 7,
         contextWindow: MODEL.contextWindow,
-        maxRounds: 32
+        maxRounds: 32,
+        toolCount: 1
     });
     expect(observer.runsStarted[0]?.promptHash).toMatch(/^[a-f0-9]{16}$/);
+    expect(observer.runsStarted[0]?.systemPromptHash).toMatch(/^[a-f0-9]{16}$/);
+    expect(observer.runsStarted[0]?.toolsetHash).toMatch(/^[a-f0-9]{16}$/);
 
     expect(observer.turnsStarted).toHaveLength(2);
     expect(observer.turnsStarted.map((turn) => turn.turnIndex)).toEqual([0, 1]);
@@ -179,14 +189,24 @@ test("records structured prompt, turn, and tool telemetry", async () => {
         firstTokenKind: "toolCall",
         stopReason: "toolUse",
         toolCalls: 1,
-        outputTokens: 20
+        outputTokens: 20,
+        llmHttpAttempts: 2,
+        llmRetries: 1,
+        rateLimitResponses: 1,
+        retryAfterMs: 50,
+        providerHttpStatus: 200
     });
     expect(observer.turnsFinished[1]).toMatchObject({
         outcome: "completed",
         firstTokenKind: "text",
         stopReason: "stop",
         toolCalls: 0,
-        outputTokens: 30
+        outputTokens: 30,
+        llmHttpAttempts: 2,
+        llmRetries: 1,
+        rateLimitResponses: 1,
+        retryAfterMs: 50,
+        providerHttpStatus: 200
     });
 
     expect(observer.toolsStarted).toHaveLength(1);
@@ -217,12 +237,19 @@ test("records structured prompt, turn, and tool telemetry", async () => {
         cacheReadTokens: 11,
         cacheWriteTokens: 3,
         finalStopReason: "stop",
-        toolSequenceJson: "[\"exec_command\"]"
+        toolSequenceJson: "[\"exec_command\"]",
+        llmHttpAttempts: 4,
+        llmRetries: 2,
+        rateLimitResponses: 2,
+        retryAfterMs: 100,
+        providerHttpStatus: 200
     });
     expect(finished?.ttftMs).not.toBeUndefined();
+    expect(finished?.submitToFirstTokenMs).toBeGreaterThanOrEqual(0);
     expect(finished?.tokensPerSecond ?? 0).toBeGreaterThan(0);
     expect(finished?.unaccountedMs).toBeGreaterThanOrEqual(0);
     expect(observer.events).toEqual([]);
+
 });
 
 test("records a failed LLM stream with its error stage", async () => {
@@ -248,7 +275,7 @@ test("records a failed LLM stream with its error stage", async () => {
         getModel: () => ({ ...MODEL }),
         stream: () => (async function* (): AsyncIterable<LlmStreamEvent> {
             yield { type: "text.delta", index: 0, delta: "partial" };
-            throw new Error("provider disconnected");
+            throw new Error("429 Too Many Requests");
         })()
     };
 
@@ -257,18 +284,18 @@ test("records a failed LLM stream with its error stage", async () => {
         config: CONFIG,
         workingDirectories: [],
         emit: () => undefined
-    })).rejects.toThrow("provider disconnected");
+    })).rejects.toThrow("429 Too Many Requests");
 
     expect(observer.turnsFinished[0]).toMatchObject({
         outcome: "error",
-        errorCode: "llm_stream_error",
-        errorMessage: "provider disconnected"
+        errorCode: "llm_rate_limited",
+        errorMessage: "429 Too Many Requests"
     });
     expect(observer.runsFinished[0]).toMatchObject({
         outcome: "failed",
         errorStage: "llm_stream",
-        errorCode: "llm_stream_error",
-        errorMessage: "provider disconnected",
+        errorCode: "llm_rate_limited",
+        errorMessage: "429 Too Many Requests",
         llmTurns: 1,
         agentSteps: 1,
         toolCalls: 0
