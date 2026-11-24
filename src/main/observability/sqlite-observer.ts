@@ -6,6 +6,8 @@ import { type JarvixLogger, noopLogger } from "../../core/logger.ts";
 import {
     noopAgentObserver,
     type AgentEvent,
+    type AgentLlmAttemptFinished,
+    type AgentLlmAttemptStarted,
     type AgentObserver,
     type AgentObserverStats,
     type AgentRunFinished,
@@ -17,7 +19,7 @@ import {
 } from "../../core/observability/index.ts";
 import { AGENT_DATABASE_VERSION, migrateAgentDatabase } from "./schema.ts";
 
-const DEFAULT_RETENTION_DAYS = 30;
+const DEFAULT_RETENTION_DAYS = 90;
 const DEFAULT_MAX_BYTES = 200 * 1024 * 1024;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ERROR_MESSAGE_MAX_LENGTH = 500;
@@ -206,6 +208,31 @@ const SQL = {
             error_message = COALESCE(:error_message, error_message)
         WHERE turn_id = :turn_id
     `,
+    insertLlmAttempt: `
+        INSERT INTO llm_attempts (
+            attempt_id, app_instance_id, session_id, run_id, turn_id,
+            attempt_index, started_at_ms, outcome
+        ) VALUES (
+            :attempt_id, :app_instance_id, :session_id, :run_id, :turn_id,
+            :attempt_index, :started_at_ms, 'running'
+        )
+        ON CONFLICT(attempt_id) DO UPDATE SET
+            attempt_index = excluded.attempt_index,
+            started_at_ms = MIN(
+                llm_attempts.started_at_ms,
+                excluded.started_at_ms
+            )
+    `,
+    updateLlmAttempt: `
+        UPDATE llm_attempts SET
+            ended_at_ms = :ended_at_ms,
+            duration_ms = :duration_ms,
+            outcome = :outcome,
+            http_status = COALESCE(:http_status, http_status),
+            retry_after_ms = COALESCE(:retry_after_ms, retry_after_ms),
+            error_code = COALESCE(:error_code, error_code)
+        WHERE attempt_id = :attempt_id
+    `,
     insertTool: `
         INSERT INTO tools (
             tool_span_id, app_instance_id, session_id, run_id, turn_id,
@@ -243,6 +270,7 @@ const SQL = {
             output_bytes = COALESCE(:output_bytes, output_bytes),
             truncated = :truncated,
             image_count = :image_count,
+            exit_code = COALESCE(:exit_code, exit_code),
             repeat_index = :repeat_index,
             repeat_group_size = :repeat_group_size,
             detail_json = COALESCE(:detail_json, detail_json)
@@ -269,6 +297,15 @@ const SQL = {
     insertCreatedMeta: `
         INSERT INTO meta (key, value) VALUES ('created_at_ms', :value)
         ON CONFLICT(key) DO NOTHING
+    `,
+    insertMetaDefault: `
+        INSERT INTO meta (key, value) VALUES (:key, :value)
+        ON CONFLICT(key) DO NOTHING
+    `,
+    incrementMetaCounter: `
+        INSERT INTO meta (key, value) VALUES (:key, '1')
+        ON CONFLICT(key) DO UPDATE SET
+            value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT)
     `,
     selectRunningRuns: `
         SELECT run_id, app_instance_id, session_id, started_at_ms, last_heartbeat_ms
@@ -536,6 +573,33 @@ export class SqliteAgentObserver implements AgentObserver {
         });
     }
 
+    llmAttemptStarted(attempt: AgentLlmAttemptStarted): void {
+        this.write("llm.attempt.started", SQL.insertLlmAttempt, {
+            attempt_id: attempt.attemptId,
+            app_instance_id: this.appInstanceId,
+            session_id: attempt.sessionId,
+            run_id: attempt.runId,
+            turn_id: attempt.turnId,
+            attempt_index: Math.round(attempt.attemptIndex),
+            started_at_ms: Math.round(attempt.startedAtMs)
+        });
+    }
+
+    llmAttemptFinished(
+        attemptId: string,
+        attempt: AgentLlmAttemptFinished
+    ): void {
+        this.write("llm.attempt.finished", SQL.updateLlmAttempt, {
+            attempt_id: attemptId,
+            ended_at_ms: Math.round(attempt.endedAtMs),
+            duration_ms: Math.round(attempt.durationMs),
+            outcome: attempt.outcome,
+            http_status: nullableInteger(attempt.httpStatus),
+            retry_after_ms: nullableInteger(attempt.retryAfterMs),
+            error_code: nullable(attempt.errorCode)
+        });
+    }
+
     toolStarted(tool: AgentToolStarted): void {
         this.write("tool.started", SQL.insertTool, {
             tool_span_id: tool.toolSpanId,
@@ -575,6 +639,7 @@ export class SqliteAgentObserver implements AgentObserver {
             output_bytes: nullableInteger(tool.outputBytes),
             truncated: toInteger(tool.truncated),
             image_count: Math.round(tool.imageCount ?? 0),
+            exit_code: nullableInteger(tool.exitCode ?? undefined),
             repeat_index: Math.round(tool.repeatIndex ?? 0),
             repeat_group_size: Math.round(tool.repeatGroupSize ?? 1),
             detail_json: jsonDetail(tool.detail)
@@ -638,6 +703,19 @@ export class SqliteAgentObserver implements AgentObserver {
         this.statement(SQL.insertCreatedMeta).run({
             value: String(this.now())
         });
+        this.statement(SQL.upsertMeta).run({
+            key: "retention_days",
+            value: String(this.retentionDays)
+        });
+        for (const key of [
+            "observer_write_errors",
+            "observer_dropped_writes"
+        ]) {
+            this.statement(SQL.insertMetaDefault).run({
+                key,
+                value: "0"
+            });
+        }
     }
 
     private maintain(recoverInterrupted: boolean): void {
@@ -753,6 +831,7 @@ export class SqliteAgentObserver implements AgentObserver {
     private recordFailure(event: string, error: unknown): void {
         this.writeErrors += 1;
         this.droppedWrites += 1;
+        this.persistHealthCounters();
         const now = this.now();
         if (now - this.lastWarningAt < 60_000) {
             return;
@@ -762,6 +841,19 @@ export class SqliteAgentObserver implements AgentObserver {
             event,
             reason: error instanceof Error ? error.message : String(error)
         });
+    }
+
+    private persistHealthCounters(): void {
+        for (const key of [
+            "observer_write_errors",
+            "observer_dropped_writes"
+        ]) {
+            try {
+                this.statement(SQL.incrementMetaCounter).run({ key });
+            } catch {
+                // A broken database cannot persist its own failure counters.
+            }
+        }
     }
 }
 

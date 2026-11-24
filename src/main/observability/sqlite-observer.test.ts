@@ -63,6 +63,21 @@ test("persists run, turn, and tool records", () => {
             messageCount: 4,
             contextTokensBefore: 1_200
         });
+        observer.llmAttemptStarted({
+            attemptId: "turn-1:a0",
+            sessionId: "session-1",
+            runId: "run-1",
+            turnId: "turn-1",
+            attemptIndex: 0,
+            startedAtMs: 1_050
+        });
+        observer.llmAttemptFinished("turn-1:a0", {
+            endedAtMs: 1_090,
+            durationMs: 40,
+            outcome: "response",
+            httpStatus: 200,
+            retryAfterMs: 250
+        });
         observer.toolStarted({
             toolSpanId: "tool-1",
             sessionId: "session-1",
@@ -91,6 +106,7 @@ test("persists run, turn, and tool records", () => {
             outputBytes: 120,
             truncated: false,
             imageCount: 0,
+            exitCode: 0,
             repeatIndex: 0,
             repeatGroupSize: 1,
             detail: { exitCode: 0 }
@@ -192,12 +208,30 @@ test("persists run, turn, and tool records", () => {
         expect(tool?.duration_ms).toBe(801);
         expect(tool?.permission_wait_ms).toBe(1);
         expect(tool?.execution_ms).toBe(799);
+        expect(tool?.exit_code).toBe(0);
         expect(tool?.detail_json).toContain("\"exitCode\":0");
+
+        const attempt = database.prepare(
+            "SELECT * FROM llm_attempts WHERE attempt_id = ?"
+        ).get("turn-1:a0");
+        expect(attempt).toMatchObject({
+            turn_id: "turn-1",
+            attempt_index: 0,
+            outcome: "response",
+            http_status: 200,
+            retry_after_ms: 250,
+            duration_ms: 40
+        });
 
         const schemaVersion = database.prepare(
             "SELECT value FROM meta WHERE key = 'schema_version'"
         ).get();
         expect(schemaVersion?.value).toBe(String(AGENT_DATABASE_VERSION));
+        expect(
+            database.prepare(
+                "SELECT value FROM meta WHERE key = 'retention_days'"
+            ).get()?.value
+        ).toBe("90");
 
     } finally {
         database.close();
@@ -340,6 +374,14 @@ test("migrates a version 1 database without losing existing records", () => {
             "retry_after_ms",
             "provider_http_status"
         ]));
+        const toolColumns = database.prepare("PRAGMA table_info(tools)").all()
+            .map((column) => column.name);
+        expect(toolColumns).toContain("exit_code");
+        expect(
+            database.prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'llm_attempts'"
+            ).get()?.name
+        ).toBe("llm_attempts");
 
         const run = database.prepare(
             "SELECT * FROM runs WHERE run_id = 'run-v1'"
@@ -472,6 +514,49 @@ test("redacts credentials, paths, and URLs from errors", () => {
         expect(run?.error_message).toContain("[url]");
         expect(run?.error_message).not.toContain("plain-secret-value");
         expect(run?.error_message).not.toContain("example.com");
+    } finally {
+        database.close();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test("persists observer write failure counters", () => {
+    const { directory, databasePath } = temporaryDatabase();
+    const observer = new SqliteAgentObserver({
+        databasePath,
+        appVersion: "test",
+        now: () => 10_000
+    });
+
+    try {
+        observer.llmAttemptStarted({
+            attemptId: "missing-turn:a0",
+            sessionId: "session-1",
+            runId: "missing-run",
+            turnId: "missing-turn",
+            attemptIndex: 0,
+            startedAtMs: 1_000
+        });
+        expect(observer.stats()).toEqual({
+            writeErrors: 1,
+            droppedWrites: 1
+        });
+    } finally {
+        observer.close();
+    }
+
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+        const counters = Object.fromEntries(
+            database.prepare(`
+                SELECT key, value FROM meta
+                WHERE key IN ('observer_write_errors', 'observer_dropped_writes')
+            `).all().map((row) => [row.key, row.value])
+        );
+        expect(counters).toEqual({
+            observer_write_errors: "1",
+            observer_dropped_writes: "1"
+        });
     } finally {
         database.close();
         rmSync(directory, { recursive: true, force: true });

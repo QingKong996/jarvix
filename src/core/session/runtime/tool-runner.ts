@@ -272,6 +272,7 @@ export class ToolCallRunner {
                 outputBytes: Buffer.byteLength(outputText, "utf8"),
                 truncated: (result.task?.truncatedCharacters ?? 0) > 0,
                 imageCount,
+                exitCode: result.task?.exitCode,
                 repeatIndex: telemetry.repeatIndex,
                 repeatGroupSize: telemetry.repeatGroupSize,
                 detail: toolDetail(result)

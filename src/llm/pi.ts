@@ -85,12 +85,22 @@ function instrumentedFetch(
     request: LlmRequest,
     fallback: FetchFunction
 ): FetchFunction | undefined {
-    if (!request.onProviderRequest && !request.onProviderResponse) {
+    if (
+        !request.onProviderRequest
+        && !request.onProviderResponse
+        && !request.onProviderError
+    ) {
         return undefined;
     }
     return async (input, init) => {
         notify(request.onProviderRequest);
-        const response = await fallback(input, init);
+        let response: Response;
+        try {
+            response = await fallback(input, init);
+        } catch (error) {
+            notify(() => request.onProviderError?.(error));
+            throw error;
+        }
         notify(() => request.onProviderResponse?.({
             status: response.status,
             retryAfterMs: retryAfterMs(response.headers)

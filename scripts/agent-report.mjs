@@ -8,7 +8,8 @@ import { DatabaseSync } from "node:sqlite";
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const MIN_P95_SAMPLES = 20;
 const MAX_SLOW_RUNS = 10;
-const MAX_DAILY_ROWS = 90;
+const MAX_DAILY_ROWS = 366;
+const DEFAULT_RETENTION_DAYS = 90;
 
 const options = parseArguments(process.argv.slice(2));
 if (options.help) {
@@ -23,8 +24,6 @@ if (!existsSync(databasePath)) {
     process.exit(1);
 }
 
-const sinceMs = Date.now() - options.days * DAY_MS;
-const previousSinceMs = sinceMs - options.days * DAY_MS;
 const database = new DatabaseSync(databasePath, { readOnly: true });
 let report;
 try {
@@ -32,14 +31,30 @@ try {
     const schemaVersion = Number(
         database.prepare("PRAGMA user_version").get()?.user_version ?? 0
     );
-    if (schemaVersion !== 2) {
+    if (schemaVersion !== 3) {
         throw new Error(
-            `Unsupported observability schema version: ${schemaVersion}. Start Jarvix once to migrate it to version 2.`
+            `Unsupported observability schema version: ${schemaVersion}. Start Jarvix once to migrate it to version 3.`
         );
     }
+    const meta = readMeta(database);
+    const retentionDays = positiveNumberOrDefault(
+        meta.retention_days,
+        DEFAULT_RETENTION_DAYS
+    );
+    const effectiveDays = Math.min(options.days, retentionDays);
+    if (effectiveDays !== options.days) {
+        console.error(
+            `Requested ${options.days} days; report window capped at ${effectiveDays} days by retention settings.`
+        );
+    }
+    const sinceMs = Date.now() - effectiveDays * DAY_MS;
+    const previousSinceMs = sinceMs - effectiveDays * DAY_MS;
     report = collectReport(database, {
         databasePath,
-        days: options.days,
+        days: effectiveDays,
+        requestedDays: options.days,
+        retentionDays,
+        meta,
         sinceMs,
         previousSinceMs
     });
@@ -83,40 +98,62 @@ function collectReport(database, window) {
             t.ended_at_ms, t.duration_ms, t.outcome, t.permission_requests,
             t.permission_wait_ms, t.execution_ms, t.is_error, t.end_reason,
             t.error_code, t.output_chars, t.output_bytes, t.image_count,
-            t.truncated, t.repeat_index, t.repeat_group_size
+            t.truncated, t.exit_code, t.repeat_index, t.repeat_group_size
         FROM tools t
         JOIN runs r ON r.run_id = t.run_id
         WHERE r.started_at_ms >= ? AND r.started_at_ms < ?
         ORDER BY t.started_at_ms DESC
     `).all(window.sinceMs, Number.MAX_SAFE_INTEGER);
+    const llmAttempts = database.prepare(`
+        SELECT
+            a.attempt_id, a.run_id, a.turn_id, a.attempt_index,
+            a.started_at_ms, a.ended_at_ms, a.duration_ms, a.outcome,
+            a.http_status, a.retry_after_ms, a.error_code
+        FROM llm_attempts a
+        JOIN runs r ON r.run_id = a.run_id
+        WHERE r.started_at_ms >= ? AND r.started_at_ms < ?
+        ORDER BY a.started_at_ms DESC
+    `).all(window.sinceMs, Number.MAX_SAFE_INTEGER);
     const promptRuns = runs.filter((run) => run.run_type === "prompt");
+    const finishedPromptRuns = promptRuns.filter(
+        (run) => run.outcome !== "running"
+    );
     const previousPromptRuns = previousRuns.filter(
-        (run) => run.run_type === "prompt"
+        (run) => run.run_type === "prompt" && run.outcome !== "running"
     );
     const namingRuns = runs.filter((run) => run.run_type === "naming");
     const mainTurns = turns.filter((turn) => turn.turn_kind === "main");
     const completedMainTurns = mainTurns.filter((turn) => turn.outcome === "completed");
     const completedTools = tools.filter((tool) => tool.outcome !== "running");
-    const currentSummary = promptRunMetrics(promptRuns, completedTools);
-    const previousSummary = promptRunMetrics(
-        previousPromptRuns,
-        []
-    );
+    const currentSummary = promptRunMetrics(finishedPromptRuns, completedTools);
+    const previousSummary = promptRunMetrics(previousPromptRuns, []);
     const toolSummary = toolMetrics(completedTools);
+    const attemptSummary = llmAttemptMetrics(llmAttempts);
+    const interactionSummary = interactionMetrics(finishedPromptRuns);
+    const modelSegments = modelRunMetrics(
+        finishedPromptRuns,
+        previousPromptRuns
+    );
     const dataQuality = {
-        promptRunsMissingTtft: missingMetric(promptRuns, "ttft_ms"),
+        promptRunsMissingTtft: missingMetric(finishedPromptRuns, "ttft_ms"),
         promptRunsMissingFirstToken: missingMetric(
-            promptRuns,
+            finishedPromptRuns,
             "submit_to_first_token_ms"
         ),
-        promptRunsMissingUsage: missingMetric(promptRuns, "output_tokens"),
-        promptRunsMissingCost: missingMetric(promptRuns, "cost_usd"),
-        promptRunsMissingAppVersion: missingMetric(promptRuns, "app_version"),
+        promptRunsMissingUsage: missingMetric(finishedPromptRuns, "output_tokens"),
+        promptRunsMissingCost: missingMetric(finishedPromptRuns, "cost_usd"),
+        promptRunsMissingAppVersion: missingMetric(
+            finishedPromptRuns,
+            "app_version"
+        ),
         promptRunsMissingPromptHash: missingMetric(
-            promptRuns,
+            finishedPromptRuns,
             "system_prompt_hash"
         ),
-        promptRunsMissingToolsetHash: missingMetric(promptRuns, "toolset_hash"),
+        promptRunsMissingToolsetHash: missingMetric(
+            finishedPromptRuns,
+            "toolset_hash"
+        ),
         mainTurnsMissingTtft: missingMetric(mainTurns, "ttft_ms"),
         mainTurnsMissingUsage: missingMetric(mainTurns, "output_tokens"),
         runsStillRunning: runs.filter((run) => run.outcome === "running").length,
@@ -129,6 +166,8 @@ function collectReport(database, window) {
         generated_at: new Date().toISOString(),
         window: {
             days: window.days,
+            requestedDays: window.requestedDays,
+            retentionDays: window.retentionDays,
             since: new Date(window.sinceMs).toISOString(),
             previousSince: new Date(window.previousSinceMs).toISOString(),
             database: window.databasePath
@@ -137,10 +176,13 @@ function collectReport(database, window) {
             runs: runs.length,
             sessions: new Set(runs.map((run) => run.session_id)).size,
             promptRuns: promptRuns.length,
+            finishedPromptRuns: finishedPromptRuns.length,
+            activePromptRuns: promptRuns.length - finishedPromptRuns.length,
             namingRuns: namingRuns.length,
             turns: turns.length,
             mainTurns: mainTurns.length,
-            toolCalls: tools.length
+            toolCalls: tools.length,
+            llmAttempts: llmAttempts.length
         },
         runs: {
             byOutcome: countBy(runs, (run) => run.outcome),
@@ -149,9 +191,10 @@ function collectReport(database, window) {
                 runs,
                 (run) => `${run.provider ?? "unknown"}/${run.model ?? "unknown"}`
             ),
-            byVersion: versionMetrics(promptRuns),
+            byVersion: versionMetrics(finishedPromptRuns),
+            modelSegments,
             errors: errorBreakdown(runs),
-            slowest: promptRuns
+            slowest: finishedPromptRuns
                 .filter((run) => run.duration_ms !== null)
                 .sort((left, right) => Number(right.duration_ms) - Number(left.duration_ms))
                 .slice(0, MAX_SLOW_RUNS)
@@ -177,9 +220,14 @@ function collectReport(database, window) {
             current: currentSummary,
             previous: previousSummary,
             tools: toolSummary,
+            interaction: interactionSummary,
+            attempts: attemptSummary,
+            modelSegments,
             dataQuality
         }),
         daily: dailyMetrics(promptRuns),
+        interaction: interactionSummary,
+        llmAttempts: attemptSummary,
         llmByModel: llmByModel(completedMainTurns),
         firstTokenKinds: countBy(
             mainTurns,
@@ -190,6 +238,10 @@ function collectReport(database, window) {
             (turn) => turn.stop_reason ?? "unknown"
         ),
         tools: toolSummary,
+        observerHealth: {
+            writeErrors: Number(window.meta.observer_write_errors ?? 0),
+            droppedWrites: Number(window.meta.observer_dropped_writes ?? 0)
+        },
         dataQuality
     };
 }
@@ -217,6 +269,18 @@ function loadRuns(database, sinceMs, beforeMs) {
         WHERE started_at_ms >= ? AND started_at_ms < ?
         ORDER BY started_at_ms DESC
     `).all(sinceMs, beforeMs);
+}
+
+function readMeta(database) {
+    return Object.fromEntries(
+        database.prepare("SELECT key, value FROM meta").all()
+            .map((row) => [row.key, row.value])
+    );
+}
+
+function positiveNumberOrDefault(value, fallback) {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
 function promptRunMetrics(runs, tools) {
@@ -317,27 +381,26 @@ function promptRunMetrics(runs, tools) {
 function versionMetrics(runs) {
     const groups = new Map();
     for (const run of runs) {
-        const key = [
-            run.app_version ?? "unknown",
-            run.build_id ?? "unknown",
-            run.reasoning_level ?? "default",
-            run.system_prompt_hash ?? "unknown",
-            run.toolset_hash ?? "unknown"
-        ].join("|");
-        const group = groups.get(key) ?? [];
-        group.push(run);
+        const dimensions = {
+            appVersion: run.app_version ?? "unknown",
+            buildId: run.build_id ?? "unknown",
+            provider: run.provider ?? "unknown",
+            model: run.model ?? "unknown",
+            reasoning: run.reasoning_level ?? "default",
+            permission: run.permission ?? "unknown",
+            promptHash: run.system_prompt_hash ?? "unknown",
+            toolsetHash: run.toolset_hash ?? "unknown"
+        };
+        const key = JSON.stringify(dimensions);
+        const group = groups.get(key) ?? { dimensions, items: [] };
+        group.items.push(run);
         groups.set(key, group);
     }
-    return [...groups.entries()]
-        .map(([key, items]) => {
-            const [appVersion, buildId, reasoning, promptHash, toolsetHash] = key.split("|");
+    return [...groups.values()]
+        .map(({ dimensions, items }) => {
             const metrics = promptRunMetrics(items, []);
             return {
-                appVersion,
-                buildId,
-                reasoning,
-                promptHash,
-                toolsetHash,
+                ...dimensions,
                 runs: items.length,
                 completedRate: metrics.completedRate,
                 durationMs: metrics.durationMs,
@@ -360,10 +423,13 @@ function dailyMetrics(runs) {
         .sort(([left], [right]) => left.localeCompare(right))
         .slice(-MAX_DAILY_ROWS)
         .map(([date, items]) => {
-            const metrics = promptRunMetrics(items, []);
+            const finished = items.filter((run) => run.outcome !== "running");
+            const metrics = promptRunMetrics(finished, []);
             return {
                 date,
                 runs: items.length,
+                finishedRuns: finished.length,
+                runningRuns: items.length - finished.length,
                 completedRate: metrics.completedRate,
                 failedRate: metrics.failedRate,
                 durationP50Ms: metrics.durationMs.p50,
@@ -376,6 +442,164 @@ function dailyMetrics(runs) {
                 costPerRun: metrics.costPerRun
             };
         });
+}
+
+function modelRunMetrics(currentRuns, previousRuns) {
+    const groups = new Map();
+    const addRuns = (runs, window) => {
+        for (const run of runs) {
+            const key = `${run.provider ?? "unknown"}/${run.model ?? "unknown"}`;
+            const group = groups.get(key) ?? {
+                model: key,
+                current: [],
+                previous: []
+            };
+            group[window].push(run);
+            groups.set(key, group);
+        }
+    };
+    addRuns(currentRuns, "current");
+    addRuns(previousRuns, "previous");
+    return [...groups.values()]
+        .map(({ model, current, previous }) => {
+            const now = promptRunMetrics(current, []);
+            const before = promptRunMetrics(previous, []);
+            return {
+                model,
+                currentRuns: current.length,
+                previousRuns: previous.length,
+                completedRate: now.completedRate,
+                previousCompletedRate: before.completedRate,
+                completedRateChange: relativeChange(
+                    now.completedRate,
+                    before.completedRate
+                ),
+                durationP50Ms: now.durationMs.p50,
+                previousDurationP50Ms: before.durationMs.p50,
+                durationChange: relativeChange(
+                    now.durationMs.p50,
+                    before.durationMs.p50
+                ),
+                ttftP50Ms: now.ttftMs.p50,
+                previousTtftP50Ms: before.ttftMs.p50,
+                ttftChange: relativeChange(now.ttftMs.p50, before.ttftMs.p50),
+                tokensPerSecondP50: now.tokensPerSecond.p50,
+                previousTokensPerSecondP50: before.tokensPerSecond.p50,
+                tokensPerSecondChange: relativeChange(
+                    now.tokensPerSecond.p50,
+                    before.tokensPerSecond.p50
+                ),
+                toolErrorRate: now.toolErrorRate,
+                previousToolErrorRate: before.toolErrorRate
+            };
+        })
+        .sort(
+            (left, right) =>
+                (right.currentRuns + right.previousRuns)
+                - (left.currentRuns + left.previousRuns)
+        );
+}
+
+function interactionMetrics(runs) {
+    const bySession = new Map();
+    for (const run of [...runs].sort(
+        (left, right) => Number(left.started_at_ms) - Number(right.started_at_ms)
+    )) {
+        const sessionRuns = bySession.get(run.session_id) ?? [];
+        sessionRuns.push(run);
+        bySession.set(run.session_id, sessionRuns);
+    }
+
+    let followUpComparable = 0;
+    let fastFollowUps = 0;
+    let repeatPrompts = 0;
+    let promptHashRuns = 0;
+    const promptsPerSession = [];
+    for (const sessionRuns of bySession.values()) {
+        promptsPerSession.push(sessionRuns.length);
+        const seenPromptHashes = new Set();
+        for (const [index, run] of sessionRuns.entries()) {
+            if (run.prompt_hash) {
+                promptHashRuns += 1;
+                if (seenPromptHashes.has(run.prompt_hash)) {
+                    repeatPrompts += 1;
+                }
+                seenPromptHashes.add(run.prompt_hash);
+            }
+            if (run.outcome !== "completed") {
+                continue;
+            }
+            const next = sessionRuns[index + 1];
+            if (!next) {
+                continue;
+            }
+            followUpComparable += 1;
+            const endedAtMs = Number(
+                run.ended_at_ms
+                ?? Number(run.started_at_ms) + Number(run.duration_ms ?? 0)
+            );
+            if (Number(next.started_at_ms) - endedAtMs <= 60_000) {
+                fastFollowUps += 1;
+            }
+        }
+    }
+
+    return {
+        sessions: bySession.size,
+        promptsPerSession: describe(promptsPerSession),
+        sessionsWithMultiplePrompts: [...bySession.values()]
+            .filter((items) => items.length > 1).length,
+        fastFollowUpWithinMs: 60_000,
+        fastFollowUpComparable: followUpComparable,
+        fastFollowUpRate: rateOrNull(fastFollowUps, followUpComparable),
+        promptHashRuns,
+        repeatPromptRate: rateOrNull(repeatPrompts, promptHashRuns)
+    };
+}
+
+function llmAttemptMetrics(attempts) {
+    const finished = attempts.filter((attempt) => attempt.outcome !== "running");
+    const byTurn = new Map();
+    for (const attempt of finished) {
+        const items = byTurn.get(attempt.turn_id) ?? [];
+        items.push(attempt);
+        byTurn.set(attempt.turn_id, items);
+    }
+    const turns = [...byTurn.values()];
+    const retryingTurns = turns.filter((items) => items.length > 1).length;
+    const firstAttemptSucceeded = turns.filter((items) => {
+        const first = items.find(
+            (attempt) => Number(attempt.attempt_index) === 0
+        );
+        return first
+            && first.outcome === "response"
+            && Number(first.http_status) >= 200
+            && Number(first.http_status) < 400;
+    }).length;
+    return {
+        attempts: attempts.length,
+        finished: finished.length,
+        running: attempts.length - finished.length,
+        byOutcome: countBy(attempts, (attempt) => attempt.outcome),
+        byStatus: countBy(
+            attempts.filter((attempt) => attempt.http_status !== null),
+            (attempt) => String(attempt.http_status)
+        ),
+        byErrorCode: countBy(
+            attempts.filter((attempt) => attempt.error_code),
+            (attempt) => attempt.error_code
+        ),
+        durationMs: describe(numbers(attempts.map((attempt) => attempt.duration_ms))),
+        errorRate: rateOrNull(
+            finished.filter((attempt) => attempt.outcome === "error").length,
+            finished.length
+        ),
+        retryingTurnRate: rateOrNull(retryingTurns, turns.length),
+        firstAttemptSuccessRate: rateOrNull(
+            firstAttemptSucceeded,
+            turns.length
+        )
+    };
 }
 
 function buildTrends(current, previous) {
@@ -460,7 +684,16 @@ function trend(key, label, current, previous, lowerIsBetter, format) {
     };
 }
 
-function buildFindings({ runs, current, previous, tools, dataQuality }) {
+function buildFindings({
+    runs,
+    current,
+    previous,
+    tools,
+    interaction,
+    attempts,
+    modelSegments,
+    dataQuality
+}) {
     const findings = [];
     const add = (severity, code, message, value) => {
         findings.push({ severity, code, message, value });
@@ -492,6 +725,18 @@ function buildFindings({ runs, current, previous, tools, dataQuality }) {
     }
     if (current.llmRetries > 0) {
         add("info", "retry_count", `本窗口共发生 ${current.llmRetries} 次 LLM HTTP 重试。`, current.llmRetries);
+    }
+    if (
+        attempts.attempts >= 20
+        && attempts.firstAttemptSuccessRate !== null
+        && attempts.firstAttemptSuccessRate < 0.9
+    ) {
+        add(
+            "warning",
+            "first_attempt_success",
+            "LLM 首次 HTTP 尝试成功率低于 90%，检查 Provider、鉴权和网络稳定性。",
+            attempts.firstAttemptSuccessRate
+        );
     }
     const p50DurationChange = relativeChange(
         current.durationMs.p50,
@@ -539,6 +784,33 @@ function buildFindings({ runs, current, previous, tools, dataQuality }) {
     }
     if (tools.calls >= 20 && tools.errorRate > 0.1) {
         add("warning", "tool_regression", "工具调用错误率偏高，优先查看错误分类。", tools.errorRate);
+    }
+    if (
+        interaction.fastFollowUpComparable >= 10
+        && interaction.fastFollowUpRate !== null
+        && interaction.fastFollowUpRate > 0.3
+    ) {
+        add(
+            "info",
+            "fast_follow_up",
+            "超过 30% 的完成请求在 60 秒内收到后续 Prompt，可能存在未满足需求或正常多轮交互。",
+            interaction.fastFollowUpRate
+        );
+    }
+    for (const model of modelSegments) {
+        if (
+            model.currentRuns >= 10
+            && model.previousRuns >= 10
+            && model.durationChange !== null
+            && model.durationChange > 0.25
+        ) {
+            add(
+                "warning",
+                "model_duration_regression",
+                `${model.model} 的总时长 p50 较上一窗口上升超过 25%。`,
+                model.durationChange
+            );
+        }
     }
     return findings;
 }
@@ -612,6 +884,18 @@ function toolMetrics(tools) {
             permissionRequests: sum(items.map((tool) => tool.permission_requests)),
             permissionWaitMs: sum(items.map((tool) => tool.permission_wait_ms)),
             averageOutputBytes: average(numbers(items.map((tool) => tool.output_bytes))),
+            exitCodes: countBy(
+                items.filter((tool) => tool.exit_code !== null),
+                (tool) => String(tool.exit_code)
+            ),
+            nonZeroExitRate: rateOrNull(
+                items.filter(
+                    (tool) =>
+                        tool.exit_code !== null
+                        && Number(tool.exit_code) !== 0
+                ).length,
+                items.filter((tool) => tool.exit_code !== null).length
+            ),
             repeatRate: percentage(
                 items.filter((tool) => Number(tool.repeat_index) > 0).length,
                 items.length
@@ -641,6 +925,18 @@ function toolMetrics(tools) {
         errorRate: percentage(errors, successes + errors),
         byName,
         byCategory: countBy(tools, (tool) => tool.tool_category),
+        exitCodes: countBy(
+            tools.filter((tool) => tool.exit_code !== null),
+            (tool) => String(tool.exit_code)
+        ),
+        nonZeroExitRate: rateOrNull(
+            tools.filter(
+                (tool) =>
+                    tool.exit_code !== null
+                    && Number(tool.exit_code) !== 0
+            ).length,
+            tools.filter((tool) => tool.exit_code !== null).length
+        ),
         errorsByCode: countBy(
             tools.filter((tool) => tool.outcome === "error"),
             (tool) => tool.error_code ?? "unknown"
@@ -707,6 +1003,10 @@ function percentage(part, total) {
     return total <= 0 ? 0 : part / total;
 }
 
+function rateOrNull(part, total) {
+    return total <= 0 ? null : part / total;
+}
+
 function missingMetric(runs, key) {
     return {
         count: runs.filter((run) => run[key] === null || run[key] === undefined).length,
@@ -740,7 +1040,11 @@ function renderMarkdown(report) {
     lines.push("# Agent observability report");
     lines.push("");
     lines.push(`- 时间范围：最近 ${report.window.days} 天（${report.window.since} 起）`);
+    if (report.window.days !== report.window.requestedDays) {
+        lines.push(`- 请求窗口：${report.window.requestedDays} 天；受保留策略限制为 ${report.window.days} 天`);
+    }
     lines.push(`- 对比窗口：${report.window.previousSince} 至 ${report.window.since}`);
+    lines.push(`- 数据保留：${report.window.retentionDays} 天`);
     lines.push(`- 数据库：\`${report.window.database}\``);
     lines.push(`- 生成时间：${report.generated_at}`);
     lines.push("");
@@ -751,8 +1055,11 @@ function renderMarkdown(report) {
     lines.push(`| Run 数 | ${report.totals.runs} |`);
     lines.push(`| Session 数 | ${report.totals.sessions} |`);
     lines.push(`| Prompt Run | ${report.totals.promptRuns} |`);
+    lines.push(`| 已完成 Prompt Run | ${report.totals.finishedPromptRuns} |`);
+    lines.push(`| 运行中 Prompt Run | ${report.totals.activePromptRuns} |`);
     lines.push(`| Naming Run | ${report.totals.namingRuns} |`);
     lines.push(`| Main LLM Turn | ${report.totals.mainTurns} |`);
+    lines.push(`| LLM HTTP Attempt | ${report.totals.llmAttempts} |`);
     lines.push(`| 工具调用 | ${report.totals.toolCalls} |`);
     lines.push("");
     lines.push("## Run 状态");
@@ -778,6 +1085,8 @@ function renderMarkdown(report) {
     lines.push("| 指标 | 值 |");
     lines.push("| --- | ---: |");
     const prompt = report.promptRuns;
+    lines.push(`| 纳入统计的已完成 Run | ${prompt.runCount} |`);
+    lines.push(`| 当前运行中 Run | ${report.totals.activePromptRuns} |`);
     lines.push(`| 工具调用率 | ${pct(prompt.toolCallRate)} |`);
     lines.push(`| 工具调用 / Run | ${num(prompt.toolCallsPerRun)} |`);
     lines.push(`| 工具调用 / Agent Step | ${num(prompt.toolCallsPerAgentStep)} |`);
@@ -805,7 +1114,7 @@ function renderMarkdown(report) {
     lines.push(`| 发生重试 Run 占比 | ${pct(prompt.retryRunRate)} |`);
     lines.push(`| 工具错误率 | ${pct(prompt.toolErrorRate)} |`);
     lines.push(`| 权限等待时长占比 | ${pct(prompt.permissionWaitShare)} |`);
-    lines.push(`| 平均成本 / Run | ${usd(prompt.costPerRun)} |`);
+    lines.push(`| 有成本记录的 Run 平均成本 | ${usd(prompt.costPerRun)} |`);
     lines.push(`| 成本 p50 / p95 | ${statUsd(prompt.costUsd)} |`);
     lines.push(`| Output Tokens p50 / p95 | ${stat(prompt.outputTokens, 0)} |`);
     lines.push(`| Cache Read 占比 | ${pct(prompt.cacheReadRatio)} |`);
@@ -818,26 +1127,48 @@ function renderMarkdown(report) {
         lines.push(`| ${item.label} | ${formatTrendValue(item, item.current)} | ${formatTrendValue(item, item.previous)} | ${formatChange(item.change)} |`);
     }
     lines.push("");
+    lines.push("## 交互反复代理指标");
+    lines.push("");
+    lines.push("| 指标 | 值 |");
+    lines.push("| --- | ---: |");
+    const interaction = report.interaction;
+    lines.push(`| Session 数 | ${interaction.sessions} |`);
+    lines.push(`| Prompt / Session p50 / p95 | ${stat(interaction.promptsPerSession, 0)} |`);
+    lines.push(`| 多 Prompt Session | ${interaction.sessionsWithMultiplePrompts} |`);
+    lines.push(`| 60 秒内后续 Prompt | ${interaction.fastFollowUpRate === null ? "-" : pct(interaction.fastFollowUpRate)} (${interaction.fastFollowUpComparable} 个可比较 Run) |`);
+    lines.push(`| 重复 Prompt 占比 | ${interaction.repeatPromptRate === null ? "-" : pct(interaction.repeatPromptRate)} |`);
+    lines.push("");
     lines.push("## 每日趋势");
     lines.push("");
-    lines.push("| 日期 | Runs | 完成率 | 失败率 | 时长 p50 | TTFT p50 | 提交→首 Token p50 | TPS p50 | 工具错误率 | 权限等待占比 | 成本/Run |");
-    lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+    lines.push("| 日期 | Runs | 运行中 | 完成率 | 失败率 | 时长 p50 | TTFT p50 | 提交→首 Token p50 | TPS p50 | 工具错误率 | 权限等待占比 | 成本/Run |");
+    lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
     for (const day of report.daily) {
-        lines.push(`| ${day.date} | ${day.runs} | ${pct(day.completedRate)} | ${pct(day.failedRate)} | ${fixed(day.durationP50Ms, 1)} ms | ${fixed(day.ttftP50Ms, 1)} ms | ${fixed(day.submitToFirstTokenP50Ms, 1)} ms | ${fixed(day.tokensPerSecondP50, 2)} | ${pct(day.toolErrorRate)} | ${pct(day.permissionWaitShare)} | ${usd(day.costPerRun)} |`);
+        lines.push(`| ${day.date} | ${day.runs} | ${day.runningRuns} | ${pct(day.completedRate)} | ${pct(day.failedRate)} | ${fixed(day.durationP50Ms, 1)} ms | ${fixed(day.ttftP50Ms, 1)} ms | ${fixed(day.submitToFirstTokenP50Ms, 1)} ms | ${fixed(day.tokensPerSecondP50, 2)} | ${pct(day.toolErrorRate)} | ${pct(day.permissionWaitShare)} | ${usd(day.costPerRun)} |`);
     }
     if (report.daily.length === 0) {
-        lines.push("| 暂无数据 | 0 | - | - | - | - | - | - | - | - | - |");
+        lines.push("| 暂无数据 | 0 | 0 | - | - | - | - | - | - | - | - | - |");
     }
     lines.push("");
     lines.push("## 版本分组");
     lines.push("");
-    lines.push("| App | Build | Reasoning | Prompt | Toolset | Runs | 完成率 | 时长 p50 | TTFT p50 | TPS p50 |");
-    lines.push("| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |");
+    lines.push("| App | Build | Model | Reasoning | Permission | Prompt | Toolset | Runs | 完成率 | 时长 p50 | TTFT p50 | TPS p50 |");
+    lines.push("| --- | --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |");
     for (const version of report.runs.byVersion.slice(0, 12)) {
-        lines.push(`| ${escapeTable(version.appVersion)} | ${escapeTable(version.buildId)} | ${escapeTable(version.reasoning)} | \`${version.promptHash}\` | \`${version.toolsetHash}\` | ${version.runs} | ${pct(version.completedRate)} | ${fixed(version.durationMs.p50, 1)} ms | ${fixed(version.ttftMs.p50, 1)} ms | ${fixed(version.tokensPerSecond.p50, 2)} |`);
+        lines.push(`| ${escapeTable(version.appVersion)} | ${escapeTable(version.buildId)} | ${escapeTable(`${version.provider}/${version.model}`)} | ${escapeTable(version.reasoning)} | ${escapeTable(version.permission)} | \`${version.promptHash}\` | \`${version.toolsetHash}\` | ${version.runs} | ${pct(version.completedRate)} | ${fixed(version.durationMs.p50, 1)} ms | ${fixed(version.ttftMs.p50, 1)} ms | ${fixed(version.tokensPerSecond.p50, 2)} |`);
     }
     if (report.runs.byVersion.length === 0) {
-        lines.push("| 暂无数据 | - | - | - | - | 0 | - | - | - | - |");
+        lines.push("| 暂无数据 | - | - | - | - | - | - | 0 | - | - | - | - |");
+    }
+    lines.push("");
+    lines.push("## 按模型环比");
+    lines.push("");
+    lines.push("| 模型 | 当前/上一 Runs | 完成率 当前/上一 | 时长 p50 当前/上一 | 时长变化 | TTFT p50 当前/上一 | TTFT 变化 | TPS p50 当前/上一 | TPS 变化 |");
+    lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+    for (const model of report.runs.modelSegments.slice(0, 12)) {
+        lines.push(`| ${escapeTable(model.model)} | ${model.currentRuns} / ${model.previousRuns} | ${pct(model.completedRate)} / ${pct(model.previousCompletedRate)} | ${fixed(model.durationP50Ms, 1)} / ${fixed(model.previousDurationP50Ms, 1)} ms | ${formatChange(model.durationChange)} | ${fixed(model.ttftP50Ms, 1)} / ${fixed(model.previousTtftP50Ms, 1)} ms | ${formatChange(model.ttftChange)} | ${fixed(model.tokensPerSecondP50, 2)} / ${fixed(model.previousTokensPerSecondP50, 2)} | ${formatChange(model.tokensPerSecondChange)} |`);
+    }
+    if (report.runs.modelSegments.length === 0) {
+        lines.push("| 暂无数据 | 0 / 0 | - | - | - | - | - | - | - |");
     }
     lines.push("");
     lines.push("## LLM 分模型");
@@ -851,10 +1182,24 @@ function renderMarkdown(report) {
         lines.push("| 暂无数据 | 0 | - | - | - | 0 / 0 / 0 | 0 |");
     }
     lines.push("");
+    lines.push("## LLM HTTP 尝试");
+    lines.push("");
+    lines.push("| 指标 | 值 |");
+    lines.push("| --- | ---: |");
+    const attempts = report.llmAttempts;
+    lines.push(`| Attempt 数 / 已结束 / 运行中 | ${attempts.attempts} / ${attempts.finished} / ${attempts.running} |`);
+    lines.push(`| HTTP 尝试时长 p50 / p95 | ${statMs(attempts.durationMs)} |`);
+    lines.push(`| 首次 Attempt 成功率 | ${attempts.firstAttemptSuccessRate === null ? "-" : pct(attempts.firstAttemptSuccessRate)} |`);
+    lines.push(`| 发生重试的 Turn 占比 | ${attempts.retryingTurnRate === null ? "-" : pct(attempts.retryingTurnRate)} |`);
+    lines.push(`| Attempt 错误率 | ${attempts.errorRate === null ? "-" : pct(attempts.errorRate)} |`);
+    lines.push(`| 状态码分布 | ${formatCounts(attempts.byStatus)} |`);
+    lines.push(`| 错误码分布 | ${formatCounts(attempts.byErrorCode)} |`);
+    lines.push("");
     lines.push("## 工具");
     lines.push("");
     const toolSummary = report.tools;
     lines.push(`- 调用：${toolSummary.calls}，成功：${toolSummary.successes}，失败：${toolSummary.errors}，取消：${toolSummary.cancelled}，错误率：${pct(toolSummary.errorRate)}`);
+    lines.push(`- 退出码：${formatCounts(toolSummary.exitCodes)}；非零退出率：${pct(toolSummary.nonZeroExitRate)}`);
     lines.push(`- 首字类型：${formatCounts(report.firstTokenKinds)}`);
     lines.push(`- 停止原因：${formatCounts(report.stopReasons)}`);
     lines.push("");
@@ -900,6 +1245,7 @@ function renderMarkdown(report) {
     lines.push(`- Main Turn 缺少 TTFT：${report.dataQuality.mainTurnsMissingTtft.count}/${report.dataQuality.mainTurnsMissingTtft.total}`);
     lines.push(`- Main Turn 缺少 Token Usage：${report.dataQuality.mainTurnsMissingUsage.count}/${report.dataQuality.mainTurnsMissingUsage.total}`);
     lines.push(`- 仍未结束：Run ${report.dataQuality.runsStillRunning}，Turn ${report.dataQuality.turnsStillRunning}，Tool ${report.dataQuality.toolsStillRunning}`);
+    lines.push(`- 采集累计写入错误 / 丢弃写入：${report.observerHealth.writeErrors} / ${report.observerHealth.droppedWrites}`);
     lines.push(`- 统计规则：${report.dataQuality.p95Rule}`);
     lines.push("");
     return `${lines.join("\n")}\n`;
@@ -1040,7 +1386,7 @@ function printHelp() {
     console.log(`Usage: node scripts/agent-report.mjs [options]
 
 Options:
-  --days <n>          Reporting window in days (default: 7)
+  --days <n>          Reporting window in days (default: 7, capped by retention)
   --format <format>   markdown or json (default: markdown)
   --db <path>         SQLite database path
   -h, --help          Show this help

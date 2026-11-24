@@ -369,3 +369,49 @@ test("instruments every injected provider HTTP attempt", async () => {
         retryAfterMs: undefined
     });
 });
+
+test("reports provider HTTP attempts that fail before a response", async () => {
+    const failure = new Error("socket hang up");
+    const fallback = vi.fn().mockRejectedValueOnce(failure);
+    const models = {
+        getModel(provider: string, id: string): Model<Api> | undefined {
+            return provider === "test" && id === "test-model"
+                ? {
+                    provider,
+                    id,
+                    name: "Test",
+                    api: "test",
+                    reasoning: false,
+                    contextWindow: 1_000,
+                    maxTokens: 100
+                } as Model<Api>
+                : undefined;
+        },
+        streamSimple(
+            _model: Model<Api>,
+            _context: Context,
+            options?: { fetch?: typeof fetch }
+        ) {
+            return (async function* (): AsyncIterable<never> {
+                await options?.fetch?.("https://example.test/v1", {});
+            })() as never;
+        }
+    } as unknown as Models;
+    const onRequest = vi.fn();
+    const onError = vi.fn();
+    const adapter = createPiAdapter({ models, fetch: fallback });
+
+    await expect(async () => {
+        for await (const _event of adapter.stream({
+            model: { provider: "test", id: "test-model" },
+            messages: [userMessage("hi")],
+            onProviderRequest: onRequest,
+            onProviderError: onError
+        })) {
+            // The fake provider rejects while producing no stream events.
+        }
+    }).rejects.toThrow("socket hang up");
+
+    expect(onRequest).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(failure);
+});

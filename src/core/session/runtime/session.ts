@@ -643,7 +643,14 @@ export class Session {
         let receivedThinkingChars = 0;
         let turnError: unknown;
         let turnOutcome: AgentTurnOutcome = "error";
-        const provider = createProviderTelemetry();
+        const providerHooks = createProviderHooks({
+            observer: this.observer,
+            sessionId: this.meta.id,
+            runId: run.runId,
+            turnId,
+            signal
+        });
+        const provider = providerHooks.telemetry;
         this.streamOpen = true;
         try {
             for await (const event of runtime.llm.stream({
@@ -651,12 +658,9 @@ export class Session {
                 tools: this.registeredTools(),
                 messages,
                 signal,
-                onProviderRequest: () => {
-                    provider.attempts += 1;
-                },
-                onProviderResponse: (response) => {
-                    recordProviderResponse(provider, response);
-                }
+                onProviderRequest: providerHooks.onProviderRequest,
+                onProviderResponse: providerHooks.onProviderResponse,
+                onProviderError: providerHooks.onProviderError
             })) {
                 if (signal.aborted) {
                     break;
@@ -704,7 +708,8 @@ export class Session {
             turnError = error;
             run.failure ??= failureFor(
                 signal.aborted ? "aborted" : "llm_stream",
-                error
+                error,
+                provider.providerHttpStatus
             );
             throw error;
         } finally {
@@ -732,7 +737,10 @@ export class Session {
                 run.failure = {
                     stage: "llm_stream",
                     code: streamErrorReported
-                        ? llmFailureCode(streamErrorMessage)
+                        ? llmFailureCode(
+                            streamErrorMessage,
+                            provider.providerHttpStatus
+                        )
                         : "llm_no_completion",
                     message: streamErrorMessage
                         ?? "Model response ended without a completion event"
@@ -817,7 +825,10 @@ export class Session {
             run.failure ??= {
                 stage: "llm_stream",
                 code: streamErrorReported
-                    ? llmFailureCode(streamErrorMessage)
+                    ? llmFailureCode(
+                        streamErrorMessage,
+                        provider.providerHttpStatus
+                    )
                     : "llm_no_completion",
                 message: streamErrorMessage
                     ?? "Model response ended without a completion event"
@@ -1229,7 +1240,14 @@ export class Session {
         let receivedThinkingChars = 0;
         let turnError: unknown;
         let turnOutcome: AgentTurnOutcome = "error";
-        const provider = createProviderTelemetry();
+        const providerHooks = createProviderHooks({
+            observer: this.observer,
+            sessionId: this.meta.id,
+            runId: run.runId,
+            turnId,
+            signal: turn.signal
+        });
+        const provider = providerHooks.telemetry;
         const request = {
             ...turn.request,
             systemPrompt: CONTEXT_COMPACTION_SYSTEM_PROMPT,
@@ -1245,15 +1263,9 @@ export class Session {
                 turn.request.maxTokens ?? CONTEXT_COMPACTION_BLOCK_TOKENS
             ),
             signal: turn.signal,
-            onProviderRequest: () => {
-                provider.attempts += 1;
-            },
-            onProviderResponse: (response: {
-                status: number;
-                retryAfterMs?: number;
-            }) => {
-                recordProviderResponse(provider, response);
-            }
+            onProviderRequest: providerHooks.onProviderRequest,
+            onProviderResponse: providerHooks.onProviderResponse,
+            onProviderError: providerHooks.onProviderError
         };
 
         this.streamOpen = true;
@@ -1313,7 +1325,11 @@ export class Session {
             };
         } catch (error) {
             turnError = error;
-            run.failure ??= failureFor("compaction", error);
+            run.failure ??= failureFor(
+                "compaction",
+                error,
+                provider.providerHttpStatus
+            );
             throw error;
         } finally {
             this.streamOpen = false;
@@ -1579,6 +1595,11 @@ type ProviderTelemetry = {
     rateLimitResponses: number;
     retryAfterMs: number;
     providerHttpStatus: number | undefined;
+    activeAttempt: {
+        attemptId: string;
+        startedAt: number;
+        startedAtMs: number;
+    } | null;
 };
 
 function createProviderTelemetry(): ProviderTelemetry {
@@ -1586,7 +1607,72 @@ function createProviderTelemetry(): ProviderTelemetry {
         attempts: 0,
         rateLimitResponses: 0,
         retryAfterMs: 0,
-        providerHttpStatus: undefined
+        providerHttpStatus: undefined,
+        activeAttempt: null
+    };
+}
+
+function createProviderHooks(options: {
+    observer: AgentObserver;
+    sessionId: string;
+    runId: string;
+    turnId: string;
+    signal: AbortSignal;
+}): {
+    telemetry: ProviderTelemetry;
+    onProviderRequest: () => void;
+    onProviderResponse: (response: LlmProviderResponse) => void;
+    onProviderError: (error: unknown) => void;
+} {
+    const telemetry = createProviderTelemetry();
+    return {
+        telemetry,
+        onProviderRequest: () => {
+            const attemptIndex = telemetry.attempts;
+            telemetry.attempts += 1;
+            const attemptId = `${options.turnId}:a${attemptIndex}`;
+            telemetry.activeAttempt = {
+                attemptId,
+                startedAt: performance.now(),
+                startedAtMs: Date.now()
+            };
+            options.observer.llmAttemptStarted({
+                attemptId,
+                sessionId: options.sessionId,
+                runId: options.runId,
+                turnId: options.turnId,
+                attemptIndex,
+                startedAtMs: telemetry.activeAttempt.startedAtMs
+            });
+        },
+        onProviderResponse: (response) => {
+            recordProviderResponse(telemetry, response);
+            finishProviderAttempt(
+                options.observer,
+                telemetry,
+                response.status >= 400 ? "error" : "response",
+                {
+                    httpStatus: response.status,
+                    retryAfterMs: response.retryAfterMs,
+                    errorCode: response.status >= 400
+                        ? `llm_http_${response.status}`
+                        : undefined
+                }
+            );
+        },
+        onProviderError: (error) => {
+            const cancelled = options.signal.aborted;
+            finishProviderAttempt(
+                options.observer,
+                telemetry,
+                cancelled ? "cancelled" : "error",
+                {
+                    errorCode: cancelled
+                        ? "llm_cancelled"
+                        : llmFailureCode(errorMessage(error))
+                }
+            );
+        }
     };
 }
 
@@ -1603,6 +1689,32 @@ function recordProviderResponse(
     }
 }
 
+function finishProviderAttempt(
+    observer: AgentObserver,
+    telemetry: ProviderTelemetry,
+    outcome: "response" | "error" | "cancelled",
+    detail: {
+        httpStatus?: number;
+        retryAfterMs?: number;
+        errorCode?: string;
+    }
+): void {
+    const attempt = telemetry.activeAttempt;
+    if (!attempt) {
+        return;
+    }
+    telemetry.activeAttempt = null;
+    const endedAtMs = Date.now();
+    observer.llmAttemptFinished(attempt.attemptId, {
+        endedAtMs,
+        durationMs: Math.max(0, Math.round(performance.now() - attempt.startedAt)),
+        outcome,
+        httpStatus: detail.httpStatus,
+        retryAfterMs: detail.retryAfterMs,
+        errorCode: detail.errorCode
+    });
+}
+
 function hashText(value: string): string {
     return createHash("sha256").update(value).digest("hex").slice(0, 16);
 }
@@ -1617,7 +1729,22 @@ function hashToolset(
     return hashText(stableJson(tools));
 }
 
-function llmFailureCode(message: string | undefined): string {
+function llmFailureCode(
+    message: string | undefined,
+    httpStatus?: number
+): string {
+    if (httpStatus === 429) {
+        return "llm_rate_limited";
+    }
+    if (httpStatus === 401 || httpStatus === 403) {
+        return "llm_auth";
+    }
+    if (httpStatus === 408 || httpStatus === 504) {
+        return "llm_timeout";
+    }
+    if (httpStatus !== undefined && httpStatus >= 500) {
+        return "llm_provider_error";
+    }
     if (!message) {
         return "llm_stream_error";
     }
@@ -1639,7 +1766,11 @@ function llmFailureCode(message: string | undefined): string {
     return "llm_stream_error";
 }
 
-function failureFor(stage: string, error: unknown): RunFailure {
+function failureFor(
+    stage: string,
+    error: unknown,
+    httpStatus?: number
+): RunFailure {
     const message = errorMessage(error) ?? "Unknown error";
     if (/Failed to persist session|after 2 attempts/.test(message)) {
         return {
@@ -1656,7 +1787,7 @@ function failureFor(stage: string, error: unknown): RunFailure {
             ? "model_not_found"
             : "model_not_configured";
     } else if (stage === "llm_stream") {
-        code = llmFailureCode(message);
+        code = llmFailureCode(message, httpStatus);
     } else if (stage === "compaction") {
         code = "compaction_failed";
     } else if (stage === "persistence") {

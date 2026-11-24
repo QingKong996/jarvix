@@ -10,6 +10,8 @@ import type { ToolExecutor } from "../../../runtime/tools/index.ts";
 import {
     noopAgentObserver,
     type AgentEvent,
+    type AgentLlmAttemptFinished,
+    type AgentLlmAttemptStarted,
     type AgentObserver,
     type AgentRunFinished,
     type AgentRunStarted,
@@ -208,6 +210,18 @@ test("records structured prompt, turn, and tool telemetry", async () => {
         retryAfterMs: 50,
         providerHttpStatus: 200
     });
+    expect(observer.llmAttemptsStarted).toHaveLength(4);
+    expect(observer.llmAttemptsStarted.map((attempt) => attempt.attemptIndex))
+        .toEqual([0, 1, 0, 1]);
+    expect(observer.llmAttemptsFinished).toHaveLength(4);
+    expect(observer.llmAttemptsFinished.map((attempt) => attempt.outcome))
+        .toEqual(["error", "response", "error", "response"]);
+    expect(observer.llmAttemptsFinished.map((attempt) => attempt.httpStatus))
+        .toEqual([429, 200, 429, 200]);
+    expect(observer.llmAttemptsFinished[0]).toMatchObject({
+        retryAfterMs: 50,
+        errorCode: "llm_http_429"
+    });
 
     expect(observer.toolsStarted).toHaveLength(1);
     expect(observer.toolsStarted[0]).toMatchObject({
@@ -363,11 +377,59 @@ test("records an aborted run without classifying it as a failure", async () => {
     });
 });
 
+test("uses structured provider status when classifying LLM failures", async () => {
+    const observer = recordingObserver();
+    const session = new Session(
+        meta,
+        [],
+        {
+            definitions: [],
+            handles: () => false,
+            execute: async () => {
+                throw new Error("unexpected tool call");
+            },
+            stop: async () => [],
+            dispose: () => undefined
+        },
+        undefined,
+        undefined,
+        undefined,
+        observer
+    );
+    const llm: LlmAdapter = {
+        getModel: () => ({ ...MODEL }),
+        stream: (request: LlmRequest) => (async function* (): AsyncIterable<LlmStreamEvent> {
+            request.onProviderRequest?.();
+            request.onProviderResponse?.({ status: 401 });
+            throw new Error("upstream rejected the request");
+        })()
+    };
+
+    await expect(session.request("fail with auth", {
+        llm,
+        config: CONFIG,
+        workingDirectories: [],
+        emit: () => undefined
+    })).rejects.toThrow("upstream rejected the request");
+
+    expect(observer.runsFinished[0]).toMatchObject({
+        outcome: "failed",
+        errorCode: "llm_auth"
+    });
+    expect(observer.llmAttemptsFinished[0]).toMatchObject({
+        outcome: "error",
+        httpStatus: 401,
+        errorCode: "llm_http_401"
+    });
+});
+
 function recordingObserver(): AgentObserver & {
     runsStarted: AgentRunStarted[];
     runsFinished: AgentRunFinished[];
     turnsStarted: AgentTurnStarted[];
     turnsFinished: AgentTurnFinished[];
+    llmAttemptsStarted: AgentLlmAttemptStarted[];
+    llmAttemptsFinished: AgentLlmAttemptFinished[];
     toolsStarted: AgentToolStarted[];
     toolsFinished: AgentToolFinished[];
     events: AgentEvent[];
@@ -376,6 +438,8 @@ function recordingObserver(): AgentObserver & {
     const runsFinished: AgentRunFinished[] = [];
     const turnsStarted: AgentTurnStarted[] = [];
     const turnsFinished: AgentTurnFinished[] = [];
+    const llmAttemptsStarted: AgentLlmAttemptStarted[] = [];
+    const llmAttemptsFinished: AgentLlmAttemptFinished[] = [];
     const toolsStarted: AgentToolStarted[] = [];
     const toolsFinished: AgentToolFinished[] = [];
     const events: AgentEvent[] = [];
@@ -385,6 +449,8 @@ function recordingObserver(): AgentObserver & {
         runsFinished,
         turnsStarted,
         turnsFinished,
+        llmAttemptsStarted,
+        llmAttemptsFinished,
         toolsStarted,
         toolsFinished,
         events,
@@ -399,6 +465,12 @@ function recordingObserver(): AgentObserver & {
         },
         turnFinished: (_turnId, turn) => {
             turnsFinished.push(turn);
+        },
+        llmAttemptStarted: (attempt) => {
+            llmAttemptsStarted.push(attempt);
+        },
+        llmAttemptFinished: (_attemptId, attempt) => {
+            llmAttemptsFinished.push(attempt);
         },
         toolStarted: (tool) => {
             toolsStarted.push(tool);
