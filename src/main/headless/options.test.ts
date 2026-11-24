@@ -3,13 +3,17 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, expect, test } from "vitest";
 import {
+    API_KEY_ENV,
+    BASE_URL_ENV,
     createHeadlessConfig,
     HEADLESS_PROVIDER_ID,
+    MODEL_ENV,
     parseHeadlessArguments,
     type HeadlessOptions
 } from "./options.ts";
 
 const base = mkdtempSync(join(tmpdir(), "jarvix-headless-"));
+const EMPTY_ENV: Readonly<Record<string, string | undefined>> = {};
 
 const REQUIRED = [
     "--headless",
@@ -24,12 +28,12 @@ afterAll(() => {
 });
 
 test("ignores arguments when headless mode is not requested", () => {
-    expect(parseHeadlessArguments(["--prompt", "ignored"], base))
+    expect(parseHeadlessArguments(["--prompt", "ignored"], base, EMPTY_ENV))
         .toEqual({ kind: "disabled" });
 });
 
 test("parses headless options and applies defaults", () => {
-    const result = parseHeadlessArguments(REQUIRED, base);
+    const result = parseHeadlessArguments(REQUIRED, base, EMPTY_ENV);
     expect(result).toMatchObject({
         kind: "run",
         options: {
@@ -56,7 +60,7 @@ test("accepts aliases, inline values, and explicit execution settings", () => {
         "--context-window=64000",
         "-C", base,
         "--permission=project-read-write"
-    ], tmpdir());
+    ], tmpdir(), EMPTY_ENV);
 
     expect(result).toMatchObject({
         kind: "run",
@@ -71,35 +75,60 @@ test("accepts aliases, inline values, and explicit execution settings", () => {
 });
 
 test("returns help without requiring connection settings", () => {
-    expect(parseHeadlessArguments(["--headless", "--help"], base))
+    expect(parseHeadlessArguments(["--headless", "--help"], base, EMPTY_ENV))
         .toEqual({ kind: "help" });
 });
 
+test("uses environment variables as fallback and prefers command-line values", () => {
+    const result = parseHeadlessArguments([
+        "--headless",
+        "--prompt", "Use environment",
+        "--api-key", "cli-secret"
+    ], base, {
+        [API_KEY_ENV]: "env-secret",
+        [MODEL_ENV]: " env-model ",
+        [BASE_URL_ENV]: " http://127.0.0.1:9000/v1 "
+    });
+
+    expect(result).toMatchObject({
+        kind: "run",
+        options: {
+            apiKey: "cli-secret",
+            model: "env-model",
+            baseUrl: "http://127.0.0.1:9000/v1"
+        }
+    });
+});
+
 test("rejects missing, duplicate, and invalid options", () => {
-    expect(() => parseHeadlessArguments(["--headless", "--prompt", "hello"], base))
+    expect(() => parseHeadlessArguments(
+        ["--headless", "--prompt", "hello"],
+        base,
+        EMPTY_ENV
+    ))
         .toThrow(/Missing required option/);
-    expect(() => parseHeadlessArguments([...REQUIRED, "--model", "other"], base))
+    expect(() => parseHeadlessArguments([...REQUIRED, "--model", "other"], base, EMPTY_ENV))
         .toThrow(/Duplicate option/);
     expect(() => parseHeadlessArguments([
         ...REQUIRED,
         "--permission", "root"
-    ], base)).toThrow(/Invalid --permission/);
+    ], base, EMPTY_ENV)).toThrow(/Invalid --permission/);
     expect(() => parseHeadlessArguments([
         ...REQUIRED,
         "--api-protocol", "unknown"
-    ], base)).toThrow(/Invalid --api-protocol/);
+    ], base, EMPTY_ENV)).toThrow(/Invalid --api-protocol/);
     expect(() => parseHeadlessArguments([
         ...REQUIRED,
         "--context-window", "1"
-    ], base)).toThrow(/at least 2/);
+    ], base, EMPTY_ENV)).toThrow(/at least 2/);
     expect(() => parseHeadlessArguments([
         ...REQUIRED,
         "--cwd", join(base, "missing")
-    ], base)).toThrow(/Working directory does not exist/);
+    ], base, EMPTY_ENV)).toThrow(/Working directory does not exist/);
 });
 
 test("builds a provider config from headless options", () => {
-    const result = parseHeadlessArguments(REQUIRED, base);
+    const result = parseHeadlessArguments(REQUIRED, base, EMPTY_ENV);
     if (result.kind !== "run") {
         throw new Error("Expected headless options");
     }

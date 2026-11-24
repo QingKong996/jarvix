@@ -14,6 +14,9 @@ import {
 
 export const HEADLESS_FLAG = "--headless";
 export const HEADLESS_PROVIDER_ID = "headless";
+export const API_KEY_ENV = "JARVIX_API_KEY";
+export const MODEL_ENV = "JARVIX_MODEL";
+export const BASE_URL_ENV = "JARVIX_BASE_URL";
 
 const DEFAULT_CONTEXT_WINDOW = 32_768;
 const DEFAULT_MAX_TOKENS = 4_096;
@@ -68,18 +71,20 @@ const OPTION_NAMES = {
 } as const satisfies Record<string, OptionName>;
 
 export const HEADLESS_HELP = `Usage:
-  Jarvix --headless --prompt <text> --api-key <key> --model <id> [options] --base-url <url>
+  Jarvix --headless --prompt <text> [options]
 
 Options:
   -p, --prompt <text>          Prompt to run once, then exit
-      --api-key <key>          Provider API key
-      --model <id>             Provider model id
+      --api-key <key>          Provider API key (env: ${API_KEY_ENV})
+      --model <id>             Provider model id (env: ${MODEL_ENV})
       --context-window <n>     Model context window in tokens (default: ${DEFAULT_CONTEXT_WINDOW})
       --api-protocol <name>    Provider protocol (default: ${DEFAULT_PROTOCOL})
   -C, --cwd <path>             Working directory (default: current directory)
       --permission <mode>      ${PERMISSION_MODES.join(", ")} (default: ${DEFAULT_PERMISSION_MODE})
-      --base-url <url>         Provider base URL
+      --base-url <url>         Provider base URL (env: ${BASE_URL_ENV})
   -h, --help                   Show this help
+
+Command-line options take precedence over environment variables.
 
 On Windows, use --base-url=<url> when other options follow the URL.
 
@@ -98,7 +103,8 @@ export class HeadlessUsageError extends Error {
 
 export function parseHeadlessArguments(
     argv: readonly string[],
-    cwd = process.cwd()
+    cwd = process.cwd(),
+    environment: Readonly<Record<string, string | undefined>> = process.env
 ): HeadlessInvocation {
     if (!argv.includes(HEADLESS_FLAG)) {
         return { kind: "disabled" };
@@ -173,10 +179,28 @@ export function parseHeadlessArguments(
         kind: "run",
         options: {
             prompt: requireOption(values, "prompt", "--prompt"),
-            apiKey: requireOption(values, "apiKey", "--api-key"),
-            model: requireOption(values, "model", "--model"),
+            apiKey: requireConnectionOption(
+                values,
+                environment,
+                "apiKey",
+                "--api-key",
+                API_KEY_ENV
+            ),
+            model: requireConnectionOption(
+                values,
+                environment,
+                "model",
+                "--model",
+                MODEL_ENV
+            ),
             contextWindow,
-            baseUrl: requireOption(values, "baseUrl", "--base-url"),
+            baseUrl: requireConnectionOption(
+                values,
+                environment,
+                "baseUrl",
+                "--base-url",
+                BASE_URL_ENV
+            ),
             protocol,
             workingDirectory,
             permission
@@ -223,6 +247,22 @@ function requireOption(
     const value = values.get(name);
     if (!value) {
         throw new HeadlessUsageError(`Missing required option: ${option}`);
+    }
+    return value;
+}
+
+function requireConnectionOption(
+    values: ReadonlyMap<OptionName, string>,
+    environment: Readonly<Record<string, string | undefined>>,
+    name: OptionName,
+    option: string,
+    environmentVariable: string
+): string {
+    const value = values.get(name) ?? environment[environmentVariable]?.trim();
+    if (!value) {
+        throw new HeadlessUsageError(
+            `Missing required option: ${option} (or environment variable ${environmentVariable})`
+        );
     }
     return value;
 }
