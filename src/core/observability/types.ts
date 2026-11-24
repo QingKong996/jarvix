@@ -10,6 +10,8 @@ export type AgentTurnKind = "main" | "compaction" | "naming";
 
 export type AgentTurnOutcome = "completed" | "error" | "aborted";
 
+export type AgentLlmAttemptOutcome = "running" | "response" | "error" | "cancelled";
+
 export type AgentToolOutcome = "success" | "error" | "cancelled";
 
 export type AgentToolCategory =
@@ -135,6 +137,24 @@ export type AgentTurnFinished = {
   errorMessage?: string;
 };
 
+export type AgentLlmAttemptStarted = {
+  attemptId: string;
+  sessionId: string;
+  runId: string;
+  turnId: string;
+  attemptIndex: number;
+  startedAtMs: number;
+};
+
+export type AgentLlmAttemptFinished = {
+  endedAtMs: number;
+  durationMs: number;
+  outcome: Exclude<AgentLlmAttemptOutcome, "running">;
+  httpStatus?: number;
+  retryAfterMs?: number;
+  errorCode?: string;
+};
+
 export type AgentToolStarted = {
   toolSpanId: string;
   sessionId: string;
@@ -166,6 +186,7 @@ export type AgentToolFinished = {
   outputBytes?: number;
   truncated?: boolean;
   imageCount?: number;
+  exitCode?: number | null;
   repeatIndex?: number;
   repeatGroupSize?: number;
   detail?: Record<string, unknown>;
@@ -191,6 +212,11 @@ export interface AgentObserver {
   runFinished(runId: string, run: AgentRunFinished): void;
   turnStarted(turn: AgentTurnStarted): void;
   turnFinished(turnId: string, turn: AgentTurnFinished): void;
+  llmAttemptStarted(attempt: AgentLlmAttemptStarted): void;
+  llmAttemptFinished(
+    attemptId: string,
+    attempt: AgentLlmAttemptFinished
+  ): void;
   toolStarted(tool: AgentToolStarted): void;
   toolFinished(toolSpanId: string, tool: AgentToolFinished): void;
   heartbeat(runId: string, tsMs: number): void;
@@ -205,6 +231,8 @@ export const noopAgentObserver: AgentObserver = {
   runFinished: () => undefined,
   turnStarted: () => undefined,
   turnFinished: () => undefined,
+  llmAttemptStarted: () => undefined,
+  llmAttemptFinished: () => undefined,
   toolStarted: () => undefined,
   toolFinished: () => undefined,
   heartbeat: () => undefined,

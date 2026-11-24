@@ -23,6 +23,8 @@ export type LlmRequest = {
     onProviderRequest?: () => void;
     /** Called for every provider HTTP response, including retry responses. */
     onProviderResponse?: (response: LlmProviderResponse) => void;
+    /** Called when a provider HTTP attempt fails before receiving a response. */
+    onProviderError?: (error: unknown) => void;
 };
 
 export type LlmStream = AsyncIterable<LlmStreamEvent>;

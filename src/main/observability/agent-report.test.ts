@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { expect, test } from "vitest";
 import { SqliteAgentObserver } from "./sqlite-observer.ts";
 
-test("renders JSON and Markdown reports from a version 2 database", () => {
+test("renders JSON and Markdown reports from a version 3 database", () => {
     const directory = mkdtempSync(join(tmpdir(), "jarvix-report-"));
     const databasePath = join(directory, "agent.sqlite3");
     const now = Date.now();
@@ -40,6 +40,36 @@ test("renders JSON and Markdown reports from a version 2 database", () => {
             startedAtMs: now - 9_000,
             provider: "test",
             model: "test-model"
+        });
+        observer.llmAttemptStarted({
+            attemptId: "turn_report_ok:a0",
+            sessionId: "session-report",
+            runId: "run_report_ok",
+            turnId: "turn_report_ok",
+            attemptIndex: 0,
+            startedAtMs: now - 8_900
+        });
+        observer.llmAttemptFinished("turn_report_ok:a0", {
+            endedAtMs: now - 8_800,
+            durationMs: 100,
+            outcome: "error",
+            httpStatus: 429,
+            retryAfterMs: 100,
+            errorCode: "llm_http_429"
+        });
+        observer.llmAttemptStarted({
+            attemptId: "turn_report_ok:a1",
+            sessionId: "session-report",
+            runId: "run_report_ok",
+            turnId: "turn_report_ok",
+            attemptIndex: 1,
+            startedAtMs: now - 8_700
+        });
+        observer.llmAttemptFinished("turn_report_ok:a1", {
+            endedAtMs: now - 8_500,
+            durationMs: 200,
+            outcome: "response",
+            httpStatus: 200
         });
         observer.toolStarted({
             toolSpanId: "tool_report_ok",
@@ -113,6 +143,14 @@ test("renders JSON and Markdown reports from a version 2 database", () => {
             toolCalls: 0,
             agentSteps: 0
         });
+        observer.runStarted({
+            runId: "run_report_active",
+            sessionId: "session-report",
+            runType: "prompt",
+            startedAtMs: now - 1_000,
+            provider: "test",
+            model: "test-model"
+        });
     } finally {
         observer.close();
     }
@@ -133,23 +171,74 @@ test("renders JSON and Markdown reports from a version 2 database", () => {
             encoding: "utf8"
         });
         const report = JSON.parse(jsonOutput) as {
-            totals: { promptRuns: number };
+            totals: {
+                promptRuns: number;
+                finishedPromptRuns: number;
+                activePromptRuns: number;
+            };
             promptRuns: {
+                runCount: number;
                 submitToFirstTokenMs: { n: number };
                 llmRetries: number;
+            };
+            runs: {
+                byVersion: { provider: string; model: string }[];
+                modelSegments: { model: string; currentRuns: number }[];
+            };
+            interaction: {
+                fastFollowUpComparable: number;
+                fastFollowUpRate: number;
+            };
+            llmAttempts: {
+                attempts: number;
+                firstAttemptSuccessRate: number;
+                byStatus: { key: string; count: number }[];
             };
             tools: {
                 byName: { truncatedRate: number; repeatRate: number }[];
             };
+            observerHealth: {
+                writeErrors: number;
+                droppedWrites: number;
+            };
             daily: unknown[];
             findings: unknown[];
         };
-        expect(report.totals.promptRuns).toBe(2);
+        expect(report.totals).toMatchObject({
+            promptRuns: 3,
+            finishedPromptRuns: 2,
+            activePromptRuns: 1
+        });
+        expect(report.promptRuns.runCount).toBe(2);
         expect(report.promptRuns.submitToFirstTokenMs.n).toBe(1);
         expect(report.promptRuns.llmRetries).toBe(1);
+        expect(report.runs.byVersion[0]).toMatchObject({
+            provider: "test",
+            model: "test-model"
+        });
+        expect(report.runs.modelSegments[0]).toMatchObject({
+            model: "test/test-model",
+            currentRuns: 2
+        });
+        expect(report.interaction).toMatchObject({
+            fastFollowUpComparable: 1,
+            fastFollowUpRate: 1
+        });
+        expect(report.llmAttempts).toMatchObject({
+            attempts: 2,
+            firstAttemptSuccessRate: 0
+        });
+        expect(report.llmAttempts.byStatus).toEqual(expect.arrayContaining([
+            { key: "429", count: 1 },
+            { key: "200", count: 1 }
+        ]));
         expect(report.tools.byName[0]).toMatchObject({
             truncatedRate: 1,
             repeatRate: 1
+        });
+        expect(report.observerHealth).toEqual({
+            writeErrors: 0,
+            droppedWrites: 0
         });
         expect(report.daily).toHaveLength(1);
 
@@ -167,6 +256,9 @@ test("renders JSON and Markdown reports from a version 2 database", () => {
         expect(markdown).toContain("## 自动发现");
         expect(markdown).toContain("## 每日趋势");
         expect(markdown).toContain("## 版本分组");
+        expect(markdown).toContain("## 按模型环比");
+        expect(markdown).toContain("## LLM HTTP 尝试");
+        expect(markdown).toContain("## 交互反复代理指标");
         expect(markdown).toContain("提交→首 Token p50 / p95");
         expect(markdown).not.toContain("undefined");
     } finally {

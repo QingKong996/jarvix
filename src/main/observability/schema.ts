@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const AGENT_DATABASE_VERSION = 2;
+export const AGENT_DATABASE_VERSION = 3;
 
 export const AGENT_SCHEMA_V1 = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -207,17 +207,52 @@ ALTER TABLE turns ADD COLUMN provider_http_status INTEGER;
 
 `;
 
+const MIGRATION_V2_TO_V3 = `
+ALTER TABLE tools ADD COLUMN exit_code INTEGER;
+
+CREATE TABLE IF NOT EXISTS llm_attempts (
+  attempt_id TEXT PRIMARY KEY,
+  app_instance_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+  turn_id TEXT NOT NULL REFERENCES turns(turn_id) ON DELETE CASCADE,
+  attempt_index INTEGER NOT NULL,
+  started_at_ms INTEGER NOT NULL,
+  ended_at_ms INTEGER,
+  duration_ms INTEGER,
+  outcome TEXT NOT NULL CHECK (
+    outcome IN ('running', 'response', 'error', 'cancelled')
+  ),
+  http_status INTEGER,
+  retry_after_ms INTEGER,
+  error_code TEXT,
+  UNIQUE (turn_id, attempt_index)
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_llm_attempts_turn
+  ON llm_attempts(turn_id, attempt_index);
+CREATE INDEX IF NOT EXISTS idx_llm_attempts_run
+  ON llm_attempts(run_id, started_at_ms);
+CREATE INDEX IF NOT EXISTS idx_llm_attempts_outcome
+  ON llm_attempts(outcome, http_status, started_at_ms);
+`;
+
 export function migrateAgentDatabase(database: DatabaseSync): void {
   const row = database.prepare("PRAGMA user_version").get();
   const version = Number(row?.user_version ?? 0);
 
-  if (version === 0 || version === 1) {
+  if (version >= 0 && version <= 2) {
     database.exec("BEGIN IMMEDIATE");
     try {
       if (version === 0) {
         database.exec(AGENT_SCHEMA_V1);
       }
-      database.exec(MIGRATION_V1_TO_V2);
+      if (version <= 1) {
+        database.exec(MIGRATION_V1_TO_V2);
+      }
+      if (version <= 2) {
+        database.exec(MIGRATION_V2_TO_V3);
+      }
       database.exec(`PRAGMA user_version = ${AGENT_DATABASE_VERSION}`);
       database.exec("COMMIT");
     } catch (error) {
