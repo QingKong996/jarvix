@@ -5,6 +5,13 @@ import { createPiAdapter } from "../llm/pi.ts";
 import type { JarvixConfig } from "../protocol/config.ts";
 import { IPC_CHANNELS } from "../protocol/ipc.ts";
 import { attachEventBridge } from "./event-bridge.ts";
+import {
+    createHeadlessConfig,
+    HEADLESS_HELP,
+    parseHeadlessArguments,
+    type HeadlessOptions
+} from "./headless/options.ts";
+import { runHeadless } from "./headless/run.ts";
 import { registerIpc } from "./ipc.ts";
 import { initializeLogging, logFilePath, mainLogger } from "./logger.ts";
 import {
@@ -16,15 +23,75 @@ import { ModelCatalogService } from "./services/model-catalog.ts";
 import { SandboxSetupService } from "./services/sandbox-setup.ts";
 import { MainWindowController } from "./window.ts";
 
-initializeLogging();
 const log = mainLogger("main");
 
-if (!app.requestSingleInstanceLock()) {
-    log.warn("Another Jarvix instance is already running; quitting", {
-        pid: process.pid
-    });
-    app.quit();
+type HeadlessBootstrap =
+    | { kind: "disabled" }
+    | { kind: "help" }
+    | { kind: "error"; message: string }
+    | { kind: "run"; options: HeadlessOptions; config: JarvixConfig };
+
+const headless = headlessBootstrap(
+    process.argv.slice(process.defaultApp ? 2 : 1)
+);
+if (headless.kind === "error") {
+    process.stderr.write(`jarvix: ${headless.message}\n`);
+    app.exit(2);
+} else if (headless.kind === "help") {
+    process.stdout.write(HEADLESS_HELP);
+    app.exit(0);
+} else if (headless.kind === "run") {
+    startHeadless(headless.options, headless.config);
 } else {
+    initializeLogging();
+    startDesktop();
+}
+
+function headlessBootstrap(argv: readonly string[]): HeadlessBootstrap {
+    try {
+        const invocation = parseHeadlessArguments(argv);
+        if (invocation.kind !== "run") {
+            return invocation;
+        }
+        return {
+            ...invocation,
+            config: createHeadlessConfig(invocation.options)
+        };
+    } catch (error) {
+        return {
+            kind: "error",
+            message: error instanceof Error ? error.message : String(error)
+        };
+    }
+}
+
+function startHeadless(options: HeadlessOptions, config: JarvixConfig): void {
+    initializeLogging({ console: false });
+    void app.whenReady()
+        .then(async () => {
+            if (process.platform === "darwin") {
+                app.dock?.hide();
+            }
+            return runHeadless(options, config);
+        })
+        .then((code) => app.exit(code))
+        .catch((error: unknown) => {
+            process.stderr.write(
+                `jarvix: ${error instanceof Error ? error.message : String(error)}\n`
+            );
+            app.exit(1);
+        });
+}
+
+function startDesktop(): void {
+    if (!app.requestSingleInstanceLock()) {
+        log.warn("Another Jarvix instance is already running; quitting", {
+            pid: process.pid
+        });
+        app.quit();
+        return;
+    }
+
     const windows = new MainWindowController();
     log.info("Jarvix starting", {
         version: app.getVersion(),

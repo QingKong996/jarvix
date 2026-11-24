@@ -17,7 +17,11 @@ const LOG_DIRECTORY = join(homedir(), ".jarvix", "logs");
 let initialized = false;
 let cleanupTimer: NodeJS.Timeout | undefined;
 
-export function initializeLogging(): void {
+export type LoggingOptions = {
+    console?: boolean;
+};
+
+export function initializeLogging(options: LoggingOptions = {}): void {
     if (initialized) {
         return;
     }
@@ -25,7 +29,7 @@ export function initializeLogging(): void {
 
     const level = app.isPackaged ? "info" : "debug";
     electronLog.transports.file.level = level;
-    electronLog.transports.console.level = level;
+    electronLog.transports.console.level = options.console === false ? false : level;
     electronLog.transports.file.maxSize = MAX_FILE_SIZE_BYTES;
     electronLog.transports.file.format = "[{y}-{m}-{d} {h}:{i}:{s}.{ms}] [{level}]{scope} {text}";
     electronLog.transports.console.format = "{h}:{i}:{s}.{ms}{scope} › {level}: {text}";
