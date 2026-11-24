@@ -64,6 +64,8 @@ if (!app.requestSingleInstanceLock()) {
         const observer = createSqliteAgentObserver({
             databasePath: observabilityDatabasePath(),
             appVersion: app.getVersion(),
+            buildId: process.env.JARVIX_BUILD_ID
+                ?? (app.isPackaged ? app.getVersion() : "dev"),
             logger: mainLogger("observability")
         });
         const jarvix = new Jarvix({

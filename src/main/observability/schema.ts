@@ -1,8 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const AGENT_DATABASE_VERSION = 1;
+export const AGENT_DATABASE_VERSION = 2;
 
-const SCHEMA_V1 = `
+export const AGENT_SCHEMA_V1 = `
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -185,14 +185,39 @@ CREATE INDEX IF NOT EXISTS idx_events_event
   ON events(event, ts_ms);
 `;
 
+const MIGRATION_V1_TO_V2 = `
+ALTER TABLE runs ADD COLUMN app_version TEXT;
+ALTER TABLE runs ADD COLUMN build_id TEXT;
+ALTER TABLE runs ADD COLUMN reasoning_level TEXT;
+ALTER TABLE runs ADD COLUMN system_prompt_hash TEXT;
+ALTER TABLE runs ADD COLUMN toolset_hash TEXT;
+ALTER TABLE runs ADD COLUMN tool_count INTEGER;
+ALTER TABLE runs ADD COLUMN submit_to_first_token_ms INTEGER;
+ALTER TABLE runs ADD COLUMN llm_http_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN llm_retries INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN rate_limit_responses INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN retry_after_ms INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN provider_http_status INTEGER;
+
+ALTER TABLE turns ADD COLUMN llm_http_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE turns ADD COLUMN llm_retries INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE turns ADD COLUMN rate_limit_responses INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE turns ADD COLUMN retry_after_ms INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE turns ADD COLUMN provider_http_status INTEGER;
+
+`;
+
 export function migrateAgentDatabase(database: DatabaseSync): void {
   const row = database.prepare("PRAGMA user_version").get();
   const version = Number(row?.user_version ?? 0);
 
-  if (version === 0) {
+  if (version === 0 || version === 1) {
     database.exec("BEGIN IMMEDIATE");
     try {
-      database.exec(SCHEMA_V1);
+      if (version === 0) {
+        database.exec(AGENT_SCHEMA_V1);
+      }
+      database.exec(MIGRATION_V1_TO_V2);
       database.exec(`PRAGMA user_version = ${AGENT_DATABASE_VERSION}`);
       database.exec("COMMIT");
     } catch (error) {

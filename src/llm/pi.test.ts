@@ -5,8 +5,13 @@ import {
     fauxText,
     fauxThinking
 } from "@earendil-works/pi-ai";
-import type { Context } from "@earendil-works/pi-ai";
-import { expect, test } from "vitest";
+import type {
+    Api,
+    Context,
+    Model,
+    Models
+} from "@earendil-works/pi-ai";
+import { expect, test, vi } from "vitest";
 import { createPiAdapter } from "./pi.ts";
 import type { LlmAssistantMessage, LlmMessage, LlmStreamEvent } from "../protocol/llm.ts";
 
@@ -307,4 +312,60 @@ test("passes the leading environment snapshot to the provider", async () => {
         content: expect.stringContaining("<environment_context>")
     });
     expect(context?.messages[2]).toMatchObject({ role: "user", content: "hi" });
+});
+
+test("instruments every injected provider HTTP attempt", async () => {
+    const fallback = vi.fn()
+        .mockResolvedValueOnce(new Response("", {
+            status: 429,
+            headers: { "retry-after-ms": "1250" }
+        }))
+        .mockResolvedValueOnce(new Response("", { status: 200 }));
+    const models = {
+        getModel(provider: string, id: string): Model<Api> | undefined {
+            return provider === "test" && id === "test-model"
+                ? {
+                    provider,
+                    id,
+                    name: "Test",
+                    api: "test",
+                    reasoning: false,
+                    contextWindow: 1_000,
+                    maxTokens: 100
+                } as Model<Api>
+                : undefined;
+        },
+        streamSimple(
+            _model: Model<Api>,
+            _context: Context,
+            options?: { fetch?: typeof fetch }
+        ) {
+            return (async function* (): AsyncIterable<never> {
+                await options?.fetch?.("https://example.test/v1", {});
+                await options?.fetch?.("https://example.test/v1", {});
+            })() as never;
+        }
+    } as unknown as Models;
+    const onRequest = vi.fn();
+    const onResponse = vi.fn();
+    const adapter = createPiAdapter({ models, fetch: fallback });
+
+    for await (const _event of adapter.stream({
+        model: { provider: "test", id: "test-model" },
+        messages: [userMessage("hi")],
+        onProviderRequest: onRequest,
+        onProviderResponse: onResponse
+    })) {
+        // The fake provider calls fetch while producing no stream events.
+    }
+
+    expect(onRequest).toHaveBeenCalledTimes(2);
+    expect(onResponse).toHaveBeenNthCalledWith(1, {
+        status: 429,
+        retryAfterMs: 1_250
+    });
+    expect(onResponse).toHaveBeenNthCalledWith(2, {
+        status: 200,
+        retryAfterMs: undefined
+    });
 });

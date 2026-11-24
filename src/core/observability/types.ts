@@ -35,6 +35,10 @@ export type AgentRunStarted = {
   contextWindow?: number;
   contextTokensStart?: number;
   maxRounds?: number;
+  reasoningLevel?: string;
+  systemPromptHash?: string;
+  toolsetHash?: string;
+  toolCount?: number;
   lastHeartbeatMs?: number;
 };
 
@@ -78,6 +82,12 @@ export type AgentRunFinished = {
   wallTokensPerSecond?: number;
   finalStopReason?: string;
   toolSequenceJson?: string;
+  submitToFirstTokenMs?: number;
+  llmHttpAttempts?: number;
+  llmRetries?: number;
+  rateLimitResponses?: number;
+  retryAfterMs?: number;
+  providerHttpStatus?: number;
   lastHeartbeatMs?: number;
 };
 
@@ -116,6 +126,11 @@ export type AgentTurnFinished = {
   contextTokensAfter?: number;
   receivedTextChars?: number;
   receivedThinkingChars?: number;
+  llmHttpAttempts?: number;
+  llmRetries?: number;
+  rateLimitResponses?: number;
+  retryAfterMs?: number;
+  providerHttpStatus?: number;
   errorCode?: string;
   errorMessage?: string;
 };
