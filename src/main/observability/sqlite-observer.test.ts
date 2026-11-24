@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import {
     createSqliteAgentObserver,
     SqliteAgentObserver
@@ -30,7 +30,6 @@ test("persists run, turn, and tool records", () => {
     try {
         observer.runStarted({
             runId: "run-1",
-            appInstanceId: "app-1",
             sessionId: "session-1",
             runType: "prompt",
             startedAtMs: 1_000,
@@ -45,7 +44,6 @@ test("persists run, turn, and tool records", () => {
         });
         observer.turnStarted({
             turnId: "turn-1",
-            appInstanceId: "app-1",
             sessionId: "session-1",
             runId: "run-1",
             turnKind: "main",
@@ -58,7 +56,6 @@ test("persists run, turn, and tool records", () => {
         });
         observer.toolStarted({
             toolSpanId: "tool-1",
-            appInstanceId: "app-1",
             sessionId: "session-1",
             runId: "run-1",
             turnId: "turn-1",
@@ -74,11 +71,11 @@ test("persists run, turn, and tool records", () => {
         });
         observer.toolFinished("tool-1", {
             endedAtMs: 1_900,
-            durationMs: 800,
+            durationMs: 800.6,
             outcome: "success",
             permissionRequests: 0,
-            permissionWaitMs: 0,
-            executionMs: 800,
+            permissionWaitMs: 1.4,
+            executionMs: 799.2,
             isError: false,
             endReason: "exited",
             outputChars: 120,
@@ -91,11 +88,11 @@ test("persists run, turn, and tool records", () => {
         });
         observer.turnFinished("turn-1", {
             endedAtMs: 2_500,
-            durationMs: 1_500,
+            durationMs: 1_500.6,
             outcome: "completed",
-            ttftMs: 250,
+            ttftMs: 250.4,
             firstTokenKind: "text",
-            generationMs: 1_000,
+            generationMs: 1_000.3,
             inputTokens: 100,
             outputTokens: 50,
             cacheReadTokens: 20,
@@ -109,11 +106,16 @@ test("persists run, turn, and tool records", () => {
         });
         observer.runFinished("run-1", {
             endedAtMs: 3_000,
-            durationMs: 2_000,
+            durationMs: 2_000.7,
             outcome: "completed",
+            activeDurationMs: 1_999.2,
             llmTurns: 1,
             toolCalls: 1,
             agentSteps: 2,
+            permissionWaitMs: 1.4,
+            llmDurationMs: 1_500.4,
+            toolDurationMs: 800.6,
+            toolExecutionMs: 799.2,
             toolErrors: 0,
             toolSequenceJson: "[\"exec_command\"]",
             inputTokens: 100,
@@ -137,18 +139,22 @@ test("persists run, turn, and tool records", () => {
         const run = database.prepare("SELECT * FROM runs WHERE run_id = ?").get("run-1");
         expect(run?.outcome).toBe("completed");
         expect(run?.agent_steps).toBe(2);
-        expect(run?.duration_ms).toBe(2_000);
-        expect(run?.active_duration_ms).toBe(2_000);
+        expect(run?.duration_ms).toBe(2_001);
+        expect(run?.active_duration_ms).toBe(1_999);
+        expect(run?.tool_execution_ms).toBe(799);
         expect(run?.tool_sequence_json).toBe("[\"exec_command\"]");
 
         const turn = database.prepare("SELECT * FROM turns WHERE turn_id = ?").get("turn-1");
         expect(turn?.outcome).toBe("completed");
         expect(turn?.ttft_ms).toBe(250);
+        expect(turn?.duration_ms).toBe(1_501);
         expect(turn?.tokens_per_second).toBe(50);
 
         const tool = database.prepare("SELECT * FROM tools WHERE tool_span_id = ?").get("tool-1");
         expect(tool?.outcome).toBe("success");
-        expect(tool?.execution_ms).toBe(800);
+        expect(tool?.duration_ms).toBe(801);
+        expect(tool?.permission_wait_ms).toBe(1);
+        expect(tool?.execution_ms).toBe(799);
         expect(tool?.detail_json).toContain("\"exitCode\":0");
 
         const schemaVersion = database.prepare(
@@ -173,14 +179,12 @@ test("marks interrupted records as crashed on startup", () => {
     try {
         first.runStarted({
             runId: "run-1",
-            appInstanceId: "app-1",
             sessionId: "session-1",
             runType: "prompt",
             startedAtMs: 1_000
         });
         first.turnStarted({
             turnId: "turn-1",
-            appInstanceId: "app-1",
             sessionId: "session-1",
             runId: "run-1",
             turnKind: "main",
@@ -189,7 +193,6 @@ test("marks interrupted records as crashed on startup", () => {
         });
         first.toolStarted({
             toolSpanId: "tool-1",
-            appInstanceId: "app-1",
             sessionId: "session-1",
             runId: "run-1",
             turnId: "turn-1",
@@ -237,6 +240,39 @@ test("marks interrupted records as crashed on startup", () => {
     }
 });
 
+test("does not recover active runs during periodic maintenance", () => {
+    vi.useFakeTimers();
+    const { directory, databasePath } = temporaryDatabase();
+    const observer = new SqliteAgentObserver({
+        databasePath,
+        appVersion: "test",
+        now: () => 10_000
+    });
+    try {
+        observer.runStarted({
+            runId: "run-active",
+            sessionId: "session-1",
+            runType: "prompt",
+            startedAtMs: 9_000
+        });
+        vi.advanceTimersByTime(DAY_MS);
+    } finally {
+        observer.close();
+        vi.useRealTimers();
+    }
+
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+        const run = database.prepare(
+            "SELECT outcome FROM runs WHERE run_id = 'run-active'"
+        ).get();
+        expect(run?.outcome).toBe("running");
+    } finally {
+        database.close();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
 test("fails open when the database is closed or unavailable", () => {
     const { directory, databasePath } = temporaryDatabase();
     const observer = new SqliteAgentObserver({
@@ -248,7 +284,6 @@ test("fails open when the database is closed or unavailable", () => {
 
     expect(() => observer.runStarted({
         runId: "run-after-close",
-        appInstanceId: "app-1",
         sessionId: "session-1",
         runType: "prompt",
         startedAtMs: 1_000
@@ -263,7 +298,6 @@ test("fails open when the database is closed or unavailable", () => {
     });
     expect(() => fallback.runStarted({
         runId: "run-unavailable",
-        appInstanceId: "app-1",
         sessionId: "session-1",
         runType: "prompt",
         startedAtMs: 1_000
@@ -275,6 +309,55 @@ test("fails open when the database is closed or unavailable", () => {
     fallback.close();
 
     rmSync(directory, { recursive: true, force: true });
+});
+
+test("redacts credentials, paths, and URLs from errors", () => {
+    const { directory, databasePath } = temporaryDatabase();
+    const observer = new SqliteAgentObserver({
+        databasePath,
+        appVersion: "test",
+        now: () => 10_000
+    });
+    try {
+        observer.runStarted({
+            runId: "run-error",
+            sessionId: "session-1",
+            runType: "prompt",
+            startedAtMs: 1_000
+        });
+        observer.runFinished("run-error", {
+            endedAtMs: 2_000,
+            durationMs: 1_000,
+            outcome: "failed",
+            errorStage: "llm_stream",
+            errorCode: "llm_stream_error",
+            errorMessage: [
+                "request failed at C:\\Users\\secret\\project.txt",
+                "api_key=" + "plain-secret-value",
+                "https://example.com/private"
+            ].join(" "),
+            llmTurns: 1,
+            toolCalls: 0,
+            agentSteps: 1
+        });
+    } finally {
+        observer.close();
+    }
+
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+        const run = database.prepare(
+            "SELECT error_message FROM runs WHERE run_id = 'run-error'"
+        ).get();
+        expect(run?.error_message).toContain("[path]");
+        expect(run?.error_message).toContain("api_key=[redacted]");
+        expect(run?.error_message).toContain("[url]");
+        expect(run?.error_message).not.toContain("plain-secret-value");
+        expect(run?.error_message).not.toContain("example.com");
+    } finally {
+        database.close();
+        rmSync(directory, { recursive: true, force: true });
+    }
 });
 
 test("prunes expired runs and cascades turns and tools", () => {
@@ -291,14 +374,12 @@ test("prunes expired runs and cascades turns and tools", () => {
     try {
         first.runStarted({
             runId: "run-old",
-            appInstanceId: "app-1",
             sessionId: "session-1",
             runType: "prompt",
             startedAtMs: old
         });
         first.turnStarted({
             turnId: "turn-old",
-            appInstanceId: "app-1",
             sessionId: "session-1",
             runId: "run-old",
             turnKind: "main",
@@ -307,7 +388,6 @@ test("prunes expired runs and cascades turns and tools", () => {
         });
         first.toolStarted({
             toolSpanId: "tool-old",
-            appInstanceId: "app-1",
             sessionId: "session-1",
             runId: "run-old",
             turnId: "turn-old",

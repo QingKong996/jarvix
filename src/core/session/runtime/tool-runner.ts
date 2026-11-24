@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
     LlmImageContent,
     LlmMessage,
@@ -5,12 +6,18 @@ import type {
     LlmToolResultContent,
     LlmToolResultMessage
 } from "../../../protocol/llm.ts";
+import { toolResultContentText } from "../../../protocol/llm.ts";
 import type {
     PermissionDecision,
     PermissionGrantInput,
     PermissionMode
 } from "../../../protocol/permission.ts";
 import { type JarvixLogger, noopLogger } from "../../logger.ts";
+import {
+    noopAgentObserver,
+    type AgentObserver,
+    type AgentToolCategory
+} from "../../observability/index.ts";
 import type { SessionPermissions } from "../../permissions/session-permissions.ts";
 import {
     ToolManagerRegistry,
@@ -39,6 +46,26 @@ type ToolCallRunnerOptions = {
     tools?: ToolExecutor;
     sessionId?: string;
     logger?: JarvixLogger;
+    observer?: AgentObserver;
+};
+
+export type ToolCallTelemetryResult = {
+    outcome: "success" | "error" | "cancelled";
+    isError: boolean;
+    durationMs: number;
+    permissionRequests: number;
+    permissionWaitMs: number;
+    executionMs: number;
+};
+
+export type ToolTelemetryContext = {
+    runId: string;
+    turnId: string;
+    turnIndex: number;
+    stepIndex: number;
+    repeatIndex: number;
+    repeatGroupSize: number;
+    onFinished?(result: ToolCallTelemetryResult): void;
 };
 
 export class ToolCallRunner {
@@ -50,6 +77,7 @@ export class ToolCallRunner {
     private readonly backgroundExitNotices = new Set<string>();
     private readonly sessionId: string | undefined;
     private readonly logger: JarvixLogger;
+    private readonly observer: AgentObserver;
 
     constructor(options: ToolCallRunnerOptions) {
         this.tools = options.tools ?? createDefaultTools();
@@ -61,6 +89,7 @@ export class ToolCallRunner {
         this.queueBackgroundExitNotice = options.queueBackgroundExitNotice;
         this.sessionId = options.sessionId;
         this.logger = options.logger ?? noopLogger;
+        this.observer = options.observer ?? noopAgentObserver;
     }
 
     get hasActiveWork(): boolean {
@@ -74,15 +103,40 @@ export class ToolCallRunner {
     async execute(
         toolCall: LlmToolCallBlock,
         runtime: SessionRuntime,
-        signal: AbortSignal
+        signal: AbortSignal,
+        telemetry?: ToolTelemetryContext
     ): Promise<void> {
         if (signal.aborted) {
-            this.finishCancelled(toolCall, runtime);
+            this.cancel(toolCall, runtime, telemetry);
             return;
         }
         const startedAt = performance.now();
+        const startedAtMs = Date.now();
+        const toolSpanId = telemetry
+            ? toolSpanIdFor(telemetry)
+            : undefined;
+        let permissionRequests = 0;
+        let permissionWaitMs = 0;
+        let unknownTool = false;
+        if (telemetry) {
+            this.observer.toolStarted({
+                toolSpanId: toolSpanId!,
+                sessionId: this.sessionId ?? "",
+                runId: telemetry.runId,
+                turnId: telemetry.turnId,
+                turnIndex: telemetry.turnIndex,
+                stepIndex: telemetry.stepIndex,
+                toolCallId: toolCall.id,
+                toolName: toolCall.name,
+                toolCategory: toolCategoryFor(toolCall.name),
+                startedAtMs,
+                argsBytes: jsonBytes(toolCall.arguments),
+                argsHash: hashJson(toolCall.arguments)
+            });
+        }
         this.logger.debug("Tool call started", {
             sessionId: this.sessionId,
+            runId: telemetry?.runId,
             toolCallId: toolCall.id,
             toolName: toolCall.name
         });
@@ -96,6 +150,7 @@ export class ToolCallRunner {
 
         let result: ToolExecutionResult;
         if (!this.tools.handles(toolCall.name)) {
+            unknownTool = true;
             this.logger.warn("Tool call used an unknown tool", {
                 sessionId: this.sessionId,
                 toolCallId: toolCall.id,
@@ -144,8 +199,19 @@ export class ToolCallRunner {
                         onTaskEvent: (event) => {
                             runtime.emit(event);
                         },
-                        requestPermission: (request) =>
-                            this.requestPermission(request, runtime, signal)
+                        requestPermission: async (request) => {
+                            permissionRequests += 1;
+                            const waitStartedAt = performance.now();
+                            try {
+                                return await this.requestPermission(
+                                    request,
+                                    runtime,
+                                    signal
+                                );
+                            } finally {
+                                permissionWaitMs += performance.now() - waitStartedAt;
+                            }
+                        }
                     },
                     signal
                 );
@@ -163,19 +229,154 @@ export class ToolCallRunner {
             }
         }
 
-        this.complete(toolCall, result, runtime);
+        let completionError: unknown;
+        let completionFailed = false;
+        try {
+            this.complete(toolCall, result, runtime);
+        } catch (error) {
+            completionFailed = true;
+            completionError = error;
+            this.logger.error("Failed to record tool result", error, {
+                sessionId: this.sessionId,
+                runId: telemetry?.runId,
+                toolCallId: toolCall.id,
+                toolName: toolCall.name
+            });
+        }
+        const durationMs = elapsedMs(startedAt);
+        const executionMs = Math.max(
+            0,
+            Math.round((durationMs - permissionWaitMs) * 10) / 10
+        );
+        const outputText = toolResultContentText(result.content);
+        const imageCount = result.images?.length ?? 0;
+        if (telemetry) {
+            const outcome = signal.aborted
+                ? "cancelled"
+                : result.isError
+                    ? "error"
+                    : "success";
+            this.observer.toolFinished(toolSpanId!, {
+                endedAtMs: Date.now(),
+                durationMs,
+                outcome,
+                permissionRequests,
+                permissionWaitMs: Math.round(permissionWaitMs * 10) / 10,
+                executionMs,
+                isError: result.isError,
+                endReason: result.endReason,
+                errorCode: result.isError
+                    ? unknownTool
+                        ? "tool_unknown"
+                        : signal.aborted
+                            ? "tool_cancelled"
+                            : "tool_failed"
+                    : undefined,
+                outputChars: outputText.length,
+                outputBytes: Buffer.byteLength(outputText, "utf8"),
+                truncated: (result.task?.truncatedCharacters ?? 0) > 0,
+                imageCount,
+                repeatIndex: telemetry.repeatIndex,
+                repeatGroupSize: telemetry.repeatGroupSize,
+                detail: toolDetail(result)
+            });
+            telemetry.onFinished?.({
+                outcome,
+                isError: result.isError,
+                durationMs,
+                permissionRequests,
+                permissionWaitMs,
+                executionMs
+            });
+        }
         this.logger.info("Tool call finished", {
             sessionId: this.sessionId,
+            runId: telemetry?.runId,
             toolCallId: toolCall.id,
             toolName: toolCall.name,
             isError: result.isError,
             endReason: result.endReason,
-            durationMs: elapsedMs(startedAt)
+            durationMs
         });
+        if (completionFailed) {
+            throw completionError;
+        }
     }
 
-    cancel(toolCall: LlmToolCallBlock, runtime: SessionRuntime): void {
-        this.finishCancelled(toolCall, runtime);
+    cancel(
+        toolCall: LlmToolCallBlock,
+        runtime: SessionRuntime,
+        telemetry?: ToolTelemetryContext
+    ): void {
+        const startedAtMs = Date.now();
+        if (telemetry) {
+            this.observer.toolStarted({
+                toolSpanId: toolSpanIdFor(telemetry),
+                sessionId: this.sessionId ?? "",
+                runId: telemetry.runId,
+                turnId: telemetry.turnId,
+                turnIndex: telemetry.turnIndex,
+                stepIndex: telemetry.stepIndex,
+                toolCallId: toolCall.id,
+                toolName: toolCall.name,
+                toolCategory: toolCategoryFor(toolCall.name),
+                startedAtMs,
+                argsBytes: jsonBytes(toolCall.arguments),
+                argsHash: hashJson(toolCall.arguments)
+            });
+        }
+        this.logger.warn("Tool call was cancelled", {
+            sessionId: this.sessionId,
+            runId: telemetry?.runId,
+            toolCallId: toolCall.id,
+            toolName: toolCall.name
+        });
+        const result = failedToolResult(toolCall, "Tool execution stopped.");
+        let completionError: unknown;
+        let completionFailed = false;
+        try {
+            this.complete(toolCall, result, runtime);
+        } catch (error) {
+            completionFailed = true;
+            completionError = error;
+            this.logger.error("Failed to record cancelled tool result", error, {
+                sessionId: this.sessionId,
+                runId: telemetry?.runId,
+                toolCallId: toolCall.id,
+                toolName: toolCall.name
+            });
+        }
+        if (telemetry) {
+            this.observer.toolFinished(toolSpanIdFor(telemetry), {
+                endedAtMs: Date.now(),
+                durationMs: 0,
+                outcome: "cancelled",
+                permissionRequests: 0,
+                permissionWaitMs: 0,
+                executionMs: 0,
+                isError: result.isError,
+                endReason: result.endReason,
+                errorCode: "tool_cancelled",
+                outputChars: 0,
+                outputBytes: 0,
+                truncated: false,
+                imageCount: 0,
+                repeatIndex: telemetry.repeatIndex,
+                repeatGroupSize: telemetry.repeatGroupSize,
+                detail: toolDetail(result)
+            });
+            telemetry.onFinished?.({
+                outcome: "cancelled",
+                isError: result.isError,
+                durationMs: 0,
+                permissionRequests: 0,
+                permissionWaitMs: 0,
+                executionMs: 0
+            });
+        }
+        if (completionFailed) {
+            throw completionError;
+        }
     }
 
     async stop() {
@@ -198,19 +399,6 @@ export class ToolCallRunner {
 
     dispose(): void {
         this.tools.dispose();
-    }
-
-    private finishCancelled(toolCall: LlmToolCallBlock, runtime: SessionRuntime): void {
-        this.logger.warn("Tool call was cancelled", {
-            sessionId: this.sessionId,
-            toolCallId: toolCall.id,
-            toolName: toolCall.name
-        });
-        this.complete(
-            toolCall,
-            failedToolResult(toolCall, "Tool execution stopped."),
-            runtime
-        );
     }
 
     private complete(
@@ -275,6 +463,67 @@ export class ToolCallRunner {
 
 function elapsedMs(startedAt: number): number {
     return Math.round((performance.now() - startedAt) * 10) / 10;
+}
+
+function toolSpanIdFor(telemetry: ToolTelemetryContext): string {
+    return `${telemetry.turnId}:tool${telemetry.stepIndex}`;
+}
+
+function toolCategoryFor(name: string): AgentToolCategory {
+    switch (name) {
+        case "exec_command":
+        case "write_stdin":
+            return "shell";
+        case "apply_patch":
+            return "patch";
+        case "view_image":
+            return "image";
+        case "request_permission":
+        case "get_local_time":
+        case "sleep":
+            return "meta";
+        default:
+            return "other";
+    }
+}
+
+function jsonBytes(value: unknown): number | undefined {
+    try {
+        const text = JSON.stringify(value);
+        return text === undefined ? undefined : Buffer.byteLength(text, "utf8");
+    } catch {
+        return undefined;
+    }
+}
+
+function hashJson(value: unknown): string | undefined {
+    try {
+        return createHash("sha256")
+            .update(JSON.stringify(value) ?? "undefined")
+            .digest("hex")
+            .slice(0, 16);
+    } catch {
+        return undefined;
+    }
+}
+
+function toolDetail(result: ToolExecutionResult): Record<string, unknown> {
+    const detail: Record<string, unknown> = {
+        kind: result.data.kind,
+        background: result.endReason === "background"
+    };
+    if ("status" in result.data && typeof result.data.status === "string") {
+        detail.status = result.data.status;
+    }
+    if (result.task) {
+        detail.exitCode = result.task.exitCode;
+        detail.unreadCharacters = result.task.unreadCharacters;
+        detail.truncatedCharacters = result.task.truncatedCharacters;
+    }
+    if (result.images && result.images.length > 0) {
+        detail.imageCount = result.images.length;
+    }
+    return detail;
 }
 
 function toolResultContent(

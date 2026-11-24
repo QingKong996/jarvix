@@ -7,6 +7,10 @@ import { IPC_CHANNELS } from "../protocol/ipc.ts";
 import { attachEventBridge } from "./event-bridge.ts";
 import { registerIpc } from "./ipc.ts";
 import { initializeLogging, logFilePath, mainLogger } from "./logger.ts";
+import {
+    createSqliteAgentObserver,
+    observabilityDatabasePath
+} from "./observability/index.ts";
 import { configPaths, loadConfig, parseConfig, saveConfig, systemDefaults } from "./services/config.ts";
 import { ModelCatalogService } from "./services/model-catalog.ts";
 import { SandboxSetupService } from "./services/sandbox-setup.ts";
@@ -57,11 +61,17 @@ if (!app.requestSingleInstanceLock()) {
             windowAvailable: () => windows.current !== null,
             logger: mainLogger("sandbox")
         });
+        const observer = createSqliteAgentObserver({
+            databasePath: observabilityDatabasePath(),
+            appVersion: app.getVersion(),
+            logger: mainLogger("observability")
+        });
         const jarvix = new Jarvix({
             llm: createPiAdapter({ providers: () => config.providers }),
             config,
             sandboxPreflight: () => sandboxSetup.preflight(),
-            logger: mainLogger("core")
+            logger: mainLogger("core"),
+            observer
         });
         const catalog = new ModelCatalogService(
             join(paths.directory, "tmp", "models-dev.json"),
@@ -114,7 +124,13 @@ if (!app.requestSingleInstanceLock()) {
                 .catch((error: unknown) => {
                     log.error("Failed to shut down sessions and tools", error);
                 })
+                .then(() => observer.flush(1_000))
+                .catch((error: unknown) => {
+                    log.error("Failed to flush Agent observability data", error);
+                })
                 .finally(() => {
+                    log.info("Agent observability closed", observer.stats());
+                    observer.close();
                     shutdownComplete = true;
                     log.info("Application shutdown finished");
                     app.quit();

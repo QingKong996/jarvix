@@ -23,7 +23,6 @@ export type AgentFirstTokenKind = "text" | "thinking" | "toolCall";
 
 export type AgentRunStarted = {
   runId: string;
-  appInstanceId: string;
   sessionId: string;
   runType: AgentRunType;
   startedAtMs: number;
@@ -84,7 +83,6 @@ export type AgentRunFinished = {
 
 export type AgentTurnStarted = {
   turnId: string;
-  appInstanceId: string;
   sessionId: string;
   runId: string;
   turnKind: AgentTurnKind;
@@ -124,7 +122,6 @@ export type AgentTurnFinished = {
 
 export type AgentToolStarted = {
   toolSpanId: string;
-  appInstanceId: string;
   sessionId: string;
   runId: string;
   stepIndex: number;
@@ -160,7 +157,6 @@ export type AgentToolFinished = {
 };
 
 export type AgentEvent = {
-  appInstanceId: string;
   tsMs: number;
   event: string;
   sessionId?: string;
