@@ -11,6 +11,7 @@
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
+    "headless": "npm run build 1>&2 && electron . --headless",
     "build": "npm run typecheck && electron-vite build",
     "start": "npm run build && electron-vite preview",
     "pack": "npm run build && electron-builder --dir",
