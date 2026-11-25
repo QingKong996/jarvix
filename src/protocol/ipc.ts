@@ -1,5 +1,6 @@
 import type { JarvixConfig } from "./config.ts";
 import type { JarvixEvent } from "./event.ts";
+import type { JarvixPathCompletionResult } from "./path-completion.ts";
 import type { PermissionMode } from "./permission.ts";
 import type { JarvixProject } from "./project.ts";
 import type { JarvixProviderContext } from "./provider-context.ts";
@@ -15,6 +16,7 @@ export const IPC_CHANNELS = {
     request: "jarvix:request",
     requestInject: "jarvix:request:inject",
     requestStop: "jarvix:request:stop",
+    pathsComplete: "jarvix:paths:complete",
     event: "jarvix:event",
     configGet: "jarvix:config:get",
     configSet: "jarvix:config:set",
@@ -62,9 +64,18 @@ export type SandboxInstallOutcome =
     | { status: "failed"; errors: string[] };
 
 export type JarvixBridge = {
-    request(question: string, sessionId: string): Promise<void>;
-    injectPrompt(question: string, sessionId: string, promptId: string): Promise<boolean>;
+    request(question: string, sessionId: string, sandboxPaths?: readonly string[]): Promise<void>;
+    injectPrompt(
+        question: string,
+        sessionId: string,
+        promptId: string,
+        sandboxPaths?: readonly string[]
+    ): Promise<boolean>;
     stopRequest(sessionId: string): Promise<void>;
+    completePaths(
+        query: string,
+        context: JarvixSessionContext
+    ): Promise<JarvixPathCompletionResult>;
     onEvents(listener: (batch: JarvixEventBatch) => void): () => void;
     getConfig(): Promise<JarvixConfig>;
     getModelCatalog(force?: boolean): Promise<ModelCatalog>;

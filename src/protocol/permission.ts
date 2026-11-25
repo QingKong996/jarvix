@@ -37,6 +37,11 @@ const domainSchema = z
 
 const directorySchema = z.string().trim().min(1).max(4096);
 
+export const sandboxPathsSchema = z
+    .array(z.string().trim().min(1).max(4096))
+    .max(64)
+    .default([]);
+
 export const permissionDomainChangeSchema = z
     .object({
         action: permissionActionSchema,

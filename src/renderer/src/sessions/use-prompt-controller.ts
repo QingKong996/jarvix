@@ -67,7 +67,8 @@ export function usePromptController(options: PromptControllerOptions) {
     const runPrompt = useCallback(async (
         question: string,
         initialSessionId: string | null,
-        goalContent?: string
+        goalContent?: string,
+        sandboxPaths: readonly string[] = []
     ): Promise<void> => {
         if (!bridge) {
             return;
@@ -103,7 +104,7 @@ export function usePromptController(options: PromptControllerOptions) {
                 void bridge.autoNameSession(sessionId, namingPrompt).catch(() => undefined);
             }
             try {
-                await bridge.request(question, sessionId);
+                await bridge.request(question, sessionId, sandboxPaths);
             } catch (error) {
                 failRequest(error instanceof Error ? error.message : String(error));
             }
@@ -135,10 +136,11 @@ export function usePromptController(options: PromptControllerOptions) {
     const startRequest = useCallback(async (
         question: string,
         sessionId: string | null,
-        goalContent?: string
+        goalContent?: string,
+        sandboxPaths: readonly string[] = []
     ): Promise<void> => {
         requestInFlightRef.current = true;
-        const request = runPrompt(question, sessionId, goalContent);
+        const request = runPrompt(question, sessionId, goalContent, sandboxPaths);
         requestCompletionRef.current = request;
         try {
             await request;
@@ -149,7 +151,10 @@ export function usePromptController(options: PromptControllerOptions) {
         }
     }, [requestCompletionRef, requestInFlightRef, runPrompt]);
 
-    const send = useCallback(async (question: string): Promise<void> => {
+    const send = useCallback(async (
+        question: string,
+        sandboxPaths: readonly string[] = []
+    ): Promise<void> => {
         const normalized = question.trim();
         if ((!normalized && !goalRef.current) || !bridge || !ready) {
             return;
@@ -161,7 +166,12 @@ export function usePromptController(options: PromptControllerOptions) {
             }
             const promptId = injectUserPrompt(normalized);
             try {
-                if (await bridge.injectPrompt(normalized, activeRequestSessionId, promptId)) {
+                if (await bridge.injectPrompt(
+                    normalized,
+                    activeRequestSessionId,
+                    promptId,
+                    sandboxPaths
+                )) {
                     return;
                 }
             } catch (error) {
@@ -174,13 +184,23 @@ export function usePromptController(options: PromptControllerOptions) {
             if (requestInFlightRef.current) {
                 return;
             }
-            await startRequest(normalized, activeSessionIdRef.current);
+            await startRequest(
+                normalized,
+                activeSessionIdRef.current,
+                undefined,
+                sandboxPaths
+            );
             return;
         }
         if (busy || requestInFlightRef.current) {
             return;
         }
-        await startRequest(normalized, activeSessionIdRef.current);
+        await startRequest(
+            normalized,
+            activeSessionIdRef.current,
+            undefined,
+            sandboxPaths
+        );
     }, [
         activeSessionIdRef,
         bridge,
@@ -193,12 +213,20 @@ export function usePromptController(options: PromptControllerOptions) {
         startRequest
     ]);
 
-    const submitGoal = useCallback(async (content: string): Promise<void> => {
+    const submitGoal = useCallback(async (
+        content: string,
+        sandboxPaths: readonly string[] = []
+    ): Promise<void> => {
         const normalized = content.trim();
         if (!normalized || !bridge || !ready || busy || requestInFlightRef.current) {
             return;
         }
-        await startRequest("", activeSessionIdRef.current, normalized);
+        await startRequest(
+            "",
+            activeSessionIdRef.current,
+            normalized,
+            sandboxPaths
+        );
     }, [
         activeSessionIdRef,
         bridge,

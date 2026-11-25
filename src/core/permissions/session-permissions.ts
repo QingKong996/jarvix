@@ -77,28 +77,15 @@ export class SessionPermissions {
                     domainKey
                 );
             }
-            for (const change of pending.request.directories) {
-                if (change.access === "read") {
-                    setChange(
-                        this.enabledReadDirectories,
-                        this.disabledReadDirectories,
-                        resolve(change.path),
-                        change.action,
-                        permissionPathKey
-                    );
-                } else {
-                    setChange(
-                        this.enabledWriteDirectories,
-                        this.disabledWriteDirectories,
-                        resolve(change.path),
-                        change.action,
-                        permissionPathKey
-                    );
-                }
-            }
+            this.applyDirectoryChanges(pending.request.directories);
         }
         pending.settle(decision);
         return true;
+    }
+
+    /** Add user-selected paths without creating a permission prompt. */
+    grantDirectories(changes: readonly PermissionDirectoryChange[]): void {
+        this.applyDirectoryChanges(changes);
     }
 
     apply(policy: SandboxPolicy | null): SandboxPolicy | null {
@@ -140,6 +127,30 @@ export class SessionPermissions {
 
     dispose(): void {
         this.reset();
+    }
+
+    private applyDirectoryChanges(
+        changes: readonly PermissionDirectoryChange[]
+    ): void {
+        for (const change of changes) {
+            if (change.access === "read") {
+                setChange(
+                    this.enabledReadDirectories,
+                    this.disabledReadDirectories,
+                    resolve(change.path),
+                    change.action,
+                    permissionPathKey
+                );
+            } else {
+                setChange(
+                    this.enabledWriteDirectories,
+                    this.disabledWriteDirectories,
+                    resolve(change.path),
+                    change.action,
+                    permissionPathKey
+                );
+            }
+        }
     }
 
     private finish(requestId: string): void {

@@ -4,12 +4,19 @@ import type { JarvixBridge, JarvixEventBatch } from "../protocol/ipc.ts";
 import { IPC_CHANNELS } from "../protocol/ipc.ts";
 
 const bridge: JarvixBridge = {
-    request: (question, sessionId) => ipcRenderer.invoke(IPC_CHANNELS.request, { question, sessionId }),
-    injectPrompt: (question, sessionId, promptId) => ipcRenderer.invoke(
+    request: (question, sessionId, sandboxPaths) => ipcRenderer.invoke(
+        IPC_CHANNELS.request,
+        { question, sessionId, sandboxPaths }
+    ),
+    injectPrompt: (question, sessionId, promptId, sandboxPaths) => ipcRenderer.invoke(
         IPC_CHANNELS.requestInject,
-        { question, sessionId, promptId }
+        { question, sessionId, promptId, sandboxPaths }
     ),
     stopRequest: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.requestStop, sessionId),
+    completePaths: (query, context) => ipcRenderer.invoke(
+        IPC_CHANNELS.pathsComplete,
+        { query, context }
+    ),
     onEvents: (listener) => {
         const handler = (_event: IpcRendererEvent, batch: JarvixEventBatch): void => {
             listener(batch);

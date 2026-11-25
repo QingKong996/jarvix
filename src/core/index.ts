@@ -437,18 +437,32 @@ export class Jarvix {
         };
     }
 
-    async request(question: string, sessionId: string): Promise<void> {
+    async request(
+        question: string,
+        sessionId: string,
+        sandboxPaths: readonly string[] = []
+    ): Promise<void> {
         const session = this.sessions.require(sessionId);
         await session.request(question, {
             llm: this.llm,
             config: this.config,
             workingDirectories: workingDirectoriesFor(session.meta),
             emit: (event) => this.emit(session.meta.id, event)
-        });
+        }, sandboxPaths);
     }
 
-    injectPrompt(question: string, sessionId: string, promptId: string): boolean {
-        return this.sessions.require(sessionId).injectPrompt(question, promptId);
+    injectPrompt(
+        question: string,
+        sessionId: string,
+        promptId: string,
+        sandboxPaths: readonly string[] = []
+    ): boolean {
+        const session = this.sessions.require(sessionId);
+        const accepted = session.injectPrompt(question, promptId);
+        if (accepted) {
+            session.exemptSandboxPaths(sandboxPaths);
+        }
+        return accepted;
     }
 
     stopRequest(sessionId: string): void {

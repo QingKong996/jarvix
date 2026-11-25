@@ -42,6 +42,44 @@ test("cancellation leaves the sandbox policy unchanged", async () => {
     expect(policy?.filesystem.allowWrite).toEqual([]);
 });
 
+test("grants selected sandbox paths without a pending approval", () => {
+    const permissions = new SessionPermissions();
+    const sessionDirectory = resolve("mounted-directory");
+
+    permissions.grantDirectories([
+        { action: "enable", access: "read", path: sessionDirectory },
+        { action: "enable", access: "write", path: sessionDirectory }
+    ]);
+
+    expect(permissions.hasPending()).toBe(false);
+    const policy = permissions.apply(createSandboxPolicy("read-only", []));
+    expect(policy?.filesystem.allowRead).toEqual([{
+        path: sessionDirectory,
+        literal: true
+    }]);
+    expect(policy?.filesystem.allowWrite).toEqual([{
+        path: sessionDirectory,
+        literal: true
+    }]);
+});
+
+test("grants selected paths once and honors access granularity", () => {
+    const permissions = new SessionPermissions();
+    const sessionDirectory = resolve("mounted-directory");
+
+    permissions.grantDirectories([
+        { action: "enable", access: "read", path: sessionDirectory },
+        { action: "enable", access: "read", path: sessionDirectory }
+    ]);
+
+    const policy = permissions.apply(createSandboxPolicy("read-only", []));
+    expect(policy?.filesystem.allowRead).toEqual([{
+        path: sessionDirectory,
+        literal: true
+    }]);
+    expect(policy?.filesystem.allowWrite).toEqual([]);
+});
+
 test("reports releasable only without pending requests or session grants", () => {
     const permissions = new SessionPermissions();
     expect(permissions.canRelease()).toBe(true);

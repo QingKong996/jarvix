@@ -1,12 +1,15 @@
 import { dialog, ipcMain } from "electron";
 import type { IpcMainInvokeEvent } from "electron";
+import { isAbsolute } from "node:path";
 import type { Jarvix } from "../core/index.ts";
 import { assertStorageId } from "../core/storage-id.ts";
 import type { JarvixConfig } from "../protocol/config.ts";
 import { IPC_CHANNELS } from "../protocol/ipc.ts";
+import { pathCompletionQuerySchema } from "../protocol/path-completion.ts";
 import {
     DEFAULT_PERMISSION_MODE,
     permissionModeSchema,
+    sandboxPathsSchema,
     type PermissionMode
 } from "../protocol/permission.ts";
 import { createProjectInputSchema } from "../protocol/project.ts";
@@ -19,6 +22,7 @@ import {
 import { mainLogger } from "./logger.ts";
 import type { ModelCatalogService } from "./services/model-catalog.ts";
 import { syncProviderModels } from "./services/provider-model-sync.ts";
+import { completePaths } from "./services/path-completion.ts";
 import type { SandboxSetupService } from "./services/sandbox-setup.ts";
 import type { MainWindowController } from "./window.ts";
 
@@ -109,6 +113,18 @@ function parsePermissionMode(value: unknown): PermissionMode {
     return parsed.data;
 }
 
+function parseSandboxPaths(value: unknown): string[] {
+    const parsed = sandboxPathsSchema.safeParse(value);
+    if (!parsed.success) {
+        throw new Error("Invalid sandbox paths");
+    }
+    const unique = [...new Set(parsed.data)];
+    if (unique.some((path) => !isAbsolute(path))) {
+        throw new Error("Sandbox paths must be absolute");
+    }
+    return unique;
+}
+
 export function registerIpc(dependencies: IpcDependencies): void {
     const { jarvix, windows, catalog, sandboxSetup, getConfig, updateConfig } = dependencies;
     const assertSender = (event: IpcMainInvokeEvent): void => windows.assertSender(event);
@@ -120,7 +136,11 @@ export function registerIpc(dependencies: IpcDependencies): void {
         if (typeof question !== "string") {
             throw new Error("Question must be a string");
         }
-        return jarvix.request(question, requireSessionId(sessionId));
+        return jarvix.request(
+            question,
+            requireSessionId(sessionId),
+            parseSandboxPaths(request.sandboxPaths)
+        );
     });
 
     handle(IPC_CHANNELS.requestStop, (event, sessionId: unknown) => {
@@ -141,7 +161,21 @@ export function registerIpc(dependencies: IpcDependencies): void {
         return jarvix.injectPrompt(
             question,
             requireSessionId(sessionId),
-            promptId
+            promptId,
+            parseSandboxPaths(request.sandboxPaths)
+        );
+    });
+
+    handle(IPC_CHANNELS.pathsComplete, async (event, payload: unknown) => {
+        assertSender(event);
+        const request = requirePayload(payload, "Invalid path completion payload");
+        const query = pathCompletionQuerySchema.safeParse(request.query);
+        if (!query.success) {
+            throw new Error("Invalid path completion query");
+        }
+        return completePaths(
+            query.data,
+            parseSessionContext(request.context)
         );
     });
 

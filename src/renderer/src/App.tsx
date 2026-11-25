@@ -19,6 +19,8 @@ import { Button } from "./components/ui/button.tsx";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable.tsx";
 import { useSessions } from "./use-sessions.ts";
 import type { JarvixConfig } from "../../protocol/config.ts";
+import type { JarvixPathCompletionResult } from "../../protocol/path-completion.ts";
+import type { JarvixSessionContext } from "../../protocol/session.ts";
 
 const bridge = window.jarvix;
 
@@ -88,6 +90,15 @@ export function App() {
 
     const handleConfigChange = useCallback(async (next: JarvixConfig) => {
         if (bridge) setConfig(await bridge.setConfig(next));
+    }, []);
+
+    const completePaths = useCallback((
+        query: string,
+        context: JarvixSessionContext
+    ): Promise<JarvixPathCompletionResult> => {
+        return bridge?.completePaths(query, context) ?? Promise.resolve({
+            entries: []
+        });
     }, []);
 
     const openSettings = useCallback(() => {
@@ -189,6 +200,7 @@ export function App() {
                                     onContextChange={updateSessionContext}
                                     onPermissionChange={updateSessionPermission}
                                     onPermissionResponse={respondPermission}
+                                    onPathComplete={completePaths}
                                 />
                             </main>
                         </ResizablePanel>

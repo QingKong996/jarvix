@@ -58,6 +58,9 @@
                 "description": "设置或更新当前会话目标"
             }
         },
+        "paths": {
+            "label": "文件和目录"
+        },
         "goal": {
             "button": "目标",
             "placeholder": "描述你的目标，并设置可衡量的预期成果，以取得最佳效果",

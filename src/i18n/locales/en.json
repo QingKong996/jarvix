@@ -58,6 +58,9 @@
                 "description": "Set or update the goal for this session"
             }
         },
+        "paths": {
+            "label": "Files and directories"
+        },
         "goal": {
             "button": "Goal",
             "placeholder": "Describe your goal and define measurable outcomes for best results",

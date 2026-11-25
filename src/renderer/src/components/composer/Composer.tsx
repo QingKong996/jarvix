@@ -1,4 +1,10 @@
-import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import {
+    useEffect,
+    useRef,
+    useState,
+    type FormEvent,
+    type KeyboardEvent
+} from "react";
 import {
     ArrowUp,
     ChevronUp,
@@ -11,9 +17,12 @@ import { AnimatePresence, motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import type { JarvixConfig } from "../../../../protocol/config.ts";
 import type { JarvixContextUsage } from "../../../../protocol/context-usage.ts";
+import type {
+    JarvixPathCompletion,
+    JarvixPathCompletionResult
+} from "../../../../protocol/path-completion.ts";
 import type {
     PermissionMode,
     PermissionRequest
@@ -34,9 +43,22 @@ import {
     cycleCommandIndex,
     detectSlashCommand,
     filterSlashCommands,
-    parseGoalCommand,
-    removeSlashCommandToken
+    parseGoalCommand
 } from "./composer-commands.ts";
+import { ComposerPathMenu } from "./ComposerPathMenu.tsx";
+import {
+    completePathMentionText,
+    detectPathMention,
+    pathMentionFor,
+    resolvePathMentions,
+    type SelectedPathMention
+} from "./composer-path-mentions.ts";
+import { pathCompletionKeyAction } from "./composer-path-keyboard.ts";
+import {
+    ComposerRichInput,
+    type ComposerRichInputHandle,
+    type EditorSnapshot
+} from "./ComposerRichInput.tsx";
 import { GoalCard } from "./GoalCard.tsx";
 import { ComposerModelMenu } from "./ComposerModelMenu.tsx";
 import { ComposerPermissionMenu } from "./ComposerPermissionMenu.tsx";
@@ -53,8 +75,8 @@ type ComposerProps = {
     contextUsage: JarvixContextUsage | null;
     goal: JarvixGoal | null;
     permissionRequest: PermissionRequest | null;
-    onSubmit: (question: string) => void;
-    onGoalSubmit: (content: string) => void;
+    onSubmit: (question: string, sandboxPaths?: readonly string[]) => void;
+    onGoalSubmit: (content: string, sandboxPaths?: readonly string[]) => void;
     onGoalClear: () => void;
     onStop: () => void;
     config: JarvixConfig | null;
@@ -62,6 +84,16 @@ type ComposerProps = {
     onContextChange: (context: JarvixSessionContext) => Promise<void>;
     onPermissionChange: (permission: PermissionMode) => Promise<void>;
     onPermissionResponse: (approved: boolean) => Promise<boolean>;
+    onPathComplete: (
+        query: string,
+        context: JarvixSessionContext
+    ) => Promise<JarvixPathCompletionResult>;
+};
+
+type PathNavigation = {
+    menuKey: string;
+    index: number;
+    path?: string;
 };
 
 export function Composer({
@@ -81,7 +113,8 @@ export function Composer({
     onConfigChange,
     onContextChange,
     onPermissionChange,
-    onPermissionResponse
+    onPermissionResponse,
+    onPathComplete
 }: ComposerProps) {
     const { t } = useTranslation();
     const [value, setValue] = useState("");
@@ -93,7 +126,16 @@ export function Composer({
     const [inputFocused, setInputFocused] = useState(false);
     const [selection, setSelection] = useState({ start: 0, end: 0 });
     const [commandNavigation, setCommandNavigation] = useState({ menuKey: "", index: 0 });
-    const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const [pathNavigation, setPathNavigation] = useState<PathNavigation>({
+        menuKey: "",
+        index: 0
+    });
+    const [pathMentions, setPathMentions] = useState<SelectedPathMention[]>([]);
+    const [pathCompletions, setPathCompletions] = useState<{
+        menuKey: string;
+        result: JarvixPathCompletionResult;
+    }>({ menuKey: "", result: { entries: [] } });
+    const richInputRef = useRef<ComposerRichInputHandle>(null);
     const selectedProject = projects.find((project) => project.id === sessionContext.projectId);
     const workingDirectoryName = sessionContext.workingDirectory
         ? sessionContext.workingDirectory.split(/[\\/]/).filter(Boolean).at(-1) ?? sessionContext.workingDirectory
@@ -120,6 +162,78 @@ export function Composer({
             ? Math.min(commandNavigation.index, matchingCommands.length - 1)
             : 0;
     const activeCommand = matchingCommands[activeCommandIndex];
+    const pathTrigger = detectPathMention(value, selection.start, selection.end);
+    const pathQuery = pathTrigger?.query ?? "";
+    const pathMenuKey = pathTrigger
+        ? `${pathTrigger.tokenStart}:${pathTrigger.tokenEnd}:${pathTrigger.query}`
+        : "";
+    const pathCompletionResult = pathCompletions.menuKey === pathMenuKey
+        ? pathCompletions.result
+        : null;
+    const matchingPaths = pathCompletionResult?.entries ?? [];
+    const pathCompletionPending = inputFocused
+        && !inputDisabled
+        && pathTrigger !== null
+        && pathCompletions.menuKey !== pathMenuKey;
+    const pathMenuOpen = inputFocused
+        && !inputDisabled
+        && pathTrigger !== null
+        && pathCompletionResult !== null
+        && matchingPaths.length > 0;
+    const activePathIndex = !pathMenuOpen
+        ? -1
+        : pathNavigation.menuKey === pathMenuKey
+            ? pathNavigation.path
+                ? Math.max(
+                    0,
+                    matchingPaths.findIndex(
+                        (path) => path.path === pathNavigation.path
+                    )
+                )
+                : Math.min(pathNavigation.index, matchingPaths.length - 1)
+            : 0;
+    const activePath = matchingPaths[activePathIndex];
+
+    useEffect(() => {
+        if (!pathTrigger || !inputFocused || inputDisabled) {
+            setPathCompletions((current) => current.menuKey === ""
+                ? current
+                : {
+                    menuKey: "",
+                    result: { entries: [] }
+                });
+            return;
+        }
+        let cancelled = false;
+        const menuKey = pathMenuKey;
+        const timer = window.setTimeout(() => {
+            void onPathComplete(pathQuery, sessionContext)
+                .then((result) => {
+                    if (!cancelled) {
+                        setPathCompletions({ menuKey, result });
+                    }
+                })
+                .catch(() => {
+                    if (!cancelled) {
+                        setPathCompletions({
+                            menuKey,
+                            result: { entries: [] }
+                        });
+                    }
+                });
+        }, 80);
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timer);
+        };
+    }, [
+        inputDisabled,
+        inputFocused,
+        onPathComplete,
+        pathMenuKey,
+        pathQuery,
+        sessionContext
+    ]);
 
     async function saveConfig(next: JarvixConfig): Promise<boolean> {
         setSaving(true);
@@ -156,49 +270,55 @@ export function Composer({
         }
         const text = value.trim();
         if (goalEditing) {
-            if (!text || running) {
+            const resolved = resolvePathMentions(text, pathMentions);
+            if (!resolved.text || running) {
                 return;
             }
-            setValue("");
-            setSelection({ start: 0, end: 0 });
             setGoalEditing(false);
-            setCommandNavigation({ menuKey: "", index: 0 });
-            onGoalSubmit(text);
-            textareaRef.current?.focus();
+            resetInput();
+            onGoalSubmit(resolved.text, resolved.paths);
             return;
         }
         const goalCommand = running ? null : parseGoalCommand(value);
         if (goalCommand) {
-            setValue("");
-            setSelection({ start: 0, end: 0 });
-            setCommandNavigation({ menuKey: "", index: 0 });
-            if (goalCommand.content) {
+            const resolved = resolvePathMentions(goalCommand.content, pathMentions);
+            resetInput();
+            if (resolved.text) {
                 setGoalEditing(false);
-                onGoalSubmit(goalCommand.content);
+                onGoalSubmit(resolved.text, resolved.paths);
             } else {
                 setGoalEditing(true);
             }
-            textareaRef.current?.focus();
             return;
         }
-        if (!text && !goal) {
+        const resolved = resolvePathMentions(text, pathMentions);
+        if (!resolved.text && !goal) {
             return;
         }
-        if (!text && running) {
+        if (!resolved.text && running) {
             return;
         }
-        setValue("");
-        setSelection({ start: 0, end: 0 });
-        setCommandNavigation({ menuKey: "", index: 0 });
-        onSubmit(text);
-        textareaRef.current?.focus();
+        resetInput();
+        onSubmit(resolved.text, resolved.paths);
     }
 
-    function updateSelection(element: HTMLTextAreaElement): void {
-        setSelection({
-            start: element.selectionStart,
-            end: element.selectionEnd
+    function resetInput(): void {
+        setValue("");
+        setSelection({ start: 0, end: 0 });
+        setPathMentions([]);
+        setCommandNavigation({ menuKey: "", index: 0 });
+        setPathNavigation({ menuKey: "", index: 0 });
+        setPathCompletions({
+            menuKey: "",
+            result: { entries: [] }
         });
+        richInputRef.current?.clear();
+    }
+
+    function handleEditorChange(snapshot: EditorSnapshot): void {
+        setValue(snapshot.value);
+        setSelection(snapshot.selection);
+        setPathMentions(snapshot.mentions);
     }
 
     function setActiveCommandIndex(index: number): void {
@@ -217,96 +337,185 @@ export function Composer({
         ));
     }
 
+    function setActivePathIndex(index: number): void {
+        setPathNavigation({ menuKey: pathMenuKey, index });
+    }
+
+    function movePathSelection(delta: number): void {
+        if (!pathMenuOpen) {
+            return;
+        }
+        setActivePathIndex(cycleCommandIndex(
+            activePathIndex,
+            delta,
+            matchingPaths.length
+        ));
+    }
+
+    function selectPath(completion: JarvixPathCompletion): void {
+        const initialMention = pathMentionFor(completion);
+        const mention = pathMentions.some(
+            (item) => item.token === initialMention.token
+                && item.path !== initialMention.path
+        )
+            ? pathMentionFor(completion, true)
+            : initialMention;
+        if (!richInputRef.current?.insertMention(mention)) {
+            return;
+        }
+        setPathNavigation({ menuKey: "", index: 0 });
+        setPathCompletions({
+            menuKey: "",
+            result: { entries: [] }
+        });
+    }
+
+    function completePathText(completion: JarvixPathCompletion): void {
+        if (!pathTrigger) {
+            return;
+        }
+        const { tokenStart, tokenEnd } = pathTrigger;
+        const completed = completePathMentionText(
+            value,
+            pathTrigger,
+            completion
+        );
+
+        richInputRef.current?.replaceRange(
+            tokenStart,
+            tokenEnd,
+            completed.token
+        );
+
+        const nextTrigger = completed.trigger;
+        if (!nextTrigger) {
+            setPathCompletions({
+                menuKey: "",
+                result: { entries: [] }
+            });
+            return;
+        }
+        const nextMenuKey = [
+            nextTrigger.tokenStart,
+            nextTrigger.tokenEnd,
+            nextTrigger.query
+        ].join(":");
+        setPathCompletions({
+            menuKey: nextMenuKey,
+            result: { entries: [completion] }
+        });
+        setPathNavigation({
+            menuKey: nextMenuKey,
+            index: 0,
+            path: completion.path
+        });
+    }
+
     function selectCommand(command: ComposerCommand): void {
         if (!slashTrigger) {
             return;
         }
 
         if (command.id === "goal") {
-            const edit = removeSlashCommandToken(value, slashTrigger);
-            setValue(edit.value);
-            setSelection({ start: edit.caret, end: edit.caret });
+            const removalEnd = value[slashTrigger.tokenEnd] === " "
+                ? slashTrigger.tokenEnd + 1
+                : slashTrigger.tokenEnd;
+            richInputRef.current?.replaceRange(
+                slashTrigger.tokenStart,
+                removalEnd,
+                ""
+            );
             setGoalEditing(true);
             setCommandNavigation({ menuKey: "", index: 0 });
-            requestAnimationFrame(() => {
-                const textarea = textareaRef.current;
-                if (!textarea) {
-                    return;
-                }
-                textarea.focus();
-                textarea.setSelectionRange(edit.caret, edit.caret);
-            });
             return;
         }
 
         const insertion = `/${command.id} `;
-        const nextValue = [
-            value.slice(0, slashTrigger.tokenStart),
-            insertion,
-            value.slice(slashTrigger.tokenEnd)
-        ].join("");
-        const nextCaret = slashTrigger.tokenStart + insertion.length;
-
-        setValue(nextValue);
-        setSelection({ start: nextCaret, end: nextCaret });
+        richInputRef.current?.replaceRange(
+            slashTrigger.tokenStart,
+            slashTrigger.tokenEnd,
+            insertion
+        );
         setCommandNavigation({ menuKey: "", index: 0 });
-        requestAnimationFrame(() => {
-            const textarea = textareaRef.current;
-            if (!textarea) {
-                return;
-            }
-            textarea.focus();
-            textarea.setSelectionRange(nextCaret, nextCaret);
-        });
     }
 
     function beginGoalEdit(content: string): void {
         setGoalEditing(true);
-        setValue(content);
         setCommandNavigation({ menuKey: "", index: 0 });
-        requestAnimationFrame(() => {
-            const textarea = textareaRef.current;
-            if (!textarea) {
-                return;
-            }
-            textarea.focus();
-            const caret = content.length;
-            setSelection({ start: caret, end: caret });
-            textarea.setSelectionRange(caret, caret);
-        });
+        richInputRef.current?.setPlainText(content);
     }
 
     function toggleGoalEditing(): void {
         if (goalEditing) {
             setGoalEditing(false);
-            setValue("");
-            setSelection({ start: 0, end: 0 });
-            textareaRef.current?.focus();
+            resetInput();
             return;
         }
         beginGoalEdit(goal?.content ?? "");
     }
 
-    function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
         if (event.nativeEvent.isComposing) {
             return;
+        }
+
+        if (
+            pathCompletionPending
+            && event.key === "Enter"
+            && !event.shiftKey
+            && !event.ctrlKey
+            && !event.metaKey
+            && !event.altKey
+        ) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+        }
+
+        if (pathMenuOpen && !event.ctrlKey && !event.metaKey && !event.altKey) {
+            const action = pathCompletionKeyAction(event.key, event.shiftKey);
+            if (action === "previous" || action === "next") {
+                event.preventDefault();
+                event.stopPropagation();
+                movePathSelection(action === "next" ? 1 : -1);
+                return;
+            }
+
+            if (action === "complete" && activePath) {
+                event.preventDefault();
+                event.stopPropagation();
+                completePathText(activePath);
+                return;
+            }
+
+            if (action === "confirm") {
+                event.preventDefault();
+                event.stopPropagation();
+                if (activePath) {
+                    selectPath(activePath);
+                }
+                return;
+            }
         }
 
         if (commandMenuOpen && !event.ctrlKey && !event.metaKey && !event.altKey) {
             if (event.key === "Tab") {
                 event.preventDefault();
+                event.stopPropagation();
                 moveCommandSelection(event.shiftKey ? -1 : 1);
                 return;
             }
 
             if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                 event.preventDefault();
+                event.stopPropagation();
                 moveCommandSelection(event.key === "ArrowDown" ? 1 : -1);
                 return;
             }
 
             if (event.key === "Enter" && !event.shiftKey && activeCommand) {
                 event.preventDefault();
+                event.stopPropagation();
                 selectCommand(activeCommand);
                 return;
             }
@@ -321,14 +530,24 @@ export function Composer({
         }
 
         event.preventDefault();
-        event.currentTarget.form?.requestSubmit();
+        event.stopPropagation();
+        event.currentTarget.closest("form")?.requestSubmit();
     }
 
     return (
         <>
             <div className={cn(CONTENT_GUTTER, "py-3")}>
                 <AnimatePresence initial={false}>
-                    {commandMenuOpen ? (
+                    {pathMenuOpen ? (
+                        <ComposerPathMenu
+                            paths={matchingPaths}
+                            query={pathQuery}
+                            activeIndex={activePathIndex}
+                            label={t("composer.paths.label")}
+                            onActiveIndexChange={setActivePathIndex}
+                            onSelect={selectPath}
+                        />
+                    ) : commandMenuOpen ? (
                         <ComposerCommandMenu
                             commands={matchingCommands}
                             activeIndex={activeCommandIndex}
@@ -363,36 +582,31 @@ export function Composer({
                                 />
                             ) : null}
                         </AnimatePresence>
-                        <Textarea
-                            ref={textareaRef}
-                            rows={1}
-                            autoComplete="off"
-                            autoFocus
-                            value={value}
-                            onChange={(event) => {
-                                setValue(event.target.value);
-                                updateSelection(event.currentTarget);
-                            }}
-                            onSelect={(event) => updateSelection(event.currentTarget)}
-                            onFocus={() => setInputFocused(true)}
-                            onBlur={() => setInputFocused(false)}
-                            onKeyDown={handleKeyDown}
+                        <ComposerRichInput
+                            ref={richInputRef}
                             disabled={inputDisabled}
                             placeholder={goalEditing
                                 ? t("composer.goal.placeholder")
                                 : t("composer.placeholder")}
-                            aria-label={goalEditing
+                            ariaLabel={goalEditing
                                 ? t("composer.goal.placeholder")
                                 : t("composer.placeholder")}
-                            aria-autocomplete="list"
-                            aria-haspopup="listbox"
-                            aria-expanded={commandMenuOpen}
-                            aria-controls={commandMenuOpen ? "composer-command-menu" : undefined}
-                            aria-activedescendant={activeCommand
-                                ? `composer-command-${activeCommand.id}`
-                                : undefined}
-                            data-testid="composer-input"
-                            className="max-h-48 min-h-8 w-full resize-none border-0 bg-transparent px-1.5 py-1.5 shadow-none focus-visible:ring-0 dark:bg-transparent"
+                            ariaExpanded={commandMenuOpen || pathMenuOpen}
+                            ariaControls={pathMenuOpen
+                                ? "composer-path-menu"
+                                : commandMenuOpen
+                                    ? "composer-command-menu"
+                                    : undefined}
+                            ariaActiveDescendant={pathMenuOpen && activePath
+                                ? `composer-path-${activePathIndex}`
+                                : activeCommand
+                                    ? `composer-command-${activeCommand.id}`
+                                    : undefined}
+                            onChange={handleEditorChange}
+                            onSelectionChange={setSelection}
+                            onFocus={() => setInputFocused(true)}
+                            onBlur={() => setInputFocused(false)}
+                            onKeyDown={handleKeyDown}
                         />
 
                         <div className="flex min-w-0 items-center gap-1">
