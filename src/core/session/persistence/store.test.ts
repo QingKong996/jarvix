@@ -17,11 +17,15 @@ import type {
     LlmUserMessage
 } from "../../../protocol/llm.ts";
 import { DEFAULT_PERMISSION_MODE } from "../../../protocol/permission.ts";
-import type { JarvixSessionMeta } from "../../../protocol/session.ts";
+import {
+    SESSION_GOAL_MAX_LENGTH,
+    type JarvixSessionMeta
+} from "../../../protocol/session.ts";
 import {
     SESSION_FORMAT_VERSION,
     appendSessionCompaction,
     appendSessionMessage,
+    clearSessionGoal,
     createSession,
     deleteSession,
     listArchivedSessionSummaries,
@@ -29,6 +33,7 @@ import {
     loadSession,
     sessionFile,
     updateSessionContext,
+    updateSessionGoal,
     updateSessionName,
     updateSessionPermission,
     updateSessionStatus
@@ -569,6 +574,85 @@ test("updateSessionPermission rewrites the header and preserves messages", () =>
     expect(loadSession(created.meta.id, directory)).toEqual({
         meta,
         messages: [userMessage]
+    });
+});
+
+test("updates and clears a persisted goal without changing messages", () => {
+    const directory = join(base, "goal");
+    const created = createSession({ projectId: PROJECT_ID }, SESSION_NAME, directory);
+    appendSessionMessage(created.meta.id, userMessage, directory);
+
+    const goal = updateSessionGoal(created.meta.id, "  Ship feature A  ", directory);
+    expect(goal).toMatchObject({
+        content: "Ship feature A",
+        createdAt: expect.any(Number),
+        updatedAt: expect.any(Number)
+    });
+    expect(loadSession(created.meta.id, directory)).toEqual({
+        meta: expect.objectContaining({ goal }),
+        messages: [userMessage]
+    });
+    expect(listSessionSummaries(directory)[0]?.goal).toEqual(goal);
+
+    const clock = vi.spyOn(Date, "now").mockReturnValue(goal.createdAt + 5_000);
+    let updated: ReturnType<typeof updateSessionGoal>;
+    try {
+        updated = updateSessionGoal(
+            created.meta.id,
+            "Ship feature A with tests",
+            directory
+        );
+    } finally {
+        clock.mockRestore();
+    }
+
+    expect(updated).toMatchObject({
+        content: "Ship feature A with tests",
+        createdAt: goal.createdAt,
+        updatedAt: goal.createdAt + 5_000
+    });
+
+    const cleared = clearSessionGoal(created.meta.id, directory);
+    expect(cleared.goal).toBeUndefined();
+    expect(loadSession(created.meta.id, directory)).toEqual({
+        meta: cleared,
+        messages: [userMessage]
+    });
+});
+
+test("rejects an invalid goal update without modifying the stored goal", () => {
+    const directory = join(base, "invalid-goal-update");
+    const created = createSession({}, SESSION_NAME, directory);
+    const goal = updateSessionGoal(created.meta.id, "Keep this goal", directory);
+
+    expect(() => updateSessionGoal(created.meta.id, "   ", directory)).toThrow();
+    expect(() => updateSessionGoal(
+        created.meta.id,
+        "x".repeat(SESSION_GOAL_MAX_LENGTH + 1),
+        directory
+    )).toThrow();
+    expect(loadSession(created.meta.id, directory)?.meta.goal).toEqual(goal);
+});
+
+test("ignores malformed goal metadata while preserving the session", () => {
+    const directory = join(base, "malformed-goal");
+    const created = createSession({}, SESSION_NAME, directory);
+    writeFileSync(
+        sessionFile(created.meta.id, directory),
+        `${JSON.stringify({
+            ...created.meta,
+            goal: {
+                content: "Malformed goal",
+                createdAt: "yesterday",
+                updatedAt: 1
+            }
+        })}\n`,
+        "utf8"
+    );
+
+    expect(loadSession(created.meta.id, directory)).toEqual({
+        meta: created.meta,
+        messages: []
     });
 });
 

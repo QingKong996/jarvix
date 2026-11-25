@@ -16,7 +16,11 @@ import type {
     PermissionDecision,
     PermissionMode
 } from "../../../protocol/permission.ts";
-import type { JarvixSession, JarvixSessionMeta } from "../../../protocol/session.ts";
+import type {
+    JarvixGoal,
+    JarvixSession,
+    JarvixSessionMeta
+} from "../../../protocol/session.ts";
 import { type JarvixLogger, noopLogger } from "../../logger.ts";
 import {
     noopAgentObserver,
@@ -30,10 +34,11 @@ import {
     resolveReasoningLevel
 } from "../../../protocol/providers.ts";
 import {
-    type ToolManager,
-    type ToolExecutor
+    createDefaultTools,
+    type ToolExecutor,
+    type GoalFinishResult,
+    type ToolManager
 } from "../../../runtime/tools/index.ts";
-import { createDefaultTools } from "../../../runtime/tools/index.ts";
 import { SessionPermissions } from "../../permissions/session-permissions.ts";
 import {
     createDefaultContextManager,
@@ -60,6 +65,14 @@ import {
     type ToolTelemetryContext
 } from "./tool-runner.ts";
 import type { SessionRuntime } from "./types.ts";
+import {
+    GoalVerifier,
+    verifierResultText
+} from "../goal/goal-verifier.ts";
+import {
+    clearSessionGoal,
+    updateSessionGoal
+} from "../persistence/store.ts";
 
 export const MAX_TOOL_ROUNDS = 32;
 const SHUTDOWN_TIMEOUT_MS = 10_000;
@@ -75,6 +88,7 @@ type TurnContext = {
     requestStartedAt: number;
     request: Omit<LlmRequest, "messages" | "signal" | "tools">;
     run: RunTelemetry;
+    autoContinue: boolean;
 };
 
 type RunTelemetry = {
@@ -157,6 +171,7 @@ export class Session {
     private readonly pendingMessages = new PendingMessageQueue();
     private readonly contextManager: ContextManager;
     private readonly toolRunner: ToolCallRunner;
+    private readonly tools: ToolExecutor;
     private readonly permissions: SessionPermissions;
     private readonly logger: JarvixLogger;
     private readonly observer: AgentObserver;
@@ -169,6 +184,8 @@ export class Session {
     private contextWindow: number | null = null;
     private shutdownPromise: Promise<void> | null = null;
     private activeRun: RunTelemetry | null = null;
+    private goalFinished = false;
+    private readonly goalVerifier = new GoalVerifier();
 
     constructor(
         meta: JarvixSessionMeta,
@@ -185,6 +202,7 @@ export class Session {
         this.contextManager = contextManagerFactory(() => this.meta.permission);
         this.history = this.contextManager.initializeHistory(messages);
         this.permissions = permissions;
+        this.tools = tools;
         this.persistence = new SessionPersistenceQueue(meta.id);
         this.toolRunner = new ToolCallRunner({
             tools,
@@ -212,6 +230,11 @@ export class Session {
             });
             throw new Error(`Session is busy: ${this.meta.id}`);
         }
+        const prompt = question.trim();
+        if (prompt.length === 0 && !this.meta.goal) {
+            throw new Error("A request requires a prompt or an active goal");
+        }
+        this.goalFinished = false;
         const startedAt = performance.now();
         const startedAtMs = Date.now();
         const historyMessagesAtStart = this.history.length;
@@ -316,13 +339,15 @@ export class Session {
         try {
             stage = "setup";
             this.ensureEnvironmentContext(runtime);
-            const questionMessage: LlmUserMessage = {
-                role: "user",
-                content: question,
-                timestamp: Date.now()
-            };
-            stage = "persistence";
-            this.append(questionMessage);
+            if (prompt.length > 0) {
+                const questionMessage: LlmUserMessage = {
+                    role: "user",
+                    content: question,
+                    timestamp: Date.now()
+                };
+                stage = "persistence";
+                this.append(questionMessage);
+            }
             const environmentReminder = this.appendEnvironmentReminderIfChanged(runtime);
             if (environmentReminder) {
                 runtime.emit({ type: "system.message", message: environmentReminder });
@@ -378,7 +403,8 @@ export class Session {
                     apiKey: provider?.apiKey,
                     maxTokens: definition.maxTokens
                 },
-                run
+                run,
+                autoContinue: false
             };
             stage = "compaction";
             await this.compactContextIfNeeded(turn);
@@ -398,7 +424,7 @@ export class Session {
                 stage = "compaction";
                 await this.compactContextIfNeeded(turn);
                 stage = "llm_stream";
-                const decision = await this.takeTurn(turn);
+                const decision = await this.takeTurn(turn, turn.autoContinue);
                 if (signal.aborted) {
                     outcome = "aborted";
                     break;
@@ -409,13 +435,20 @@ export class Session {
                 }
                 stage = "persistence";
                 if (this.flushPendingTurnMessages(runtime)) {
+                    turn.autoContinue = false;
                     round = 0;
                     continue;
                 }
                 if (decision === "complete") {
+                    if (this.meta.goal && !this.goalFinished) {
+                        turn.autoContinue = true;
+                        round = 0;
+                        continue;
+                    }
                     outcome = "completed";
                     break;
                 }
+                turn.autoContinue = false;
                 round += 1;
             }
         } catch (error) {
@@ -539,6 +572,62 @@ export class Session {
         }
     }
 
+    setGoal(content: string, emitUpdate = true): JarvixGoal {
+        const goal = updateSessionGoal(this.meta.id, content);
+        this.meta.goal = goal;
+        this.goalFinished = false;
+        if (emitUpdate) {
+            this.emitGoal();
+        }
+        return goal;
+    }
+
+    clearGoal(emitUpdate = true): void {
+        clearSessionGoal(this.meta.id);
+        delete this.meta.goal;
+        this.goalFinished = false;
+        if (emitUpdate) {
+            this.emitGoal();
+        }
+    }
+
+    async finishGoal(signal: AbortSignal): Promise<GoalFinishResult> {
+        const runtime = this.lastRuntime;
+        if (!this.meta.goal) {
+            return {
+                passed: false,
+                reason: "There is no active goal."
+            };
+        }
+        if (!runtime) {
+            return {
+                passed: false,
+                reason: "The session runtime is unavailable."
+            };
+        }
+        const verification = await this.goalVerifier.verify({
+            sessionId: this.meta.id,
+            goal: this.meta.goal.content,
+            permission: this.meta.permission,
+            workingDirectories: runtime.workingDirectories ?? [],
+            llm: runtime.llm,
+            config: runtime.config,
+            tools: this.tools,
+            permissions: this.permissions,
+            signal,
+            emit: runtime.emit,
+            logger: this.logger
+        });
+        if (verification.passed) {
+            this.clearGoal();
+            this.goalFinished = true;
+        }
+        return {
+            passed: verification.passed,
+            reason: verifierResultText(verification)
+        };
+    }
+
     injectPrompt(question: string, promptId: string): boolean {
         const text = question.trim();
         const id = promptId.trim();
@@ -603,7 +692,8 @@ export class Session {
     }
 
     private async takeTurn(
-        turn: TurnContext
+        turn: TurnContext,
+        autoContinue: boolean
     ): Promise<TurnDecision> {
         const { runtime, signal, run } = turn;
         if (signal.aborted) {
@@ -617,7 +707,15 @@ export class Session {
         const turnId = `${run.runId}:t${turnIndex}`;
         const streamStartedAt = performance.now();
         const streamStartedAtMs = Date.now();
-        const messages = this.messagesForRequest(runtime.workingDirectories ?? []);
+        const requestContext = this.contextManager.prepareRequest(
+            this.history,
+            runtime.workingDirectories ?? [],
+            {
+                goal: this.meta.goal?.content,
+                requireFinishGoal: autoContinue
+            }
+        );
+        const messages = requestContext.messages;
         const contextTokensBefore = this.contextTokens(
             turn.contextWindow,
             runtime.workingDirectories ?? []
@@ -655,6 +753,7 @@ export class Session {
         try {
             for await (const event of runtime.llm.stream({
                 ...turn.request,
+                systemPrompt: requestContext.systemPrompt,
                 tools: this.registeredTools(),
                 messages,
                 signal,
@@ -892,6 +991,9 @@ export class Session {
             return "failed";
         }
 
+        if (this.goalFinished) {
+            return "complete";
+        }
         return toolCalls.length > 0 ? "continue" : "complete";
     }
 
@@ -903,7 +1005,11 @@ export class Session {
     }
 
     providerContext(workingDirectories: readonly string[] = []): JarvixProviderContext {
-        return this.contextManager.prepareRequest(this.history, workingDirectories);
+        return this.contextManager.prepareRequest(
+            this.history,
+            workingDirectories,
+            { goal: this.meta.goal?.content }
+        );
     }
 
     contextUsage(
@@ -914,7 +1020,8 @@ export class Session {
             contextWindow,
             history: this.history,
             workingDirectories,
-            tools: this.registeredTools()
+            tools: this.registeredTools(),
+            goal: this.meta.goal?.content
         });
     }
 
@@ -1102,13 +1209,6 @@ export class Session {
         if (message) {
             this.history.unshift(message);
         }
-    }
-
-    private messagesForRequest(workingDirectories: readonly string[]): LlmMessage[] {
-        return this.contextManager.prepareRequest(
-            this.history,
-            workingDirectories
-        ).messages;
     }
 
     private appendEnvironmentReminderIfChanged(
@@ -1411,6 +1511,18 @@ export class Session {
         });
     }
 
+    private emitGoal(): void {
+        const runtime = this.lastRuntime;
+        if (!runtime) {
+            return;
+        }
+        runtime.emit({
+            type: "goal.updated",
+            goal: this.meta.goal ?? null
+        });
+        this.emitContextUsageFor(runtime, this.contextWindow);
+    }
+
     private queueBackgroundExitNotice(
         runtime: SessionRuntime,
         sessionId: string,
@@ -1462,6 +1574,7 @@ export class Session {
             timestamp: Date.now()
         };
         this.append(message);
+        this.goalFinished = false;
         if (this.activeRun) {
             this.activeRun.injectedPrompts += 1;
         }

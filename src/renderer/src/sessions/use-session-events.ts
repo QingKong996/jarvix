@@ -9,6 +9,7 @@ import type { JarvixBridge } from "../../../protocol/ipc.ts";
 import type { PermissionRequest } from "../../../protocol/permission.ts";
 import type { JarvixProject } from "../../../protocol/project.ts";
 import type {
+    JarvixGoal,
     JarvixSession,
     JarvixSessionSummary
 } from "../../../protocol/session.ts";
@@ -29,6 +30,7 @@ export type SessionEventsOptions = {
     activateSession: (session: JarvixSession | null) => void;
     clearPermissionRequest: (sessionId?: string, requestId?: string) => void;
     updateSessionName: (sessionId: string, name: string) => void;
+    updateGoalState: (goal: JarvixGoal | null) => void;
     setProjects: Dispatch<SetStateAction<JarvixProject[]>>;
     setSessions: Dispatch<SetStateAction<JarvixSessionSummary[]>>;
     setArchivedSessions: Dispatch<SetStateAction<JarvixSessionSummary[]>>;
@@ -47,6 +49,7 @@ export function useSessionEvents(options: SessionEventsOptions): void {
         activateSession,
         clearPermissionRequest,
         updateSessionName,
+        updateGoalState,
         setProjects,
         setSessions,
         setArchivedSessions,
@@ -91,6 +94,12 @@ export function useSessionEvents(options: SessionEventsOptions): void {
                     )) {
                         clearPermissionRequest(batch.sessionId, event.requestId);
                     }
+                }
+                if (
+                    event.type === "goal.updated" &&
+                    batch.sessionId === activeSessionIdRef.current
+                ) {
+                    updateGoalState(event.goal);
                 }
             }
             if (providerContextChanged) {
@@ -155,6 +164,7 @@ export function useSessionEvents(options: SessionEventsOptions): void {
         setProviderContextRevision,
         setReady,
         setSessions,
+        updateGoalState,
         updateSessionName
     ]);
 }

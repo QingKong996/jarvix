@@ -11,6 +11,7 @@ import {
 } from "../protocol/permission.ts";
 import { createProjectInputSchema } from "../protocol/project.ts";
 import {
+    sessionGoalContentSchema,
     sessionContextSchema,
     sessionNameSchema,
     type JarvixSessionContext
@@ -116,8 +117,8 @@ export function registerIpc(dependencies: IpcDependencies): void {
         assertSender(event);
         const request = requirePayload(payload, "Invalid request payload");
         const { question, sessionId } = request;
-        if (typeof question !== "string" || question.trim().length === 0) {
-            throw new Error("Question must be a non-empty string");
+        if (typeof question !== "string") {
+            throw new Error("Question must be a string");
         }
         return jarvix.request(question, requireSessionId(sessionId));
     });
@@ -281,6 +282,24 @@ export function registerIpc(dependencies: IpcDependencies): void {
     handle(IPC_CHANNELS.sessionDelete, (event, sessionId: unknown) => {
         assertSender(event);
         jarvix.deleteSession(requireSessionId(sessionId));
+    });
+
+    handle(IPC_CHANNELS.sessionGoalSet, (event, payload: unknown) => {
+        assertSender(event);
+        const request = requirePayload(payload, "Invalid goal payload");
+        const content = sessionGoalContentSchema.safeParse(request.content);
+        if (!content.success) {
+            throw new Error("Invalid goal content");
+        }
+        return jarvix.setGoal(
+            requireSessionId(request.sessionId),
+            content.data
+        );
+    });
+
+    handle(IPC_CHANNELS.sessionGoalClear, (event, sessionId: unknown) => {
+        assertSender(event);
+        jarvix.clearGoal(requireSessionId(sessionId));
     });
 
     handle(IPC_CHANNELS.sessionOpen, (event, sessionId: unknown) => {

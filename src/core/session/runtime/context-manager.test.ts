@@ -63,3 +63,31 @@ test("restores the leading environment context and hides it from persisted histo
     ]);
     expect(manager.visibleHistory([environment, user])).toEqual([user]);
 });
+
+test("appends the hidden goal to the latest request and only adds the finish prompt when continuing", () => {
+    const manager = new DefaultContextManager(() => "read-only");
+    manager.ensureEnvironmentContext([]);
+
+    const initial = manager.prepareRequest([], [], {
+        goal: "Ship feature A"
+    });
+    expect(initial.messages.at(-1)).toMatchObject({
+        role: "system",
+        context: "goal"
+    });
+    expect(initial.messages.at(-1)).toEqual(expect.objectContaining({
+        content: expect.stringContaining("<goal>\nShip feature A\n</goal>")
+    }));
+    expect(initial.systemPrompt).not.toContain("call finish_goal");
+
+    const continuation = manager.prepareRequest([], [], {
+        goal: "Ship feature A",
+        requireFinishGoal: true
+    });
+    expect(continuation.systemPrompt).toContain("call finish_goal explicitly");
+    expect(continuation.messages.at(-1)).toMatchObject({
+        role: "system",
+        context: "goal"
+    });
+    expect(manager.visibleHistory(continuation.messages)).toEqual([]);
+});

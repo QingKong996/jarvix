@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, test, vi } from "vitest";
 import type { LlmAdapter } from "./llm/index.ts";
+import type { LlmRequest } from "./llm/adapter.ts";
 import type {
     LlmAssistantMessage,
     LlmMessage,
@@ -72,6 +73,22 @@ function assistantMessage(text: string): LlmAssistantMessage {
         },
         stopReason: "stop",
         timestamp: Date.now()
+    };
+}
+
+function toolCallMessage(
+    name: string,
+    arguments_: Record<string, unknown>
+): LlmAssistantMessage {
+    return {
+        ...assistantMessage(""),
+        content: [{
+            type: "toolCall",
+            id: `call-${name}`,
+            name,
+            arguments: arguments_
+        }],
+        stopReason: "toolUse"
     };
 }
 
@@ -607,4 +624,158 @@ test("persists permissions in session metadata", () => {
     expect(reloaded.getPermission(session.meta.id)).toBe("full-access");
     expect(loadSession(session.meta.id, sessionDirectory)?.meta.permission)
         .toBe("full-access");
+});
+
+test("emits each goal change and context refresh exactly once", async () => {
+    home.path = join(base, "goal-events-home");
+    const jarvix = new Jarvix({
+        llm: fakeLlm("ok", []),
+        config: TEST_CONFIG
+    });
+    const session = jarvix.createSession({}, SESSION_NAME);
+    await jarvix.request("warm the session", session.meta.id);
+
+    const goalEvents: Array<unknown> = [];
+    let contextUsageEvents = 0;
+    jarvix.subscribe((event) => {
+        if (event.type === "goal.updated") {
+            goalEvents.push(event.goal);
+        } else if (event.type === "context.usage") {
+            contextUsageEvents += 1;
+        }
+    });
+
+    const first = jarvix.setGoal(session.meta.id, "First goal");
+    const second = jarvix.setGoal(session.meta.id, "Second goal");
+    jarvix.clearGoal(session.meta.id);
+
+    expect(goalEvents).toEqual([first, second, null]);
+    expect(contextUsageEvents).toBe(3);
+});
+
+test("restores a goal without running it and uses a fresh verifier for finish_goal", async () => {
+    home.path = join(base, "goal-home");
+    const requests: LlmRequest[] = [];
+    const llm: LlmAdapter = {
+        getModel: () => MODEL,
+        stream(request) {
+            requests.push({
+                ...request,
+                messages: [...request.messages]
+            });
+            const verifier = request.systemPrompt?.includes("independent goal verifier") === true;
+            const message = verifier
+                ? toolCallMessage("verify_result", {
+                    passed: true,
+                    reason: "The result is present."
+                })
+                : toolCallMessage("finish_goal", {});
+            return (async function* (): AsyncIterable<LlmStreamEvent> {
+                yield { type: "start" };
+                yield { type: "done", message };
+            })();
+        }
+    };
+    const jarvix = new Jarvix({ llm, config: TEST_CONFIG });
+    const session = jarvix.createSession({}, SESSION_NAME);
+    jarvix.setGoal(session.meta.id, "Ship feature A");
+
+    const restarted = new Jarvix({ llm, config: TEST_CONFIG });
+    expect(restarted.loadSession(session.meta.id)?.meta.goal?.content)
+        .toBe("Ship feature A");
+    expect(requests).toHaveLength(0);
+
+    await restarted.request("", session.meta.id);
+
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.messages.at(-1)).toMatchObject({
+        role: "system",
+        context: "goal",
+        content: expect.stringContaining("<goal>\nShip feature A\n</goal>")
+    });
+    expect(requests[0]?.tools?.map((tool) => tool.name)).toContain("finish_goal");
+    expect(requests[1]?.systemPrompt).toContain("independent goal verifier");
+    expect(requests[1]?.tools?.map((tool) => tool.name)).toContain("verify_result");
+    expect(requests[1]?.tools?.map((tool) => tool.name)).not.toContain("finish_goal");
+    expect(requests[1]?.tools?.map((tool) => tool.name)).not.toContain("update_goal");
+    expect(requests[1]?.messages.map((message) => message.role)).toEqual([
+        "system",
+        "user"
+    ]);
+    expect(requests[1]?.messages[1]).toMatchObject({
+        role: "user",
+        content: "<goal>\nShip feature A\n</goal>"
+    });
+    expect(restarted.loadSession(session.meta.id)?.meta.goal).toBeUndefined();
+});
+
+test("continues an injected prompt normally after goal verification succeeds", async () => {
+    home.path = join(base, "goal-injected-prompt-home");
+    const requests: LlmRequest[] = [];
+    let mainCalls = 0;
+    let releaseVerifier!: () => void;
+    let verifierStarted!: () => void;
+    const verifierGate = new Promise<void>((resolve) => {
+        releaseVerifier = resolve;
+    });
+    const verifierReady = new Promise<void>((resolve) => {
+        verifierStarted = resolve;
+    });
+    const llm: LlmAdapter = {
+        getModel: () => MODEL,
+        stream(request) {
+            requests.push({
+                ...request,
+                messages: [...request.messages]
+            });
+            if (request.systemPrompt?.includes("independent goal verifier")) {
+                verifierStarted();
+                return (async function* (): AsyncIterable<LlmStreamEvent> {
+                    await verifierGate;
+                    yield {
+                        type: "done",
+                        message: toolCallMessage("verify_result", {
+                            passed: true,
+                            reason: "The goal is complete."
+                        })
+                    };
+                })();
+            }
+
+            mainCalls += 1;
+            const message = mainCalls === 1
+                ? toolCallMessage("finish_goal", {})
+                : mainCalls === 2
+                    ? toolCallMessage("get_local_time", {})
+                    : assistantMessage("Follow-up complete.");
+            return (async function* (): AsyncIterable<LlmStreamEvent> {
+                yield { type: "done", message };
+            })();
+        }
+    };
+    const jarvix = new Jarvix({ llm, config: TEST_CONFIG });
+    const session = jarvix.createSession({}, SESSION_NAME);
+    jarvix.setGoal(session.meta.id, "Ship feature A");
+
+    const request = jarvix.request("", session.meta.id);
+    await verifierReady;
+    const injected = jarvix.injectPrompt(
+        "Now explain the result",
+        session.meta.id,
+        "prompt-after-verification"
+    );
+    releaseVerifier();
+    await request;
+
+    expect(injected).toBe(true);
+    expect(mainCalls).toBe(3);
+    expect(requests).toHaveLength(4);
+    expect(requests[2]?.messages.some((message) => (
+        message.role === "user" &&
+        message.content === "Now explain the result"
+    ))).toBe(true);
+    expect(jarvix.loadSession(session.meta.id)?.messages.at(-1)).toMatchObject({
+        role: "assistant",
+        content: [{ type: "text", text: "Follow-up complete." }]
+    });
 });

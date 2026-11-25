@@ -8,11 +8,16 @@ import type { JarvixEvent, JarvixListener } from "../protocol/event.ts";
 import type { JarvixProject } from "../protocol/project.ts";
 import type { JarvixProviderContext } from "../protocol/provider-context.ts";
 import type {
+    JarvixGoal,
     JarvixSession,
     JarvixSessionContext,
     JarvixSessionSummary
 } from "../protocol/session.ts";
-import { sessionContextSchema, sessionNameSchema } from "../protocol/session.ts";
+import {
+    sessionContextSchema,
+    sessionGoalContentSchema,
+    sessionNameSchema
+} from "../protocol/session.ts";
 import { resolveConfiguredModel } from "../protocol/providers.ts";
 import {
     DEFAULT_PERMISSION_MODE,
@@ -163,6 +168,25 @@ export class Jarvix {
     getProviderContext(sessionId: string): JarvixProviderContext {
         const session = this.sessions.require(sessionId);
         return session.providerContext(workingDirectoriesFor(session.meta));
+    }
+
+    setGoal(sessionId: string, content: string): JarvixGoal {
+        const session = this.sessions.require(sessionId);
+        const goal = session.setGoal(
+            sessionGoalContentSchema.parse(content),
+            false
+        );
+        this.emit(sessionId, { type: "goal.updated", goal });
+        this.emitContextUsage(session);
+        return goal;
+    }
+
+    clearGoal(sessionId: string): void {
+        const session = this.sessions.require(sessionId);
+        session.abort();
+        session.clearGoal(false);
+        this.emit(sessionId, { type: "goal.updated", goal: null });
+        this.emitContextUsage(session);
     }
 
     setPermission(sessionId: string, permission: PermissionMode): PermissionMode {

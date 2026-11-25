@@ -3,12 +3,15 @@ import { randomUUID } from "node:crypto";
 import type { LlmMessage, LlmUserMessage } from "../../../protocol/llm.ts";
 import { permissionModeOrDefault } from "../../../protocol/permission.ts";
 import {
+    type JarvixGoal,
     type JarvixSessionContext,
     type JarvixSessionMeta,
+    sessionGoalContentSchema,
     sessionContextSchema
 } from "../../../protocol/session.ts";
 
 export const SESSION_HEADER_MAX_BYTES = 1024 * 1024;
+export const SESSION_FORMAT_VERSION = 5;
 
 export type SessionMessageRecord = {
     type: "message";
@@ -98,6 +101,7 @@ export function parseSessionMeta(value: unknown): JarvixSessionMeta | null {
         value.status === "archived" &&
         archivedAt !== undefined
     );
+    const goal = parseSessionGoal(value.goal);
     return {
         type: "session",
         version: value.version,
@@ -107,7 +111,29 @@ export function parseSessionMeta(value: unknown): JarvixSessionMeta | null {
         status: archived ? "archived" : "active",
         permission: permissionModeOrDefault(value.permission),
         ...(archived ? { archivedAt } : {}),
+        ...(goal ? { goal } : {}),
         ...(parsedContext.success ? parsedContext.data : {})
+    };
+}
+
+function parseSessionGoal(value: unknown): JarvixGoal | null {
+    if (!isRecord(value)) {
+        return null;
+    }
+    const content = sessionGoalContentSchema.safeParse(value.content);
+    if (
+        !content.success ||
+        typeof value.createdAt !== "number" ||
+        !Number.isFinite(value.createdAt) ||
+        typeof value.updatedAt !== "number" ||
+        !Number.isFinite(value.updatedAt)
+    ) {
+        return null;
+    }
+    return {
+        content: content.data,
+        createdAt: value.createdAt,
+        updatedAt: value.updatedAt
     };
 }
 
@@ -182,7 +208,8 @@ function isLlmMessage(value: unknown): value is LlmMessage {
     if (value.role === "system") {
         return typeof value.content === "string" && (
             value.context === undefined ||
-            value.context === "environment"
+            value.context === "environment" ||
+            value.context === "goal"
         ) && (
             value.environmentKey === undefined ||
             typeof value.environmentKey === "string"

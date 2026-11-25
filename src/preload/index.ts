@@ -57,6 +57,11 @@ const bridge: JarvixBridge = {
     archiveSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.sessionArchive, sessionId),
     unarchiveSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.sessionUnarchive, sessionId),
     deleteSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.sessionDelete, sessionId),
+    setGoal: (sessionId, content) => ipcRenderer.invoke(
+        IPC_CHANNELS.sessionGoalSet,
+        { sessionId, content }
+    ),
+    clearGoal: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.sessionGoalClear, sessionId),
     openSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.sessionOpen, sessionId),
     releaseSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.sessionRelease, sessionId),
     getProviderContext: (sessionId) => ipcRenderer.invoke(

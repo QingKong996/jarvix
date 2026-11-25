@@ -133,6 +133,7 @@ function applyEvent(state: TranscriptState, event: JarvixEvent): TranscriptState
         case "backgroundTask.discard":
         case "log":
         case "session.renamed":
+        case "goal.updated":
         case "context.usage":
         case "permission.request":
         case "permission.resolved":

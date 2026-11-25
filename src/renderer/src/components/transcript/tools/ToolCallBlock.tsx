@@ -6,6 +6,10 @@ import { useTranslation } from "react-i18next";
 import { cn } from "cn";
 import type { ToolCallEndReason } from "../../../../../runtime/tools/types.ts";
 import type { ToolCallViewData } from "../../../../../runtime/tools/view.ts";
+import {
+    FINISH_GOAL_TOOL,
+    UPDATE_GOAL_TOOL
+} from "../../../../../runtime/tools/goal/goal-tools.ts";
 import { ApplyPatchDiff } from "./ApplyPatchDiff.tsx";
 import { ShellToolCall } from "./ShellToolCall.tsx";
 import { LocalTimeToolCall, SleepToolCall } from "./TimeToolCall.tsx";
@@ -123,6 +127,12 @@ function toolLabel(toolName: string, data: ToolCallViewData, t: TFunction<"trans
     }
     if (data.kind === "image.view_image") {
         return t("tools.viewImage");
+    }
+    if (toolName === UPDATE_GOAL_TOOL) {
+        return t("tools.updateGoal");
+    }
+    if (toolName === FINISH_GOAL_TOOL) {
+        return t("tools.finishGoal");
     }
     return `${t("tools.generic")} · ${toolName}`;
 }

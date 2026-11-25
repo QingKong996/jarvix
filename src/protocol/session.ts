@@ -7,6 +7,29 @@ export const SESSION_NAME_MAX_LENGTH = 80;
 
 export const sessionNameSchema = z.string().trim().min(1).max(SESSION_NAME_MAX_LENGTH);
 
+export const SESSION_GOAL_MAX_LENGTH = 64_000;
+
+export const sessionGoalContentSchema = z
+    .string()
+    .trim()
+    .min(1)
+    .max(SESSION_GOAL_MAX_LENGTH);
+
+export type JarvixGoal = {
+    content: string;
+    createdAt: number;
+    updatedAt: number;
+};
+
+export function sessionGoalFrom(content: string, previous?: JarvixGoal): JarvixGoal {
+    const now = Date.now();
+    return {
+        content: sessionGoalContentSchema.parse(content),
+        createdAt: previous?.createdAt ?? now,
+        updatedAt: now
+    };
+}
+
 export const SESSION_STATUSES = ["active", "archived"] as const;
 export type JarvixSessionStatus = (typeof SESSION_STATUSES)[number];
 
@@ -42,6 +65,7 @@ export type JarvixSessionMeta = JarvixSessionContext & {
     status: JarvixSessionStatus;
     archivedAt?: number;
     permission: PermissionMode;
+    goal?: JarvixGoal;
 };
 
 /** A session loaded into memory. */
@@ -59,4 +83,5 @@ export type JarvixSessionSummary = JarvixSessionContext & {
     updatedAt: number;
     status: JarvixSessionStatus;
     archivedAt?: number;
+    goal?: JarvixGoal;
 };

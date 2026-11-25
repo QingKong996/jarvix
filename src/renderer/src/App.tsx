@@ -50,6 +50,7 @@ export function App() {
         sessionContext,
         sessionPermission,
         contextUsage,
+        goal,
         providerContextRevision,
         permissionRequest,
         activeSessionId,
@@ -69,7 +70,9 @@ export function App() {
         moveSessionToProject,
         selectSession,
         send,
-        stop
+        stop,
+        submitGoal,
+        clearGoal
     } = useSessions();
 
     useEffect(() => {
@@ -175,8 +178,11 @@ export function App() {
                                     sessionContext={sessionContext}
                                     sessionPermission={sessionPermission}
                                     contextUsage={contextUsage}
+                                    goal={goal}
                                     permissionRequest={permissionRequest}
                                     onSubmit={send}
+                                    onGoalSubmit={submitGoal}
+                                    onGoalClear={clearGoal}
                                     onStop={stop}
                                     config={config}
                                     onConfigChange={handleConfigChange}

@@ -281,6 +281,7 @@ function readSessionSummary(
         updatedAt: readLastMessageTimestamp(file) ?? meta.createdAt,
         status: meta.status,
         ...(meta.archivedAt !== undefined ? { archivedAt: meta.archivedAt } : {}),
+        ...(meta.goal ? { goal: meta.goal } : {}),
         ...(meta.projectId ? { projectId: meta.projectId } : {}),
         ...(meta.workingDirectory ? { workingDirectory: meta.workingDirectory } : {})
     };

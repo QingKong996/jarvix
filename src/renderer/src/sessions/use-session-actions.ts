@@ -12,6 +12,7 @@ import {
 } from "../../../protocol/permission.ts";
 import type { JarvixProject } from "../../../protocol/project.ts";
 import type {
+    JarvixGoal,
     JarvixSession,
     JarvixSessionContext
 } from "../../../protocol/session.ts";
@@ -34,6 +35,7 @@ export type SessionActionsOptions = {
     releaseSession: (sessionId: string | null) => void;
     updateContextState: (context: JarvixSessionContext) => void;
     updatePermissionState: (permission: PermissionMode) => void;
+    updateGoalState: (goal: JarvixGoal | null) => void;
     updateSessionName: (sessionId: string, name: string) => void;
     refreshProjects: () => Promise<void>;
     refreshSessions: () => Promise<void>;
@@ -56,6 +58,7 @@ export function useSessionActions(options: SessionActionsOptions) {
         releaseSession,
         updateContextState,
         updatePermissionState,
+        updateGoalState,
         updateSessionName,
         refreshProjects,
         refreshSessions,
@@ -73,6 +76,7 @@ export function useSessionActions(options: SessionActionsOptions) {
         clearPermissionRequest();
         updateContextState(projectId ? { projectId } : {});
         updatePermissionState(DEFAULT_PERMISSION_MODE);
+        updateGoalState(null);
         setContextUsage(null);
         hydrate([]);
         releaseSession(previousSessionId);
@@ -87,6 +91,7 @@ export function useSessionActions(options: SessionActionsOptions) {
         setActiveSessionId,
         setContextUsage,
         updateContextState,
+        updateGoalState,
         updatePermissionState
     ]);
 
