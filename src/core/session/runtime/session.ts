@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { isAbsolute } from "node:path";
 import type {
     LlmAssistantMessage,
     LlmMessage,
@@ -89,6 +90,8 @@ type TurnContext = {
     request: Omit<LlmRequest, "messages" | "signal" | "tools">;
     run: RunTelemetry;
     autoContinue: boolean;
+    sandboxPaths: readonly string[];
+    sandboxPathsExempted: boolean;
 };
 
 type RunTelemetry = {
@@ -223,7 +226,11 @@ export class Session {
         });
     }
 
-    async request(question: string, runtime: SessionRuntime): Promise<void> {
+    async request(
+        question: string,
+        runtime: SessionRuntime,
+        sandboxPaths: readonly string[] = []
+    ): Promise<void> {
         if (this.running) {
             this.logger.warn("Rejected request because the session is busy", {
                 sessionId: this.meta.id
@@ -404,7 +411,9 @@ export class Session {
                     maxTokens: definition.maxTokens
                 },
                 run,
-                autoContinue: false
+                autoContinue: false,
+                sandboxPaths,
+                sandboxPathsExempted: false
             };
             stage = "compaction";
             await this.compactContextIfNeeded(turn);
@@ -683,6 +692,30 @@ export class Session {
         return accepted;
     }
 
+    exemptSandboxPaths(paths: readonly string[]): void {
+        const unique = [...new Set(paths)];
+        if (unique.length === 0 || this.meta.permission === "full-access") {
+            return;
+        }
+        const invalid = unique.find((path) => !isAbsolute(path));
+        if (invalid) {
+            throw new Error(`Sandbox path must be absolute: ${invalid}`);
+        }
+        const writable = this.meta.permission === "project-read-write"
+            || this.meta.permission === "auto-review";
+        this.permissions.grantDirectories(unique.flatMap((path) => [
+            { action: "enable" as const, access: "read" as const, path },
+            ...(writable
+                ? [{ action: "enable" as const, access: "write" as const, path }]
+                : [])
+        ]));
+        this.logger.info("Sandbox paths exempted", {
+            sessionId: this.meta.id,
+            pathCount: unique.length,
+            writable
+        });
+    }
+
     registerToolManager(manager: ToolManager): void {
         this.toolRunner.registerToolManager(manager);
     }
@@ -954,6 +987,10 @@ export class Session {
             durationMs: elapsedMs(streamStartedAt)
         });
         if (toolCalls.length > 0) {
+            if (!turn.sandboxPathsExempted) {
+                this.exemptSandboxPaths(turn.sandboxPaths);
+                turn.sandboxPathsExempted = true;
+            }
             const toolTelemetry = this.telemetryForToolCalls(
                 run,
                 turnId,
