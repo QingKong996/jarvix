@@ -4,6 +4,16 @@ export {
     DEFAULT_TOOL_MANAGER_ID
 } from "./default-manager.ts";
 export { createDefaultTools } from "./default-tools.ts";
+export {
+    createGoalToolManager,
+    FINISH_GOAL_TOOL,
+    GOAL_TOOL_MANAGER_ID,
+    UPDATE_GOAL_TOOL
+} from "./goal/goal-tools.ts";
+export type {
+    GoalFinishResult,
+    GoalToolHost
+} from "./goal/goal-tools.ts";
 export { BackgroundTaskManager } from "./shell/background-task-manager.ts";
 export { ShellSessionBudget } from "./shell/shell.ts";
 export { REQUEST_PERMISSION_TOOL } from "./request-permission/request-permission.ts";

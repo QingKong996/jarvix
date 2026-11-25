@@ -25,11 +25,17 @@ export type ContextRequest = {
     messages: LlmMessage[];
 };
 
+export type ContextRequestOptions = {
+    goal?: string;
+    requireFinishGoal?: boolean;
+};
+
 export type ContextManagerUsageInput = {
     contextWindow: number;
     history: readonly LlmMessage[];
     workingDirectories?: readonly string[];
     tools?: readonly LlmToolDefinition[];
+    goal?: string;
 };
 
 export interface ContextManager {
@@ -43,10 +49,41 @@ export interface ContextManager {
     ): EnvironmentReminder | null;
     prepareRequest(
         history: readonly LlmMessage[],
-        workingDirectories?: readonly string[]
+        workingDirectories?: readonly string[],
+        options?: ContextRequestOptions
     ): ContextRequest;
     visibleHistory(messages: readonly LlmMessage[]): LlmMessage[];
     estimateUsage(input: ContextManagerUsageInput): JarvixContextUsage;
+}
+
+const GOAL_CONTINUATION_PROMPT = [
+    "You are continuing an active goal automatically.",
+    "Do not stop after an interim response or claim that the goal is complete.",
+    "Continue working until the result is ready, then call finish_goal explicitly.",
+    "Only finish_goal can end the goal; it starts an independent verification."
+].join("\n");
+
+function systemPromptFor(
+    base: string,
+    options: ContextRequestOptions | undefined
+): string {
+    return options?.requireFinishGoal
+        ? `${base}\n\n${GOAL_CONTINUATION_PROMPT}`
+        : base;
+}
+
+function goalContextMessage(goal: string): LlmSystemMessage {
+    return {
+        role: "system",
+        content: [
+            "The active goal is:",
+            "<goal>",
+            goal,
+            "</goal>"
+        ].join("\n"),
+        context: "goal",
+        timestamp: Date.now()
+    };
 }
 
 export type ContextManagerFactory = (permission: () => PermissionMode) => ContextManager;
@@ -109,7 +146,8 @@ export class DefaultContextManager implements ContextManager {
 
     prepareRequest(
         history: readonly LlmMessage[],
-        workingDirectories: readonly string[] = []
+        workingDirectories: readonly string[] = [],
+        options: ContextRequestOptions = {}
     ): ContextRequest {
         const key = environmentKeyFor(this.permission(), workingDirectories);
         let messages: LlmMessage[];
@@ -130,21 +168,31 @@ export class DefaultContextManager implements ContextManager {
                 );
             }
         }
+        if (options.goal) {
+            messages.push(goalContextMessage(options.goal));
+        }
         return {
-            systemPrompt: this.systemPrompt,
+            systemPrompt: systemPromptFor(this.systemPrompt, options),
             messages
         };
     }
 
     visibleHistory(messages: readonly LlmMessage[]): LlmMessage[] {
-        return messages.filter((message) => !isEnvironmentContextMessage(message));
+        return messages.filter((message) => !(
+            message.role === "system" &&
+            (message.context === "environment" || message.context === "goal")
+        ));
     }
 
     estimateUsage(input: ContextManagerUsageInput): JarvixContextUsage {
         return estimateContextUsage({
             contextWindow: input.contextWindow,
             systemPrompt: this.systemPrompt,
-            messages: this.prepareRequest(input.history, input.workingDirectories).messages,
+            messages: this.prepareRequest(
+                input.history,
+                input.workingDirectories,
+                { goal: input.goal }
+            ).messages,
             tools: input.tools
         });
     }

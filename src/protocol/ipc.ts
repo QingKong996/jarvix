@@ -5,6 +5,7 @@ import type { JarvixProject } from "./project.ts";
 import type { JarvixProviderContext } from "./provider-context.ts";
 import type { ModelCatalog, ModelDefinition, ProviderModelSyncRequest } from "./providers.ts";
 import type {
+    JarvixGoal,
     JarvixSession,
     JarvixSessionContext,
     JarvixSessionSummary
@@ -32,6 +33,8 @@ export const IPC_CHANNELS = {
     sessionArchive: "jarvix:session:archive",
     sessionUnarchive: "jarvix:session:unarchive",
     sessionDelete: "jarvix:session:delete",
+    sessionGoalSet: "jarvix:session:goal:set",
+    sessionGoalClear: "jarvix:session:goal:clear",
     sessionOpen: "jarvix:session:open",
     sessionRelease: "jarvix:session:release",
     sessionProviderContext: "jarvix:session:provider-context",
@@ -90,6 +93,8 @@ export type JarvixBridge = {
     archiveSession(sessionId: string): Promise<void>;
     unarchiveSession(sessionId: string): Promise<void>;
     deleteSession(sessionId: string): Promise<void>;
+    setGoal(sessionId: string, content: string): Promise<JarvixGoal>;
+    clearGoal(sessionId: string): Promise<void>;
     openSession(sessionId: string): Promise<JarvixSession | null>;
     releaseSession(sessionId: string): Promise<boolean>;
     getProviderContext(sessionId: string): Promise<JarvixProviderContext>;

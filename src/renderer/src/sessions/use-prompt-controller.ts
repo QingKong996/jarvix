@@ -7,6 +7,7 @@ import {
 import type { JarvixBridge } from "../../../protocol/ipc.ts";
 import type { PermissionMode } from "../../../protocol/permission.ts";
 import type {
+    JarvixGoal,
     JarvixSession,
     JarvixSessionContext
 } from "../../../protocol/session.ts";
@@ -32,6 +33,8 @@ export type PromptControllerOptions = {
     requestInFlightRef: RefObject<boolean>;
     sessionContextRef: RefObject<JarvixSessionContext>;
     sessionPermissionRef: RefObject<PermissionMode>;
+    goalRef: RefObject<JarvixGoal | null>;
+    setGoal: (goal: JarvixGoal | null) => void;
     hasUserMessagesRef: RefObject<boolean>;
     requestEventGate: RequestEventGate;
     activateSession: (session: JarvixSession | null) => void;
@@ -52,6 +55,8 @@ export function usePromptController(options: PromptControllerOptions) {
         requestInFlightRef,
         sessionContextRef,
         sessionPermissionRef,
+        goalRef,
+        setGoal,
         hasUserMessagesRef,
         requestEventGate,
         activateSession,
@@ -61,7 +66,8 @@ export function usePromptController(options: PromptControllerOptions) {
 
     const runPrompt = useCallback(async (
         question: string,
-        initialSessionId: string | null
+        initialSessionId: string | null,
+        goalContent?: string
     ): Promise<void> => {
         if (!bridge) {
             return;
@@ -80,13 +86,21 @@ export function usePromptController(options: PromptControllerOptions) {
                 await refreshSessions();
                 sessionId = created.meta.id;
             }
+            if (goalContent !== undefined) {
+                const goal = await bridge.setGoal(sessionId, goalContent);
+                goalRef.current = goal;
+                setGoal(goal);
+            }
             requestSessionIdRef.current = sessionId;
             requestEventGate.resume(sessionId);
             setRunning(true);
-            beginTurn(question);
+            if (question.trim().length > 0) {
+                beginTurn(question);
+            }
             hasUserMessagesRef.current = true;
-            if (shouldAutoName) {
-                void bridge.autoNameSession(sessionId, question).catch(() => undefined);
+            const namingPrompt = question.trim() || goalContent;
+            if (shouldAutoName && namingPrompt) {
+                void bridge.autoNameSession(sessionId, namingPrompt).catch(() => undefined);
             }
             try {
                 await bridge.request(question, sessionId);
@@ -106,22 +120,25 @@ export function usePromptController(options: PromptControllerOptions) {
     }, [
         activateSession,
         bridge,
+        goalRef,
         hasUserMessagesRef,
         refreshSessions,
         requestEventGate,
         requestSessionIdRef,
         sessionContextRef,
         sessionPermissionRef,
+        setGoal,
         setBusy,
         setRunning
     ]);
 
     const startRequest = useCallback(async (
         question: string,
-        sessionId: string | null
+        sessionId: string | null,
+        goalContent?: string
     ): Promise<void> => {
         requestInFlightRef.current = true;
-        const request = runPrompt(question, sessionId);
+        const request = runPrompt(question, sessionId, goalContent);
         requestCompletionRef.current = request;
         try {
             await request;
@@ -134,11 +151,14 @@ export function usePromptController(options: PromptControllerOptions) {
 
     const send = useCallback(async (question: string): Promise<void> => {
         const normalized = question.trim();
-        if (!normalized || !bridge || !ready) {
+        if ((!normalized && !goalRef.current) || !bridge || !ready) {
             return;
         }
         const activeRequestSessionId = requestSessionIdRef.current;
         if (activeRequestSessionId) {
+            if (!normalized) {
+                return;
+            }
             const promptId = injectUserPrompt(normalized);
             try {
                 if (await bridge.injectPrompt(normalized, activeRequestSessionId, promptId)) {
@@ -165,10 +185,26 @@ export function usePromptController(options: PromptControllerOptions) {
         activeSessionIdRef,
         bridge,
         busy,
+        goalRef,
         ready,
         requestCompletionRef,
         requestInFlightRef,
         requestSessionIdRef,
+        startRequest
+    ]);
+
+    const submitGoal = useCallback(async (content: string): Promise<void> => {
+        const normalized = content.trim();
+        if (!normalized || !bridge || !ready || busy || requestInFlightRef.current) {
+            return;
+        }
+        await startRequest("", activeSessionIdRef.current, normalized);
+    }, [
+        activeSessionIdRef,
+        bridge,
+        busy,
+        ready,
+        requestInFlightRef,
         startRequest
     ]);
 
@@ -196,5 +232,43 @@ export function usePromptController(options: PromptControllerOptions) {
         setRunning
     ]);
 
-    return { send, stop };
+    const clearGoal = useCallback(async (): Promise<void> => {
+        const sessionId = activeSessionIdRef.current;
+        if (!bridge || !sessionId) {
+            goalRef.current = null;
+            setGoal(null);
+            return;
+        }
+        if (requestSessionIdRef.current === sessionId) {
+            stopTurn();
+            clearPermissionRequest(sessionId);
+            requestEventGate.pause(sessionId);
+            setRunning(false);
+            try {
+                await bridge.stopRequest(sessionId);
+            } catch {
+                requestEventGate.cancelPause(sessionId);
+            }
+        }
+        try {
+            await bridge.clearGoal(sessionId);
+        } catch {
+            return;
+        }
+        goalRef.current = null;
+        setGoal(null);
+        await refreshSessions();
+    }, [
+        activeSessionIdRef,
+        bridge,
+        clearPermissionRequest,
+        goalRef,
+        refreshSessions,
+        requestEventGate,
+        requestSessionIdRef,
+        setGoal,
+        setRunning
+    ]);
+
+    return { send, stop, submitGoal, clearGoal };
 }

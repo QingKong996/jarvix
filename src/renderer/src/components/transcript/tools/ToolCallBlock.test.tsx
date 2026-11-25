@@ -13,12 +13,13 @@ afterEach(() => {
 function renderTool(
     data: Extract<ToolCallViewData, { kind: "generic" }>,
     isError = false,
-    endReason: ToolCallEndReason | null = null
+    endReason: ToolCallEndReason | null = null,
+    toolName = "write_file"
 ): string {
     return renderToStaticMarkup(
         <I18nextProvider i18n={i18n}>
             <ToolCallBlock
-                toolName="write_file"
+                toolName={toolName}
                 data={data}
                 isError={isError}
                 endReason={endReason}
@@ -80,3 +81,18 @@ test.each([
         expect(html).toContain(expected);
     }
 );
+
+test.each([
+    ["update_goal", "更新目标"],
+    ["finish_goal", "结束目标"]
+] as const)("labels the %s goal tool", (toolName, label) => {
+    const html = renderTool({
+        kind: "generic",
+        name: toolName,
+        arguments: {},
+        output: "",
+        status: "completed"
+    }, false, null, toolName);
+
+    expect(html).toContain(label);
+});

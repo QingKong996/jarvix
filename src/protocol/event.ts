@@ -2,6 +2,7 @@ import type { LlmStreamEvent, LlmSystemMessage } from "./llm.ts";
 import type { ToolCallEndReason, ToolTaskEvent } from "../runtime/tools/types.ts";
 import type { ToolCallOutputDelta, ToolCallViewData } from "../runtime/tools/view.ts";
 import type { JarvixContextUsage } from "./context-usage.ts";
+import type { JarvixGoal } from "./session.ts";
 import type {
     PermissionDecision,
     PermissionRequest
@@ -46,6 +47,9 @@ export type JarvixEvent = LlmStreamEvent
   } | {
     type: "session.renamed";
     name: string;
+  } | {
+    type: "goal.updated";
+    goal: JarvixGoal | null;
   } | {
     type: "prompt.injected";
     promptId: string;

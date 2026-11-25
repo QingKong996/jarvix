@@ -14,13 +14,13 @@ import {
 import type { SandboxPreflight } from "../permissions/sandbox-launch.ts";
 import { SessionPermissions } from "../permissions/session-permissions.ts";
 import {
+    createDefaultToolManager,
+    createGoalToolManager,
+    DEFAULT_TOOL_MANAGER_ID,
+    GOAL_TOOL_MANAGER_ID,
+    ShellSessionBudget,
     ToolManagerRegistry,
     type ToolManager
-} from "../../runtime/tools/index.ts";
-import {
-    createDefaultToolManager,
-    DEFAULT_TOOL_MANAGER_ID,
-    ShellSessionBudget
 } from "../../runtime/tools/index.ts";
 import {
     createDefaultContextManager,
@@ -377,6 +377,13 @@ export class SessionManager {
                 this.logger,
                 this.observer
             );
+            tools.registerManager(createGoalToolManager({
+                getGoal: () => instance.meta.goal?.content,
+                updateGoal: (content) => {
+                    instance.setGoal(content);
+                },
+                finishGoal: (signal) => instance.finishGoal(signal)
+            }));
         } catch (error) {
             tools.dispose();
             if (!existingPermissions) {
@@ -404,7 +411,10 @@ export class SessionManager {
     }
 
     private assertToolManagerAvailable(managerId: string): void {
-        if (managerId === DEFAULT_TOOL_MANAGER_ID) {
+        if (
+            managerId === DEFAULT_TOOL_MANAGER_ID ||
+            managerId === GOAL_TOOL_MANAGER_ID
+        ) {
             throw new Error(`Tool manager id is reserved: ${managerId}`);
         }
         if (this.toolManagers.has(managerId)) {

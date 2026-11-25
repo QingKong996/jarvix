@@ -51,6 +51,25 @@
         },
         "model": "模型",
         "reasoning": "推理等级",
+        "commands": {
+            "label": "命令",
+            "goal": {
+                "label": "目标",
+                "description": "设置或更新当前会话目标"
+            }
+        },
+        "goal": {
+            "button": "目标",
+            "placeholder": "描述你的目标，并设置可衡量的预期成果，以取得最佳效果",
+            "running": "目标进行中",
+            "paused": "目标已暂停",
+            "pausedStalled": "目标已停滞",
+            "delete": "删除目标",
+            "pause": "暂停目标",
+            "resume": "继续目标",
+            "edit": "编辑目标",
+            "exitEdit": "退出目标编辑"
+        },
         "reasoningLevels": {
             "none": "关闭",
             "minimal": "极低",
@@ -169,6 +188,8 @@
         "viewImage": "查看图片",
         "localTime": "本地时间",
         "sleep": "等待",
+        "updateGoal": "更新目标",
+        "finishGoal": "结束目标",
         "localTimeDetails": {
             "utcOffset": "UTC 偏移",
             "unixTimestamp": "Unix 时间戳"

@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 import type { JarvixSessionMeta } from "../../../protocol/session.ts";
+import type { LlmMessage } from "../../../protocol/llm.ts";
 import {
     assertSessionMetaFits,
     serializeRecord,
@@ -65,6 +66,13 @@ export function appendSessionRecord(file: string, record: SessionRecord): void {
     appendFileSync(file, `${trailingRecordSeparator(file)}${serializeRecord(record)}`, {
         encoding: "utf8",
         mode: SESSION_FILE_MODE
+    });
+}
+
+export function appendSessionMessageToFile(file: string, message: LlmMessage): void {
+    appendSessionRecord(file, {
+        type: "message",
+        message
     });
 }
 

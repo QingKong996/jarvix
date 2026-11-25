@@ -8,6 +8,7 @@ import {
 import type { JarvixProject } from "../../protocol/project.ts";
 import {
     sessionContextFrom,
+    type JarvixGoal,
     type JarvixSession,
     type JarvixSessionContext,
     type JarvixSessionSummary
@@ -40,6 +41,7 @@ export function useSessions() {
         DEFAULT_PERMISSION_MODE
     );
     const [contextUsage, setContextUsage] = useState<JarvixContextUsage | null>(null);
+    const [goal, setGoal] = useState<JarvixGoal | null>(null);
     const [providerContextRevision, setProviderContextRevision] = useState(0);
     const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
     const [busy, setBusy] = useState(false);
@@ -52,6 +54,7 @@ export function useSessions() {
     const requestInFlightRef = useRef(false);
     const sessionContextRef = useRef<JarvixSessionContext>({});
     const sessionPermissionRef = useRef<PermissionMode>(DEFAULT_PERMISSION_MODE);
+    const goalRef = useRef<JarvixGoal | null>(null);
     const permissionRequestRef = useRef<ActivePermissionRequest | null>(null);
     const hasUserMessagesRef = useRef(false);
 
@@ -69,6 +72,11 @@ export function useSessions() {
     const updatePermissionState = useCallback((permission: PermissionMode): void => {
         sessionPermissionRef.current = permission;
         setSessionPermission(permission);
+    }, []);
+
+    const updateGoalState = useCallback((next: JarvixGoal | null): void => {
+        goalRef.current = next;
+        setGoal(next);
     }, []);
 
     const clearPermissionRequest = useCallback((
@@ -101,10 +109,16 @@ export function useSessions() {
         setActiveSessionId(session?.meta.id ?? null);
         updateContextState(session ? sessionContextFrom(session.meta) : {});
         updatePermissionState(session?.meta.permission ?? DEFAULT_PERMISSION_MODE);
+        updateGoalState(session?.meta.goal ?? null);
         setContextUsage(session?.contextUsage ?? null);
         clearPermissionRequest();
         hydrate(session?.messages ?? []);
-    }, [clearPermissionRequest, updateContextState, updatePermissionState]);
+    }, [
+        clearPermissionRequest,
+        updateContextState,
+        updateGoalState,
+        updatePermissionState
+    ]);
 
     const refreshSessions = useCallback(async (): Promise<void> => {
         const next = await loadSessions(bridge);
@@ -141,6 +155,7 @@ export function useSessions() {
         clearPermissionRequest,
         releaseSession,
         updateContextState,
+        updateGoalState,
         updatePermissionState,
         updateSessionName,
         refreshProjects,
@@ -155,6 +170,7 @@ export function useSessions() {
         requestEventGate,
         activateSession,
         clearPermissionRequest,
+        updateGoalState,
         updateSessionName,
         setProjects,
         setSessions,
@@ -165,7 +181,7 @@ export function useSessions() {
         setReady
     });
 
-    const { send, stop } = usePromptController({
+    const { send, stop, submitGoal, clearGoal } = usePromptController({
         bridge,
         ready,
         busy,
@@ -177,6 +193,8 @@ export function useSessions() {
         requestInFlightRef,
         sessionContextRef,
         sessionPermissionRef,
+        goalRef,
+        setGoal: updateGoalState,
         hasUserMessagesRef,
         requestEventGate,
         activateSession,
@@ -191,6 +209,7 @@ export function useSessions() {
         sessionContext,
         sessionPermission,
         contextUsage,
+        goal,
         providerContextRevision,
         permissionRequest,
         activeSessionId,
@@ -199,6 +218,8 @@ export function useSessions() {
         ready,
         ...actions,
         send,
-        stop
+        stop,
+        submitGoal,
+        clearGoal
     };
 }

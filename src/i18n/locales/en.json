@@ -51,6 +51,25 @@
         },
         "model": "Model",
         "reasoning": "Reasoning",
+        "commands": {
+            "label": "Commands",
+            "goal": {
+                "label": "Goal",
+                "description": "Set or update the goal for this session"
+            }
+        },
+        "goal": {
+            "button": "Goal",
+            "placeholder": "Describe your goal and define measurable outcomes for best results",
+            "running": "Goal in progress",
+            "paused": "Goal paused",
+            "pausedStalled": "Goal stalled",
+            "delete": "Delete goal",
+            "pause": "Pause goal",
+            "resume": "Resume goal",
+            "edit": "Edit goal",
+            "exitEdit": "Exit goal editing"
+        },
         "reasoningLevels": {
             "none": "Off",
             "minimal": "Minimal",
@@ -169,6 +188,8 @@
         "viewImage": "View image",
         "localTime": "Local time",
         "sleep": "Wait",
+        "updateGoal": "Update goal",
+        "finishGoal": "Finish goal",
         "localTimeDetails": {
             "utcOffset": "UTC offset",
             "unixTimestamp": "Unix timestamp"

@@ -8,10 +8,12 @@ import {
     type PermissionMode
 } from "../../../protocol/permission.ts";
 import {
+    type JarvixGoal,
     type JarvixSession,
     type JarvixSessionContext,
     type JarvixSessionMeta,
     type JarvixSessionStatus,
+    sessionGoalFrom,
     sessionNameSchema
 } from "../../../protocol/session.ts";
 import { defaultSessionDirectory, sessionFile } from "./paths.ts";
@@ -20,6 +22,7 @@ import {
     ensureMessageRecordId,
     messageRecordId,
     normalizeSessionContext,
+    SESSION_FORMAT_VERSION,
     type SessionCompactRecord,
     type SessionMessageRecord
 } from "./records.ts";
@@ -29,7 +32,7 @@ import {
     writeSessionMeta
 } from "./writer.ts";
 
-export const SESSION_FORMAT_VERSION = 4;
+export { SESSION_FORMAT_VERSION } from "./records.ts";
 
 export { defaultSessionDirectory, sessionFile } from "./paths.ts";
 export {
@@ -96,6 +99,40 @@ export function updateSessionPermission(
         version: SESSION_FORMAT_VERSION,
         permission: permissionModeSchema.parse(permission)
     };
+    writeSessionMeta(file, meta);
+    return meta;
+}
+
+/** Replace the session goal while preserving its messages. */
+export function updateSessionGoal(
+    id: string,
+    content: string,
+    directory = defaultSessionDirectory()
+): JarvixGoal {
+    const file = sessionFile(id, directory);
+    const current = requireSessionMeta(file, id);
+    const goal = sessionGoalFrom(content, current.goal);
+    const meta: JarvixSessionMeta = {
+        ...current,
+        version: SESSION_FORMAT_VERSION,
+        goal
+    };
+    writeSessionMeta(file, meta);
+    return goal;
+}
+
+/** Remove the session goal while preserving its messages. */
+export function clearSessionGoal(
+    id: string,
+    directory = defaultSessionDirectory()
+): JarvixSessionMeta {
+    const file = sessionFile(id, directory);
+    const current = requireSessionMeta(file, id);
+    const meta: JarvixSessionMeta = {
+        ...current,
+        version: SESSION_FORMAT_VERSION
+    };
+    delete meta.goal;
     writeSessionMeta(file, meta);
     return meta;
 }
