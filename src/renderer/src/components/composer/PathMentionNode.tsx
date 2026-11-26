@@ -130,9 +130,9 @@ function PathMentionView({
                             }}
                             className={cn(
                                 "group/path-mention relative inline-flex min-w-0 max-w-[min(20rem,70vw)] cursor-pointer items-center gap-1",
-                                "rounded-md border bg-accent/70 px-1.5 py-0.5 text-[13px] leading-5",
-                                "text-accent-foreground transition-colors",
-                                selected && "ring-2 ring-ring/40"
+                                "rounded-md border border-border/80 bg-background px-2 py-0.5 text-[12.5px] leading-5",
+                                "text-foreground transition-colors hover:border-border-strong",
+                                selected && "ring-2 ring-ring/35"
                             )}
                         >
                             <span
@@ -168,8 +168,8 @@ function PathMentionView({
                         sideOffset={6}
                         collisionPadding={8}
                         className={cn(
-                            "z-50 max-w-[min(32rem,80vw)] rounded-md border bg-popover px-2 py-1",
-                            "text-xs leading-5 break-all text-popover-foreground shadow-lg"
+                            "z-50 max-w-[min(32rem,80vw)] rounded-lg border border-border-strong bg-popover px-2.5 py-1",
+                            "text-xs leading-5 break-all text-popover-foreground shadow-[0_6px_16px_rgb(0_0_0/0.07)] dark:shadow-[0_8px_20px_rgb(0_0_0/0.38)]"
                         )}
                     >
                         {attributes.path}

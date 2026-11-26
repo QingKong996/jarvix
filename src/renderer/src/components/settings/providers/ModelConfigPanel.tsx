@@ -43,22 +43,23 @@ export function ModelConfigPanel({
 
     return (
         <section aria-labelledby={titleId} className="flex h-full min-h-0 flex-col">
-            <div className="flex items-center justify-between gap-3 border-b px-5 py-4">
-                <h3 id={titleId} className="text-base font-semibold">
+            <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border px-6">
+                <h3 id={titleId} className="text-base font-semibold tracking-tight">
                     {originalId === undefined ? t("settings.providers.addModel") : t("settings.providers.modelSettings")}
                 </h3>
                 <Button
                     type="button"
-                    size="icon-xs"
+                    size="icon-sm"
                     variant="ghost"
                     aria-label={t("ui.dialog.close")}
                     onClick={onClose}
+                    className="text-muted-foreground hover:text-foreground"
                 >
                     <X />
                 </Button>
             </div>
             <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
-                <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-5 text-sm">
+                <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-6 text-sm">
                     <FormField label={t("settings.providers.modelName")}>
                         <Input
                             required
@@ -100,17 +101,18 @@ export function ModelConfigPanel({
                             />
                         </FormField>
                     </div>
-                    <label className="flex items-center gap-2">
+                    <label className="flex cursor-pointer items-center gap-2 text-sm select-none">
                         <input
                             type="checkbox"
                             checked={model.reasoning}
                             disabled={disabled}
                             onChange={(event) => onChange({ reasoning: event.target.checked })}
+                            className="size-4 accent-primary"
                         />
                         {t("settings.providers.reasoning")}
                     </label>
                 </div>
-                <DialogFooter error={error} className="border-t px-5 py-3">
+                <DialogFooter error={error} className="border-t border-border bg-sidebar/50 px-6 py-3.5">
                     <Button type="button" variant="outline" onClick={onClose}>{t("settings.cancel")}</Button>
                     <Button type="submit" disabled={disabled}>
                         {t("settings.providers.applyModel")}

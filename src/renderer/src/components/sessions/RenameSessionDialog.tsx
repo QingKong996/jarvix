@@ -82,7 +82,7 @@ export function RenameSessionDialog({
 
                     <DialogFooter error={error}>
                         <DialogClose asChild>
-                            <Button type="button" variant="ghost" disabled={saving}>
+                            <Button type="button" variant="outline" disabled={saving}>
                                 {t("sessions.cancel")}
                             </Button>
                         </DialogClose>

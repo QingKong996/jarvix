@@ -16,7 +16,7 @@ const CommittedTurnView = memo(function CommittedTurnView({ turn }: { turn: Comm
 
     if (turn.role === "user") {
         return (
-            <p className="max-w-[85%] self-end rounded-lg bg-secondary px-3 py-2 text-sm leading-relaxed break-words whitespace-pre-wrap text-secondary-foreground">
+            <p className="max-w-[82%] self-end rounded-2xl bg-secondary px-4 py-2.5 text-sm leading-relaxed break-words whitespace-pre-wrap text-secondary-foreground">
                 {turn.text}
             </p>
         );
@@ -44,7 +44,14 @@ const CommittedTurnView = memo(function CommittedTurnView({ turn }: { turn: Comm
                 }
                 return <Markdown key={index} text={block.text} />;
             })}
-            {turn.error ? <p role="alert" className="text-[13px] text-destructive">{turn.error}</p> : null}
+            {turn.error ? (
+                <p
+                    role="alert"
+                    className="rounded-xl border border-destructive/25 bg-destructive/5 px-3.5 py-2.5 text-[13px] leading-relaxed text-destructive"
+                >
+                    {turn.error}
+                </p>
+            ) : null}
         </div>
     );
 });
@@ -189,8 +196,8 @@ export function Transcript({ sessionId }: { sessionId: string | null }) {
             data-session-id={sessionId ?? undefined}
             className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto"
         >
-            <div className={cn("flex min-h-full flex-col gap-3 py-8", CONTENT_GUTTER)}>
-                <div className={cn("flex flex-col gap-3", CHAT_COLUMN)}>
+            <div className={cn("flex min-h-full flex-col gap-6 py-8", CONTENT_GUTTER)}>
+                <div className={cn("flex flex-col gap-6", CHAT_COLUMN)}>
                     <CommittedList />
                     <LiveSlot />
                     <InjectedList />

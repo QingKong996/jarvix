@@ -101,7 +101,7 @@ export function SandboxSetupDialog() {
             >
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
-                        <ShieldAlert className="size-5 text-amber-600" />
+                        <ShieldAlert className="size-4 text-warning" />
                         {t("sandbox.setup.title")}
                     </DialogTitle>
                     <DialogDescription>{t("sandbox.setup.message")}</DialogDescription>
@@ -110,7 +110,7 @@ export function SandboxSetupDialog() {
                 {error ? (
                     <p
                         role="alert"
-                        className="max-h-32 overflow-y-auto rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs whitespace-pre-wrap text-destructive"
+                        className="max-h-32 overflow-y-auto rounded-xl border border-destructive/25 bg-destructive/5 p-3 text-xs whitespace-pre-wrap text-destructive"
                     >
                         {error}
                     </p>
@@ -119,7 +119,7 @@ export function SandboxSetupDialog() {
                 <DialogFooter>
                     <Button
                         type="button"
-                        variant="ghost"
+                        variant="outline"
                         disabled={installing}
                         onClick={() => handleOpenChange(false)}
                     >
@@ -127,8 +127,8 @@ export function SandboxSetupDialog() {
                     </Button>
                     <Button
                         type="button"
+                        variant="default"
                         disabled={installing}
-                        className="bg-[#1F6FEB] text-white hover:bg-[#1F6FEB]/90"
                         onClick={() => void handleInstall()}
                     >
                         {installing ? <LoaderCircle className="animate-spin" /> : <ShieldAlert />}

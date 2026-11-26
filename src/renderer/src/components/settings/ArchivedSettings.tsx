@@ -33,12 +33,12 @@ export function ArchivedSettings({ sessions, disabled, onRestore }: ArchivedSett
     }
 
     return (
-        <section aria-labelledby="archived-sessions-title" className="flex flex-col gap-3 text-sm">
+        <section aria-labelledby="archived-sessions-title" className="flex flex-col gap-4 text-sm">
             <div>
-                <h3 id="archived-sessions-title" className="font-medium">
+                <h3 id="archived-sessions-title" className="font-medium text-foreground">
                     {t("settings.archived.title")}
                 </h3>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                     {t("settings.archived.description")}
                 </p>
             </div>
@@ -46,11 +46,11 @@ export function ArchivedSettings({ sessions, disabled, onRestore }: ArchivedSett
             {error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null}
 
             {sessions.length > 0 ? (
-                <ul className="divide-y rounded-md border">
+                <ul className="divide-y divide-border/80 overflow-hidden rounded-xl border border-border/80 bg-background">
                     {sessions.map((session) => (
-                        <li key={session.id} className="flex items-center gap-3 px-3 py-2.5">
+                        <li key={session.id} className="flex items-center gap-3 px-4 py-3">
                             <div className="min-w-0 flex-1">
-                                <p className="truncate" title={session.name}>{session.name}</p>
+                                <p className="truncate font-medium text-foreground" title={session.name}>{session.name}</p>
                                 <p className="mt-0.5 text-xs text-muted-foreground">
                                     {t("settings.archived.archivedAt", {
                                         date: new Date(session.archivedAt ?? session.updatedAt)
@@ -76,7 +76,7 @@ export function ArchivedSettings({ sessions, disabled, onRestore }: ArchivedSett
                     ))}
                 </ul>
             ) : (
-                <div className="rounded-md border border-dashed px-4 py-8 text-center text-xs text-muted-foreground">
+                <div className="rounded-xl border border-dashed border-border bg-surface-subtle/60 px-4 py-8 text-center text-xs text-muted-foreground">
                     {t("settings.archived.empty")}
                 </div>
             )}

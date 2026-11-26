@@ -40,8 +40,8 @@ export function ContextUsageRing({ usage }: ContextUsageRingProps) {
     const tone = percentage >= 90
         ? "text-destructive"
         : percentage >= 70
-            ? "text-[#9a6700] dark:text-[#d29922]"
-            : "text-[#1f6feb] dark:text-[#58a6ff]";
+            ? "text-warning"
+            : "text-foreground/70";
     const strokeDashoffset = CIRCUMFERENCE * (1 - Math.min(1, ratio));
     const initialStrokeDashoffset = initialOffset.current ?? strokeDashoffset;
     initialOffset.current = initialStrokeDashoffset;
@@ -51,7 +51,7 @@ export function ContextUsageRing({ usage }: ContextUsageRingProps) {
             role="img"
             aria-label={label}
             title={label}
-            className="inline-flex size-7 shrink-0 items-center justify-center"
+            className="inline-flex size-8 shrink-0 items-center justify-center"
             style={{ "--ring-offset": initialStrokeDashoffset } as CSSProperties}
             animate={{ "--ring-offset": strokeDashoffset }}
             transition={smoothTransition}

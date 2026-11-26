@@ -85,23 +85,24 @@ export function Sidebar({
     }
 
     return (
-        <aside data-testid="session-sidebar" className="flex h-full min-h-0 flex-col bg-sidebar">
-            <div className="flex items-center gap-2.5 border-b border-border px-5 py-3.5">
-                <span className="text-[15px] font-semibold tracking-[0.4px]">Jarvix</span>
+        <aside data-testid="session-sidebar" className="flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground">
+            <div className="flex h-14 shrink-0 items-center justify-between px-4">
+                <span className="text-[15px] font-semibold tracking-tight text-foreground">Jarvix</span>
             </div>
 
-            <div className="flex min-h-0 flex-1 flex-col p-3">
+            <div className="flex min-h-0 flex-1 flex-col px-3 pb-3">
                 <NavigationItem
                     onClick={() => onNewSession()}
                     disabled={busy}
                     icon={<Plus />}
                     data-testid="new-session"
+                    className="font-medium text-foreground"
                 >
                     {t("sessions.new")}
                 </NavigationItem>
 
-                <div className="mt-5 flex items-center justify-between pl-3">
-                    <p className="text-[11px] font-medium tracking-[0.08em] text-muted-foreground uppercase">
+                <div className="mt-5 flex items-center justify-between px-2.5">
+                    <p className="text-xs font-medium text-muted-foreground">
                         {t("projects.title")}
                     </p>
                     <Button
@@ -113,6 +114,7 @@ export function Sidebar({
                         onClick={onNewProject}
                         disabled={busy}
                         data-testid="new-project"
+                        className="text-muted-foreground hover:text-foreground"
                     >
                         <FolderPlus />
                     </Button>
@@ -127,7 +129,7 @@ export function Sidebar({
                 >
                     <nav
                         aria-label={t("projects.title")}
-                        className="-mx-1 mt-1 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-1 py-1"
+                        className="-mx-0.5 mt-1.5 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-0.5 py-0.5"
                     >
                         {groups.length === 0 ? (
                             <p className="px-3 py-2 text-xs text-muted-foreground">{t("projects.empty")}</p>
@@ -153,7 +155,7 @@ export function Sidebar({
 
                     <DragOverlay dropAnimation={null}>
                         {draggedSession ? (
-                            <div className="flex h-full w-full min-w-0 items-center gap-2 rounded-xl border border-border bg-popover px-3 text-sm shadow-lg">
+                            <div className="flex h-full w-full min-w-0 items-center gap-2 rounded-xl border border-border-strong bg-popover px-3.5 text-sm text-popover-foreground shadow-[0_6px_20px_rgb(0_0_0/0.06)] dark:shadow-[0_8px_24px_rgb(0_0_0/0.36)]">
                                 <span className="truncate">{draggedSession.name}</span>
                             </div>
                         ) : null}
@@ -161,7 +163,7 @@ export function Sidebar({
                 </DndContext>
             </div>
 
-            <div className="border-t border-border p-3">
+            <div className="border-t border-border/70 p-3">
                 <NavigationItem onClick={onOpenSettings} icon={<Settings />} data-testid="open-settings">
                     {t("nav.settings")}
                 </NavigationItem>

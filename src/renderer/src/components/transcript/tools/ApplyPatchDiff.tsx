@@ -88,7 +88,7 @@ export const ApplyPatchDiff = memo(function ApplyPatchDiff({ patch }: ApplyPatch
     return (
         <div
             data-slot="apply-patch-diff"
-            className="overflow-hidden rounded-md border bg-muted/10 font-mono text-[12px] leading-5 text-foreground"
+            className="overflow-hidden rounded-xl border border-border/80 bg-surface-subtle font-mono text-xs leading-5 text-foreground"
         >
             <div className="max-h-96 overflow-auto">
                 <div className="min-w-max">
@@ -98,7 +98,7 @@ export const ApplyPatchDiff = memo(function ApplyPatchDiff({ patch }: ApplyPatch
                     {preview.truncated ? (
                         <div
                             data-slot="apply-patch-preview-notice"
-                            className="border-t px-3 py-2 text-[11px] text-muted-foreground"
+                            className="border-t border-border bg-background/60 px-3 py-2 text-[11px] text-muted-foreground"
                         >
                             {t("tools.patchDetails.truncated")}
                             {preview.omittedLines > 0
@@ -122,8 +122,8 @@ function PatchLine({ line }: { line: string }) {
             data-kind={kind}
             className={cn(
                 "min-h-5 px-3 whitespace-pre",
-                kind === "add" && "bg-emerald-500/15 text-emerald-800 dark:text-emerald-200",
-                kind === "remove" && "bg-red-500/15 text-red-800 dark:text-red-200",
+                kind === "add" && "bg-emerald-500/15 text-emerald-800 dark:text-emerald-300",
+                kind === "remove" && "bg-red-500/15 text-red-800 dark:text-red-300",
                 kind === "plain" && "text-muted-foreground"
             )}
         >

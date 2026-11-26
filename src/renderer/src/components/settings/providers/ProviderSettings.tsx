@@ -99,7 +99,7 @@ export function ProviderSettings({ providers, selectedModel, disabled, onChange 
         <div className="@container flex flex-col gap-6 text-sm">
             <section aria-labelledby="configured-providers-title" className="flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-3">
-                    <h3 id="configured-providers-title" className="font-medium">{t("settings.providers.configured")}</h3>
+                    <h3 id="configured-providers-title" className="font-medium text-foreground">{t("settings.providers.configured")}</h3>
                     <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => setEditor({
                         provider: {
                             id: `custom:${crypto.randomUUID()}`,
@@ -115,11 +115,11 @@ export function ProviderSettings({ providers, selectedModel, disabled, onChange 
                     </Button>
                 </div>
                 {providers.length > 0 ? (
-                    <ul className="divide-y rounded-md border">
+                    <ul className="divide-y divide-border/80 overflow-hidden rounded-xl border border-border/80 bg-background">
                         {providers.map((provider) => (
-                            <li key={provider.id} className="flex items-center gap-3 px-3 py-2.5">
+                            <li key={provider.id} className="flex items-center gap-3 px-3.5 py-2.5">
                                 <ProviderIcon id={provider.id} name={provider.name} />
-                                <span className="min-w-0 flex-1 truncate" title={provider.name}>{provider.name}</span>
+                                <span className="min-w-0 flex-1 truncate font-medium text-foreground" title={provider.name}>{provider.name}</span>
                                 <Button
                                     type="button"
                                     variant="ghost"
@@ -127,6 +127,7 @@ export function ProviderSettings({ providers, selectedModel, disabled, onChange 
                                     disabled={disabled}
                                     aria-label={t("settings.providers.editNamed", { name: provider.name })}
                                     onClick={() => edit(provider)}
+                                    className="text-muted-foreground hover:text-foreground"
                                 >
                                     <Pencil />
                                 </Button>
@@ -145,22 +146,22 @@ export function ProviderSettings({ providers, selectedModel, disabled, onChange 
                         ))}
                     </ul>
                 ) : (
-                    <p className="rounded-md border border-dashed px-3 py-4 text-muted-foreground">{t("settings.providers.empty")}</p>
+                    <p className="rounded-xl border border-dashed border-border bg-surface-subtle/60 px-3 py-5 text-center text-xs text-muted-foreground">{t("settings.providers.empty")}</p>
                 )}
             </section>
 
             <Collapsible
                 open={catalogOpen}
                 onOpenChange={setCatalogOpen}
-                className="flex flex-col gap-3 border-t pt-5"
+                className="flex flex-col gap-3 border-t border-border pt-4"
             >
                 <div className="flex items-center justify-between gap-3">
-                    <CollapsibleTrigger className="group flex items-center gap-2 rounded-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <CollapsibleTrigger className="group flex items-center gap-1.5 rounded-md font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30">
                         <motion.span
                             aria-hidden="true"
                             animate={{ rotate: catalogOpen ? 0 : -90 }}
                             transition={quickTransition}
-                            className="inline-flex shrink-0"
+                            className="inline-flex shrink-0 text-muted-foreground"
                         >
                             <ChevronDown className="size-4" />
                         </motion.span>
@@ -173,6 +174,7 @@ export function ProviderSettings({ providers, selectedModel, disabled, onChange 
                         disabled={disabled || loading}
                         aria-label={t("settings.providers.refresh")}
                         onClick={() => void refresh()}
+                        className="text-muted-foreground hover:text-foreground"
                     >
                         <RefreshCw className={loading ? "animate-spin" : undefined} />
                     </Button>
@@ -188,8 +190,8 @@ export function ProviderSettings({ providers, selectedModel, disabled, onChange 
                         <p className="text-xs text-muted-foreground">{t("settings.providers.stale", { date: new Date(catalog.fetchedAt).toLocaleString() })}</p>
                     ) : null}
                     {error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null}
-                    {loading && !catalog ? <p role="status" className="text-muted-foreground">{t("settings.providers.loading")}</p> : null}
-                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 @min-[34rem]:grid-cols-3">
+                    {loading && !catalog ? <p role="status" className="text-xs text-muted-foreground">{t("settings.providers.loading")}</p> : null}
+                    <div className="grid grid-cols-2 gap-1.5 @min-[34rem]:grid-cols-3">
                         {available?.map((provider) => (
                             <button
                                 key={provider.id}
@@ -197,14 +199,14 @@ export function ProviderSettings({ providers, selectedModel, disabled, onChange 
                                 disabled={disabled}
                                 onClick={() => addFromCatalog(provider)}
                                 title={provider.name}
-                                className="flex min-w-0 items-center gap-3 rounded-md px-2 py-2.5 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                                className="flex min-w-0 items-center gap-2.5 rounded-lg border border-transparent px-3 py-2.5 text-left text-sm outline-none transition-colors duration-150 hover:border-border/80 hover:bg-accent/70 focus-visible:ring-2 focus-visible:ring-ring/25 disabled:opacity-50"
                             >
                                 <ProviderIcon id={provider.id} name={provider.name} />
                                 <span className="truncate">{provider.name}</span>
                             </button>
                         ))}
                     </div>
-                    {available?.length === 0 ? <p className="text-muted-foreground">{t("settings.providers.noResults")}</p> : null}
+                    {available?.length === 0 ? <p className="text-xs text-muted-foreground">{t("settings.providers.noResults")}</p> : null}
                 </AnimatedCollapsibleContent>
             </Collapsible>
 

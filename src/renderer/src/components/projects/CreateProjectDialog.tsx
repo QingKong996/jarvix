@@ -95,7 +95,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreate }: CreateProj
 
                     <div className="flex flex-col gap-2">
                         <div className="flex items-center justify-between gap-3">
-                            <span className="text-sm font-medium">{t("projects.workingDirectories")}</span>
+                            <span className="text-sm font-medium text-foreground">{t("projects.workingDirectories")}</span>
                             <Button
                                 type="button"
                                 variant="outline"
@@ -110,18 +110,18 @@ export function CreateProjectDialog({ open, onOpenChange, onCreate }: CreateProj
                         </div>
 
                         {workingDirectories.length === 0 ? (
-                            <p className="rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground">
+                            <p className="rounded-xl border border-dashed border-border bg-surface-subtle/60 px-3 py-4 text-center text-xs text-muted-foreground">
                                 {t("projects.noDirectories")}
                             </p>
                         ) : (
-                            <ul className="flex max-h-44 flex-col gap-1 overflow-y-auto">
+                            <ul className="flex max-h-44 flex-col gap-1.5 overflow-y-auto">
                                 {workingDirectories.map((directory) => (
                                     <li
                                         key={directory}
-                                        className="flex items-center gap-2 rounded-md bg-secondary/60 px-3 py-2"
+                                        className="flex items-center gap-2 rounded-lg border border-border/75 bg-surface-subtle px-3 py-1.5"
                                     >
-                                        <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
-                                        <span className="min-w-0 flex-1 truncate text-sm" title={directory}>
+                                        <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
+                                        <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground" title={directory}>
                                             {directory}
                                         </span>
                                         <Button
@@ -133,6 +133,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreate }: CreateProj
                                                 current.filter((item) => item !== directory)
                                             ))}
                                             disabled={saving}
+                                            className="text-muted-foreground hover:text-foreground"
                                         >
                                             <X />
                                         </Button>
@@ -144,7 +145,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreate }: CreateProj
 
                     <DialogFooter error={error}>
                         <DialogClose asChild>
-                            <Button type="button" variant="ghost" disabled={saving}>
+                            <Button type="button" variant="outline" disabled={saving}>
                                 {t("projects.cancel")}
                             </Button>
                         </DialogClose>

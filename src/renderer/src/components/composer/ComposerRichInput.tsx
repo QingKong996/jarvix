@@ -103,7 +103,7 @@ export const ComposerRichInput = forwardRef<
         content: "",
         editorProps: {
             attributes: {
-                class: "composer-prosemirror min-h-8 max-h-48 overflow-y-auto whitespace-pre-wrap break-words px-1.5 py-1.5 text-sm outline-none",
+                class: "composer-prosemirror min-h-10 max-h-48 overflow-y-auto whitespace-pre-wrap break-words px-0.5 py-1 text-sm leading-relaxed outline-none",
                 role: "textbox",
                 "aria-multiline": "true",
                 "aria-autocomplete": "list",
@@ -186,12 +186,12 @@ export const ComposerRichInput = forwardRef<
 
     return (
         <div
-            className="relative min-h-8 w-full"
+            className="relative min-h-10 w-full"
             onKeyDownCapture={onKeyDown}
         >
             <EditorContent editor={editor} />
             {empty ? (
-                <span className="pointer-events-none absolute inset-x-1.5 top-1.5 truncate text-sm text-muted-foreground">
+                <span className="pointer-events-none absolute inset-x-0.5 top-1 truncate text-sm leading-relaxed text-muted-foreground">
                     {placeholder}
                 </span>
             ) : null}

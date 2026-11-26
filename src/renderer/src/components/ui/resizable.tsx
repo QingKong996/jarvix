@@ -29,10 +29,10 @@ function ResizableHandle({
     <ResizablePrimitive.Separator
       data-slot="resizable-handle"
       className={cn(
-        "relative flex w-px items-center justify-center bg-border outline-none",
+        "relative flex w-px items-center justify-center bg-border transition-colors outline-none",
         "after:absolute after:inset-y-0 after:left-1/2 after:w-2 after:-translate-x-1/2",
-        "data-[separator=hover]:after:bg-primary/25 data-[separator=focus]:after:bg-primary/40 data-[separator=active]:after:bg-primary/40",
-        "focus-visible:ring-[3px] focus-visible:ring-ring/50",
+        "data-[separator=hover]:bg-border-strong data-[separator=focus]:bg-foreground/35 data-[separator=active]:bg-foreground/45",
+        "focus-visible:ring-2 focus-visible:ring-ring/30",
         "aria-[orientation=horizontal]:h-px aria-[orientation=horizontal]:w-full aria-[orientation=horizontal]:after:inset-x-0 aria-[orientation=horizontal]:after:inset-y-auto aria-[orientation=horizontal]:after:h-2 aria-[orientation=horizontal]:after:w-full aria-[orientation=horizontal]:after:translate-x-0 aria-[orientation=horizontal]:after:-translate-y-1/2",
         className
       )}
