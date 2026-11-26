@@ -4,12 +4,11 @@ import type {
     PermissionAction,
     PermissionDecision,
     PermissionDirectoryChange,
-    PermissionDomainChange,
     PermissionGrantInput,
     PermissionRequest
 } from "../../protocol/permission.ts";
 import { permissionPathKey } from "./path-key.ts";
-import { applyPermissionGrants, type SandboxPolicy } from "./sandbox.ts";
+import type { PermissionRules } from "./rules.ts";
 
 type PendingPermission = {
     request: PermissionRequest;
@@ -88,15 +87,23 @@ export class SessionPermissions {
         this.applyDirectoryChanges(changes);
     }
 
-    apply(policy: SandboxPolicy | null): SandboxPolicy | null {
-        return applyPermissionGrants(policy, sessionChanges(
-            this.enabledDomains,
-            this.disabledDomains,
-            this.enabledReadDirectories,
-            this.disabledReadDirectories,
-            this.enabledWriteDirectories,
-            this.disabledWriteDirectories
-        ));
+    grants(): PermissionRules {
+        return {
+            domains: {
+                allow: [...this.enabledDomains],
+                deny: [...this.disabledDomains]
+            },
+            directories: {
+                read: {
+                    allow: [...this.enabledReadDirectories],
+                    deny: [...this.disabledReadDirectories]
+                },
+                write: {
+                    allow: [...this.enabledWriteDirectories],
+                    deny: [...this.disabledWriteDirectories]
+                }
+            }
+        };
     }
 
     hasPending(): boolean {
@@ -163,38 +170,6 @@ export class SessionPermissions {
             pending.signal.removeEventListener("abort", pending.abortListener);
         }
     }
-}
-
-function sessionChanges(
-    enabledDomains: ReadonlySet<string>,
-    disabledDomains: ReadonlySet<string>,
-    enabledReadDirectories: ReadonlySet<string>,
-    disabledReadDirectories: ReadonlySet<string>,
-    enabledWriteDirectories: ReadonlySet<string>,
-    disabledWriteDirectories: ReadonlySet<string>
-): PermissionGrantInput {
-    const domains: PermissionDomainChange[] = [];
-    for (const domain of enabledDomains) {
-        domains.push({ action: "enable", domain });
-    }
-    for (const domain of disabledDomains) {
-        domains.push({ action: "disable", domain });
-    }
-
-    const directories: PermissionDirectoryChange[] = [];
-    for (const path of enabledReadDirectories) {
-        directories.push({ action: "enable", access: "read", path });
-    }
-    for (const path of disabledReadDirectories) {
-        directories.push({ action: "disable", access: "read", path });
-    }
-    for (const path of enabledWriteDirectories) {
-        directories.push({ action: "enable", access: "write", path });
-    }
-    for (const path of disabledWriteDirectories) {
-        directories.push({ action: "disable", access: "write", path });
-    }
-    return { domains, directories };
 }
 
 function setChange(

@@ -1,11 +1,10 @@
 import { resolve } from "node:path";
 import { expect, test } from "vitest";
 import { SessionPermissions } from "./session-permissions.ts";
-import { createSandboxPolicy } from "./sandbox.ts";
 
 const directory = resolve("approved-directory");
 
-test("approval adds session grants to subsequent sandbox policies", async () => {
+test("approval exposes session grants", async () => {
     const permissions = new SessionPermissions();
     const handle = permissions.begin({
         domains: [{ action: "enable", domain: "api.example.com" }],
@@ -15,19 +14,25 @@ test("approval adds session grants to subsequent sandbox policies", async () => 
     expect(permissions.respond(handle.request.id, "approved")).toBe(true);
     await expect(handle.decision).resolves.toBe("approved");
 
-    const base = createSandboxPolicy("read-only", []);
-    const policy = permissions.apply(base);
-
-    expect(policy?.network.allowedDomains).toEqual(["api.example.com"]);
-    expect(policy?.filesystem.allowWrite).toEqual([{
-        path: directory,
-        literal: true
-    }]);
-    expect(base?.network.allowedDomains).toEqual([]);
-    expect(base?.filesystem.allowWrite).toEqual([]);
+    expect(permissions.grants()).toEqual({
+        domains: {
+            allow: ["api.example.com"],
+            deny: []
+        },
+        directories: {
+            read: {
+                allow: [],
+                deny: []
+            },
+            write: {
+                allow: [directory],
+                deny: []
+            }
+        }
+    });
 });
 
-test("cancellation leaves the sandbox policy unchanged", async () => {
+test("cancellation leaves grants empty", async () => {
     const permissions = new SessionPermissions();
     const handle = permissions.begin({
         domains: [{ action: "enable", domain: "api.example.com" }],
@@ -37,12 +42,25 @@ test("cancellation leaves the sandbox policy unchanged", async () => {
     expect(permissions.respond(handle.request.id, "cancelled")).toBe(true);
     await expect(handle.decision).resolves.toBe("cancelled");
 
-    const policy = permissions.apply(createSandboxPolicy("read-only", []));
-    expect(policy?.network.allowedDomains).toEqual([]);
-    expect(policy?.filesystem.allowWrite).toEqual([]);
+    expect(permissions.grants()).toEqual({
+        domains: {
+            allow: [],
+            deny: []
+        },
+        directories: {
+            read: {
+                allow: [],
+                deny: []
+            },
+            write: {
+                allow: [],
+                deny: []
+            }
+        }
+    });
 });
 
-test("grants selected sandbox paths without a pending approval", () => {
+test("grants selected paths without a pending approval", () => {
     const permissions = new SessionPermissions();
     const sessionDirectory = resolve("mounted-directory");
 
@@ -52,15 +70,16 @@ test("grants selected sandbox paths without a pending approval", () => {
     ]);
 
     expect(permissions.hasPending()).toBe(false);
-    const policy = permissions.apply(createSandboxPolicy("read-only", []));
-    expect(policy?.filesystem.allowRead).toEqual([{
-        path: sessionDirectory,
-        literal: true
-    }]);
-    expect(policy?.filesystem.allowWrite).toEqual([{
-        path: sessionDirectory,
-        literal: true
-    }]);
+    expect(permissions.grants().directories).toEqual({
+        read: {
+            allow: [sessionDirectory],
+            deny: []
+        },
+        write: {
+            allow: [sessionDirectory],
+            deny: []
+        }
+    });
 });
 
 test("grants selected paths once and honors access granularity", () => {
@@ -72,12 +91,9 @@ test("grants selected paths once and honors access granularity", () => {
         { action: "enable", access: "read", path: sessionDirectory }
     ]);
 
-    const policy = permissions.apply(createSandboxPolicy("read-only", []));
-    expect(policy?.filesystem.allowRead).toEqual([{
-        path: sessionDirectory,
-        literal: true
-    }]);
-    expect(policy?.filesystem.allowWrite).toEqual([]);
+    expect(permissions.grants().directories.read.allow).toEqual([
+        sessionDirectory
+    ]);
 });
 
 test("reports releasable only without pending requests or session grants", () => {
@@ -133,9 +149,22 @@ test("reset clears grants and cancels pending requests", async () => {
 
     await expect(pending.decision).resolves.toBe("cancelled");
     expect(permissions.respond(pending.request.id, "approved")).toBe(false);
-    const policy = permissions.apply(createSandboxPolicy("read-only", []));
-    expect(policy?.network.allowedDomains).toEqual([]);
-    expect(policy?.filesystem.allowWrite).toEqual([]);
+    expect(permissions.grants()).toEqual({
+        domains: {
+            allow: [],
+            deny: []
+        },
+        directories: {
+            read: {
+                allow: [],
+                deny: []
+            },
+            write: {
+                allow: [],
+                deny: []
+            }
+        }
+    });
 });
 
 test("applies and reverses every domain and filesystem access change", async () => {
@@ -159,16 +188,21 @@ test("applies and reverses every domain and filesystem access change", async () 
     });
     permissions.respond(first.request.id, "approved");
 
-    let policy = permissions.apply(createSandboxPolicy("read-only", []));
-    expect(policy?.network).toMatchObject({
-        allowedDomains: ["api.example.com"],
-        deniedDomains: ["old.example.com"]
-    });
-    expect(policy?.filesystem).toMatchObject({
-        allowRead: [{ path: readEnabled, literal: true }],
-        denyRead: [{ path: readDisabled, literal: true }],
-        allowWrite: [{ path: writeEnabled, literal: true }],
-        denyWrite: [{ path: writeDisabled, literal: true }]
+    expect(permissions.grants()).toEqual({
+        domains: {
+            allow: ["api.example.com"],
+            deny: ["old.example.com"]
+        },
+        directories: {
+            read: {
+                allow: [readEnabled],
+                deny: [readDisabled]
+            },
+            write: {
+                allow: [writeEnabled],
+                deny: [writeDisabled]
+            }
+        }
     });
 
     const second = permissions.begin({
@@ -185,16 +219,21 @@ test("applies and reverses every domain and filesystem access change", async () 
     });
     permissions.respond(second.request.id, "approved");
 
-    policy = permissions.apply(createSandboxPolicy("read-only", []));
-    expect(policy?.network).toMatchObject({
-        allowedDomains: ["old.example.com"],
-        deniedDomains: ["api.example.com"]
-    });
-    expect(policy?.filesystem).toMatchObject({
-        allowRead: [{ path: readDisabled, literal: true }],
-        denyRead: [{ path: readEnabled, literal: true }],
-        allowWrite: [{ path: writeDisabled, literal: true }],
-        denyWrite: [{ path: writeEnabled, literal: true }]
+    expect(permissions.grants()).toEqual({
+        domains: {
+            allow: ["old.example.com"],
+            deny: ["api.example.com"]
+        },
+        directories: {
+            read: {
+                allow: [readDisabled],
+                deny: [readEnabled]
+            },
+            write: {
+                allow: [writeDisabled],
+                deny: [writeEnabled]
+            }
+        }
     });
 });
 
@@ -215,16 +254,19 @@ test.skipIf(process.platform !== "win32")(
             directories: [{ action: "disable", access: "write", path }]
         });
         permissions.respond(disable.request.id, "approved");
-        let policy = permissions.apply(createSandboxPolicy("read-only", []));
-        expect(policy?.filesystem.denyWrite).toEqual([{ path, literal: true }]);
+        expect(permissions.grants().directories.write).toEqual({
+            allow: [],
+            deny: [path]
+        });
 
         const enable = permissions.begin({
             domains: [],
             directories: [{ action: "enable", access: "write", path: otherCase }]
         });
         permissions.respond(enable.request.id, "approved");
-        policy = permissions.apply(createSandboxPolicy("read-only", []));
-        expect(policy?.filesystem.allowWrite).toEqual([{ path: otherCase, literal: true }]);
-        expect(policy?.filesystem.denyWrite).toEqual([]);
+        expect(permissions.grants().directories.write).toEqual({
+            allow: [otherCase],
+            deny: []
+        });
     }
 );

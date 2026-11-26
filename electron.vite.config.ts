@@ -21,7 +21,7 @@ export default defineConfig({
                 input: {
                     index: fileURLToPath(new URL("./src/main/index.ts", import.meta.url)),
                     "sandbox-runner": fileURLToPath(
-                        new URL("./src/core/permissions/sandbox-runner.ts", import.meta.url)
+                        new URL("./src/sandbox/runner.ts", import.meta.url)
                     )
                 }
             }

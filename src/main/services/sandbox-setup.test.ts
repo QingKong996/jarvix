@@ -2,7 +2,7 @@ import { expect, test, vi } from "vitest";
 import type {
     SandboxInstallResult,
     SandboxPreflightResult
-} from "../../core/permissions/sandbox-launch.ts";
+} from "../../sandbox/index.ts";
 import { SandboxSetupService } from "./sandbox-setup.ts";
 
 test("resumes a pending preflight after the renderer installs the sandbox", async () => {

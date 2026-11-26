@@ -1,6 +1,9 @@
-import type { SandboxPreflight } from "../../core/permissions/sandbox-launch.ts";
+import type { ToolSandboxFactory } from "../../core/execution/sandbox.ts";
+import {
+    createPermissionRules,
+    mergePermissionRules
+} from "../../core/permissions/rules.ts";
 import { SessionPermissions } from "../../core/permissions/session-permissions.ts";
-import { createSandboxPolicy } from "../../core/permissions/sandbox.ts";
 import type { ToolManager } from "./tool-manager.ts";
 import { toolFromExecutor } from "./tool-manager.ts";
 import { createDefaultTools } from "./default-tools.ts";
@@ -10,7 +13,7 @@ export const DEFAULT_TOOL_MANAGER_ID = "jarvix.default";
 
 export type DefaultToolManagerOptions = {
     permissions: SessionPermissions;
-    sandboxPreflight?: SandboxPreflight;
+    sandboxFactory?: ToolSandboxFactory;
     sharedBudget: ShellSessionBudget;
 };
 
@@ -20,27 +23,33 @@ export function createDefaultToolManager(
     return {
         id: DEFAULT_TOOL_MANAGER_ID,
         create(context) {
-            const sandboxPolicy = () => options.permissions.apply(createSandboxPolicy(
-                context.permission(),
-                context.workingDirectories()
-            ));
+            const sandbox = options.sandboxFactory?.({
+                permissionRules: () => mergePermissionRules(
+                    createPermissionRules(
+                        context.permission(),
+                        context.workingDirectories()
+                    ),
+                    options.permissions.grants()
+                )
+            });
             return [toolFromExecutor(createDefaultTools({
                 shell: {
                     defaultCwd: () => context.workingDirectories()[0],
-                    sandboxPolicy,
-                    sandboxPreflight: options.sandboxPreflight,
+                    sandbox: sandbox?.command,
                     sharedBudget: options.sharedBudget
                 },
                 applyPatch: {
                     defaultCwd: () => context.workingDirectories()[0],
-                    sandboxPolicy
+                    sandbox: sandbox?.access
                 },
                 requestPermission: {
-                    sandboxPolicy
+                    sandboxActive: sandbox
+                        ? () => sandbox.active
+                        : undefined
                 },
                 viewImage: {
                     defaultCwd: () => context.workingDirectories()[0],
-                    sandboxPolicy
+                    sandbox: sandbox?.access
                 }
             }))];
         }

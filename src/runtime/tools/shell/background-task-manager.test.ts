@@ -3,17 +3,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
 import type { LlmToolCallBlock } from "../../../protocol/llm.ts";
-import type { SandboxPreflight } from "../../../core/permissions/sandbox-launch.ts";
-import { createSandboxPolicy } from "../../../core/permissions/sandbox.ts";
+import type { SandboxReadiness } from "../../../core/execution/sandbox.ts";
+import { createPermissionRules } from "../../../core/permissions/rules.ts";
+import { createToolSandbox } from "../../../sandbox/tool-sandbox.ts";
 import {
     BackgroundTaskManager,
     MAX_BACKGROUND_SUBSCRIPTIONS
 } from "./background-task-manager.ts";
-import { writeFakeSandboxRunner } from "./fake-sandbox-runner.ts";
+import { writeFakeSandboxRunner } from "../../../sandbox/fake-runner.ts";
 import { ShellSessionBudget, ShellTool } from "./shell.ts";
 import type { ToolBackgroundEnd, ToolTaskEvent } from "../types.ts";
 
-const readySandboxPreflight: SandboxPreflight = async () => ({
+const readySandboxPreflight = async (): Promise<SandboxReadiness> => ({
     ready: true,
     warnings: []
 });
@@ -397,9 +398,12 @@ test("keeps a timed-out task failed without repeating reported violations", asyn
         }]
     });
     const manager = new BackgroundTaskManager(new ShellTool({
-        sandboxPolicy: () => createSandboxPolicy("read-only", [directory]),
-        sandboxPreflight: readySandboxPreflight,
-        sandboxRunnerPath: runner
+        sandbox: createToolSandbox({
+            permissionRules: () => createPermissionRules("read-only", [directory])
+        }, {
+            preflight: readySandboxPreflight,
+            runnerPath: runner
+        }).command
     }));
     const completed: ToolBackgroundEnd[] = [];
 

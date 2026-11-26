@@ -6,7 +6,7 @@ import {
     type SandboxPreflight,
     type SandboxProfileReadiness,
     type SandboxPreflightResult
-} from "../../core/permissions/sandbox-launch.ts";
+} from "../../sandbox/index.ts";
 import { type JarvixLogger, noopLogger } from "../../core/logger.ts";
 import type { SandboxInstallOutcome, SandboxStatus } from "../../protocol/ipc.ts";
 

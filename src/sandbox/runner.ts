@@ -8,8 +8,8 @@ import type {
     SandboxRunnerMessage,
     SandboxRunnerRequest,
     SandboxRunnerViolation
-} from "./sandbox-protocol.ts";
-import { rememberSandboxViolation } from "./violations.ts";
+} from "./protocol.ts";
+import { rememberSandboxViolation } from "../core/permissions/violations.ts";
 
 if (process.env.JARVIX_SANDBOX_RUNNER === "1") {
     void runSandboxRunner().catch((error: unknown) => {

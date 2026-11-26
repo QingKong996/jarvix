@@ -1,13 +1,9 @@
 import { resolve } from "node:path";
 import type { LlmToolCallBlock } from "../../../protocol/llm.ts";
-import {
-    createSandboxLaunch,
-    preflightSandbox,
-    SandboxRunnerHost,
-    type SandboxLaunch,
-    type SandboxPreflight
-} from "../../../core/permissions/sandbox-launch.ts";
-import type { SandboxPolicy } from "../../../core/permissions/sandbox.ts";
+import type {
+    CommandSandbox,
+    SandboxedCommand
+} from "../../../core/execution/sandbox.ts";
 import { appendSandboxViolations } from "../../../core/permissions/violations.ts";
 import { formatTruncatedOutput } from "../output.ts";
 import type {
@@ -76,9 +72,7 @@ const DEFAULT_CWD = process.cwd();
 
 export type ShellToolOptions = {
     defaultCwd?: string | (() => string | undefined);
-    sandboxPolicy?: () => SandboxPolicy | null;
-    sandboxPreflight?: SandboxPreflight;
-    sandboxRunnerPath?: string;
+    sandbox?: CommandSandbox;
     maxSessions?: number;
     sharedBudget?: ShellSessionBudget;
 };
@@ -87,10 +81,7 @@ export type ShellToolOptions = {
 export class ShellTool implements ToolExecutor {
     readonly definitions = SHELL_TOOL_DEFINITIONS;
     private readonly defaultCwd?: string | (() => string | undefined);
-    private readonly sandboxPolicy?: () => SandboxPolicy | null;
-    private readonly sandboxPreflight: SandboxPreflight;
-    private readonly sandboxRunnerPath?: string;
-    private sandboxRunnerHost?: SandboxRunnerHost;
+    private readonly sandbox?: CommandSandbox;
     private readonly maxSessions: number;
     private startingSessions = 0;
     readonly sharedBudget?: ShellSessionBudget;
@@ -99,9 +90,7 @@ export class ShellTool implements ToolExecutor {
 
     constructor(options: ShellToolOptions = {}) {
         this.defaultCwd = options.defaultCwd;
-        this.sandboxPolicy = options.sandboxPolicy;
-        this.sandboxPreflight = options.sandboxPreflight ?? preflightSandbox;
-        this.sandboxRunnerPath = options.sandboxRunnerPath;
+        this.sandbox = options.sandbox;
         this.maxSessions = normalizeSessionLimit(options.maxSessions);
         this.sharedBudget = options.sharedBudget;
     }
@@ -151,8 +140,7 @@ export class ShellTool implements ToolExecutor {
         }
         this.children.clear();
         this.addressableSessions.clear();
-        this.sandboxRunnerHost?.dispose();
-        this.sandboxRunnerHost = undefined;
+        this.sandbox?.dispose();
     }
 
     async stop(): Promise<readonly ToolStopEvent[]> {
@@ -266,8 +254,8 @@ export class ShellTool implements ToolExecutor {
         if (this.sessionCount() >= this.maxSessions) {
             return sessionLimitResult(command, this.maxSessions);
         }
-        if (this.sandboxPolicy?.()) {
-            const preflight = await this.sandboxPreflight();
+        if (this.sandbox?.active) {
+            const preflight = await this.sandbox.preflight();
             if (!preflight.ready) {
                 return sandboxPreflightResult(command, preflight);
             }
@@ -440,7 +428,7 @@ export class ShellTool implements ToolExecutor {
         toolCallId: string,
         sharedSlotHeld: boolean
     ): Promise<ShellSession> {
-        let sandboxed: SandboxLaunch | null;
+        let sandboxed: SandboxedCommand | null;
         try {
             sandboxed = await this.sandboxLaunch(command, cwd, toolCallId);
         } finally {
@@ -459,7 +447,7 @@ export class ShellTool implements ToolExecutor {
         command: string,
         cwd: string,
         listener: (chunk: string) => void,
-        sandboxed: SandboxLaunch | null,
+        sandboxed: SandboxedCommand | null,
         sharedSlotHeld: boolean
     ): ShellSession {
         return startShellSession({
@@ -484,22 +472,13 @@ export class ShellTool implements ToolExecutor {
         command: string,
         cwd: string,
         toolCallId: string
-    ): Promise<SandboxLaunch | null> {
-        const policy = this.sandboxPolicy?.();
-        if (!policy) {
-            return null;
-        }
-
-        this.sandboxRunnerHost ??= new SandboxRunnerHost({
-            runnerPath: this.sandboxRunnerPath
-        });
-        return createSandboxLaunch(this.sandboxRunnerHost, {
+    ): Promise<SandboxedCommand | null> {
+        return this.sandbox?.prepareCommand({
             command,
             cwd,
             commandId: toolCallId,
-            policy,
             binShell: sandboxBinShell()
-        });
+        }) ?? null;
     }
 
     private releaseSharedSlot(session: ShellSession): void {

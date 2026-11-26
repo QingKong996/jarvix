@@ -4,6 +4,7 @@ import { Jarvix } from "../core/index.ts";
 import { createPiAdapter } from "../llm/pi.ts";
 import type { JarvixConfig } from "../protocol/config.ts";
 import { IPC_CHANNELS } from "../protocol/ipc.ts";
+import { createToolSandboxFactory } from "../sandbox/index.ts";
 import { attachEventBridge } from "./event-bridge.ts";
 import {
     createHeadlessConfig,
@@ -128,6 +129,9 @@ function startDesktop(): void {
             windowAvailable: () => windows.current !== null,
             logger: mainLogger("sandbox")
         });
+        const sandboxFactory = createToolSandboxFactory({
+            preflight: () => sandboxSetup.preflight()
+        });
         const observer = createSqliteAgentObserver({
             databasePath: observabilityDatabasePath(),
             appVersion: app.getVersion(),
@@ -138,7 +142,7 @@ function startDesktop(): void {
         const jarvix = new Jarvix({
             llm: createPiAdapter({ providers: () => config.providers }),
             config,
-            sandboxPreflight: () => sandboxSetup.preflight(),
+            sandboxFactory,
             logger: mainLogger("core"),
             observer
         });

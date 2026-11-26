@@ -16,11 +16,10 @@ import {
     ApplyPatchParseError,
     parseApplyPatch
 } from "./apply-patch-parser.ts";
-import {
-    authorizeSandboxWrites,
-    type SandboxPathDecision
-} from "../../../core/permissions/path-access.ts";
-import type { SandboxPolicy } from "../../../core/permissions/sandbox.ts";
+import type {
+    PathAccessDecision,
+    PathAccessGuard
+} from "../../../core/execution/sandbox.ts";
 import { formatSandboxViolations } from "../../../core/permissions/violations.ts";
 import type {
     ToolExecutionResult,
@@ -82,18 +81,18 @@ export const APPLY_PATCH_TOOL_DEFINITIONS: readonly LlmToolDefinition[] = [{
 
 export type ApplyPatchToolOptions = {
     defaultCwd?: string | (() => string | undefined);
-    sandboxPolicy?: () => SandboxPolicy | null;
+    sandbox?: PathAccessGuard;
 };
 
 /** Executes OpenAI apply_patch hunks against the local filesystem. */
 export class ApplyPatchTool implements ToolExecutor {
     readonly definitions = APPLY_PATCH_TOOL_DEFINITIONS;
     private readonly defaultCwd?: string | (() => string | undefined);
-    private readonly sandboxPolicy?: () => SandboxPolicy | null;
+    private readonly sandbox?: PathAccessGuard;
 
     constructor(options: ApplyPatchToolOptions = {}) {
         this.defaultCwd = options.defaultCwd;
-        this.sandboxPolicy = options.sandboxPolicy;
+        this.sandbox = options.sandbox;
     }
 
     handles(name: string): boolean {
@@ -123,12 +122,16 @@ export class ApplyPatchTool implements ToolExecutor {
 
         const cwd = this.resolveCwd(arguments_.data.cwd);
         const targets = patchWriteTargets(parsed, cwd);
-        let decisions: SandboxPathDecision[];
+        let decisions: readonly PathAccessDecision[];
         try {
-            decisions = authorizeSandboxWrites(
-                this.sandboxPolicy?.() ?? null,
-                targets.map((target) => target.path)
-            );
+            decisions = this.sandbox
+                ? this.sandbox.authorizeWrites(
+                    targets.map((target) => target.path)
+                )
+                : targets.map((target): PathAccessDecision => ({
+                    allowed: true,
+                    path: target.path
+                }));
         } catch (error) {
             return failedResult(call, `Failed to check sandbox policy: ${errorMessage(error)}`);
         }
@@ -204,7 +207,7 @@ function sandboxDeniedResult(
     call: LlmToolCallBlock,
     arguments_: z.infer<typeof applyPatchArguments>,
     denied: ReadonlyArray<{
-        decision: Extract<SandboxPathDecision, { allowed: false }>;
+        decision: Extract<PathAccessDecision, { allowed: false }>;
         target: {
             path: string;
             operation: string;

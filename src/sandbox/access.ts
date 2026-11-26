@@ -8,18 +8,8 @@ import {
     sep
 } from "node:path";
 import { realPathOf, type FilesystemPathEntry } from "@anthropic-ai/sandbox-runtime";
-import type { SandboxPolicy } from "./sandbox.ts";
-
-export type SandboxPathDecision =
-    | {
-        allowed: true;
-        path: string;
-    }
-    | {
-        allowed: false;
-        path: string;
-        reason: string;
-    };
+import type { PathAccessDecision } from "../core/execution/sandbox.ts";
+import type { SandboxPolicy } from "./policy.ts";
 
 type PathRule = {
     path: string;
@@ -38,7 +28,7 @@ type PathRuleMatch = {
 export function authorizeSandboxRead(
     policy: SandboxPolicy | null,
     requestedPath: string
-): SandboxPathDecision {
+): PathAccessDecision {
     const absolutePath = resolve(requestedPath);
     if (policy === null || policy.filesystem.disabled === true) {
         return { allowed: true, path: absolutePath };
@@ -74,7 +64,7 @@ export function authorizeSandboxRead(
 export function authorizeSandboxWrite(
     policy: SandboxPolicy | null,
     requestedPath: string
-): SandboxPathDecision {
+): PathAccessDecision {
     const absolutePath = resolve(requestedPath);
     if (policy === null || policy.filesystem.disabled === true) {
         return { allowed: true, path: absolutePath };
@@ -151,7 +141,7 @@ export function authorizeSandboxWrite(
 export function authorizeSandboxWrites(
     policy: SandboxPolicy | null,
     requestedPaths: readonly string[]
-): SandboxPathDecision[] {
+): PathAccessDecision[] {
     return requestedPaths.map((path) => authorizeSandboxWrite(policy, path));
 }
 

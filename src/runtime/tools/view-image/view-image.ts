@@ -2,11 +2,10 @@ import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { z } from "zod";
 import type { LlmToolCallBlock, LlmToolDefinition } from "../../../protocol/llm.ts";
-import {
-    authorizeSandboxRead,
-    type SandboxPathDecision
-} from "../../../core/permissions/path-access.ts";
-import type { SandboxPolicy } from "../../../core/permissions/sandbox.ts";
+import type {
+    PathAccessDecision,
+    PathAccessGuard
+} from "../../../core/execution/sandbox.ts";
 import type {
     ToolExecutionObserver,
     ToolExecutionResult,
@@ -49,18 +48,18 @@ export const VIEW_IMAGE_TOOL_DEFINITIONS: readonly LlmToolDefinition[] = [{
 
 export type ViewImageToolOptions = {
     defaultCwd?: string | (() => string | undefined);
-    sandboxPolicy?: () => SandboxPolicy | null;
+    sandbox?: PathAccessGuard;
 };
 
 /** Loads a local image and returns it as pi-ai image content. */
 export class ViewImageTool implements ToolExecutor {
     readonly definitions = VIEW_IMAGE_TOOL_DEFINITIONS;
     private readonly defaultCwd?: string | (() => string | undefined);
-    private readonly sandboxPolicy?: () => SandboxPolicy | null;
+    private readonly sandbox?: PathAccessGuard;
 
     constructor(options: ViewImageToolOptions = {}) {
         this.defaultCwd = options.defaultCwd;
-        this.sandboxPolicy = options.sandboxPolicy;
+        this.sandbox = options.sandbox;
     }
 
     handles(name: string): boolean {
@@ -86,9 +85,11 @@ export class ViewImageTool implements ToolExecutor {
         }
 
         const path = this.resolvePath(parsed.data.path);
-        let decision: SandboxPathDecision;
+        let decision: PathAccessDecision;
         try {
-            decision = authorizeSandboxRead(this.sandboxPolicy?.() ?? null, path);
+            decision = this.sandbox
+                ? this.sandbox.authorizeRead(path)
+                : { allowed: true, path };
         } catch (error) {
             return failedResult(
                 call,

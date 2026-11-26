@@ -27,7 +27,7 @@ import {
     noopAgentObserver,
     type AgentObserver
 } from "./observability/index.ts";
-import type { SandboxPreflight } from "./permissions/sandbox-launch.ts";
+import type { ToolSandboxFactory } from "./execution/sandbox.ts";
 import type { ToolManager } from "../runtime/tools/tool-manager.ts";
 import {
     createProject as createStoredProject,
@@ -43,7 +43,7 @@ import { generateSessionNameResult } from "./session/naming.ts";
 export type JarvixOptions = {
     llm: LlmAdapter;
     config?: JarvixConfig;
-    sandboxPreflight?: SandboxPreflight;
+    sandboxFactory?: ToolSandboxFactory;
     contextManagerFactory?: ContextManagerFactory;
     toolManagers?: readonly ToolManager[];
     logger?: JarvixLogger;
@@ -64,7 +64,7 @@ export class Jarvix {
         this.logger = options.logger ?? noopLogger;
         this.observer = options.observer ?? noopAgentObserver;
         this.sessions = new SessionManager(
-            options.sandboxPreflight,
+            options.sandboxFactory,
             options.contextManagerFactory,
             options.toolManagers,
             this.logger,

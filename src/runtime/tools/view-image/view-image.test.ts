@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import type { LlmToolCallBlock } from "../../../protocol/llm.ts";
-import { createSandboxPolicy } from "../../../core/permissions/sandbox.ts";
+import {
+    createPermissionRules,
+    mergePermissionRules
+} from "../../../core/permissions/rules.ts";
+import { createToolSandbox } from "../../../sandbox/tool-sandbox.ts";
 import { createDefaultTools } from "../index.ts";
 import { toToolResultDetails } from "../view.ts";
 import { VIEW_IMAGE_TOOL, ViewImageTool } from "./view-image.ts";
@@ -62,11 +66,31 @@ test("rejects invalid image data and sandbox-denied paths", async () => {
     expect(invalid.images).toBeUndefined();
     expect(invalid.content).toContain("invalid or unsupported image data");
 
-    const policy = createSandboxPolicy("read-only", [directory]);
-    policy!.filesystem.denyRead.push({ path: deniedPath, literal: true });
+    const permissionRules = mergePermissionRules(
+        createPermissionRules("read-only", [directory]),
+        {
+            domains: {
+                allow: [],
+                deny: []
+            },
+            directories: {
+                read: {
+                    allow: [],
+                    deny: [deniedPath]
+                },
+                write: {
+                    allow: [],
+                    deny: []
+                }
+            }
+        }
+    );
+    const sandbox = createToolSandbox({
+        permissionRules: () => permissionRules
+    });
     const denied = await new ViewImageTool({
         defaultCwd: directory,
-        sandboxPolicy: () => policy
+        sandbox: sandbox.access
     }).execute(
         call(VIEW_IMAGE_TOOL, { path: deniedPath }),
         observer

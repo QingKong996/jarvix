@@ -2,6 +2,7 @@ import { Jarvix } from "../../core/index.ts";
 import { createPiAdapter } from "../../llm/pi.ts";
 import type { JarvixConfig } from "../../protocol/config.ts";
 import type { PermissionRequest } from "../../protocol/permission.ts";
+import { createToolSandboxFactory } from "../../sandbox/index.ts";
 import { mainLogger } from "../logger.ts";
 import type { HeadlessOptions } from "./options.ts";
 import { finalAssistantText } from "./output.ts";
@@ -16,6 +17,7 @@ export async function runHeadless(
     const jarvix = new Jarvix({
         llm: createPiAdapter({ providers: () => config.providers }),
         config,
+        sandboxFactory: createToolSandboxFactory(),
         logger
     });
     let sessionId: string | undefined;

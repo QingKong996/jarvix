@@ -12,6 +12,7 @@ import type {
 } from "../../protocol/llm.ts";
 import type { JarvixEvent } from "../../protocol/event.ts";
 import { providerConfigSchema } from "../../protocol/providers.ts";
+import { createToolSandboxFactory } from "../../sandbox/index.ts";
 import { Jarvix } from "../index.ts";
 
 const home = vi.hoisted(() => ({ path: "" }));
@@ -83,7 +84,11 @@ test("approves access for the session and applies it to later tool calls", async
             return [assistantMessage("done")];
         })
     };
-    const jarvix = new Jarvix({ llm, config: CONFIG });
+    const jarvix = new Jarvix({
+        llm,
+        config: CONFIG,
+        sandboxFactory: createToolSandboxFactory()
+    });
     const session = jarvix.createSession({ workingDirectory: base }, "test", "read-only");
     const events: Array<{ type: string; [key: string]: unknown }> = [];
     let permissionRequestId = "";
@@ -165,7 +170,11 @@ test("clears approved access when the permission mode changes", async () => {
             return [assistantMessage("done")];
         })
     };
-    const jarvix = new Jarvix({ llm, config: CONFIG });
+    const jarvix = new Jarvix({
+        llm,
+        config: CONFIG,
+        sandboxFactory: createToolSandboxFactory()
+    });
     const session = jarvix.createSession(
         { workingDirectory: workspace },
         "permission change",
@@ -236,7 +245,11 @@ test("retains approved access across idle session release and reload", async () 
             return [assistantMessage("done")];
         })
     };
-    const jarvix = new Jarvix({ llm, config: CONFIG });
+    const jarvix = new Jarvix({
+        llm,
+        config: CONFIG,
+        sandboxFactory: createToolSandboxFactory()
+    });
     const session = jarvix.createSession({}, "retained permission", "read-only");
     const unsubscribe = jarvix.subscribe((event, sessionId) => {
         if (event.type === "permission.request") {
