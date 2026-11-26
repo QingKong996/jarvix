@@ -13,31 +13,31 @@ export function LocalTimeToolCall({ data }: { data: LocalTimeView }) {
         <div
             data-slot="local-time-tool"
             data-status={data.status}
-            className="overflow-hidden rounded-lg border bg-card/60"
+            className="overflow-hidden rounded-xl border border-border/80 bg-surface-subtle"
         >
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3">
-                <div className="grid size-10 shrink-0 place-items-center rounded-md border bg-muted/60 text-muted-foreground">
-                    <Clock3 className="size-5" />
+            <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2.5 px-4 py-3">
+                <div className="grid size-9 shrink-0 place-items-center rounded-lg border border-border/70 bg-background text-muted-foreground">
+                    <Clock3 className="size-4" />
                 </div>
                 <div className="min-w-0 flex-1">
                     <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
                         {t("tools.localTime")}
                     </p>
-                    <p className="font-mono text-2xl leading-tight font-semibold tabular-nums">
+                    <p className="font-mono text-xl leading-tight font-semibold text-foreground tabular-nums">
                         {available ? time : "--:--:--"}
                     </p>
                     <p className="min-h-4 text-xs text-muted-foreground">
                         {available ? date : null}
                     </p>
                 </div>
-                <div className="flex items-center gap-2 rounded-full border bg-secondary/70 px-2.5 py-1 text-[11px]">
-                    <span className="font-medium">{data.timeZone || "—"}</span>
+                <div className="flex items-center gap-1.5 rounded-full border border-border/70 bg-background px-2.5 py-1 text-[11px]">
+                    <span className="font-medium text-foreground">{data.timeZone || "—"}</span>
                     <span className="text-muted-foreground">
                         UTC{data.utcOffset || "—"}
                     </span>
                 </div>
             </div>
-            <div className="grid grid-cols-2 border-t">
+            <div className="grid grid-cols-2 border-t border-border/80 bg-background/50">
                 <Metric
                     label={t("tools.localTimeDetails.utcOffset")}
                     value={data.utcOffset || "—"}
@@ -70,15 +70,17 @@ export function SleepToolCall({ data }: { data: SleepView }) {
         <div
             data-slot="sleep-tool"
             data-status={data.status}
-            className="overflow-hidden rounded-md border bg-muted/20"
+            className="overflow-hidden rounded-xl border border-border/80 bg-surface-subtle"
         >
             <div className="flex items-center gap-3 px-4 py-3">
-                <Timer className={cn("size-5 shrink-0 text-muted-foreground", active && "animate-pulse")} />
+                <div className="grid size-9 shrink-0 place-items-center rounded-lg border border-border/70 bg-background text-muted-foreground">
+                    <Timer className={cn("size-4", active && "animate-pulse text-foreground")} />
+                </div>
                 <div className="min-w-0 flex-1">
-                    <p className="text-[11px] text-muted-foreground">{label}</p>
+                    <p className="text-[11px] font-medium text-muted-foreground">{label}</p>
                     <p
                         role="timer"
-                        className="font-mono text-3xl leading-none font-semibold tracking-tight tabular-nums"
+                        className="font-mono text-xl leading-tight font-semibold tracking-tight text-foreground tabular-nums"
                     >
                         {formatClock(displayedMs)}
                     </p>
@@ -91,9 +93,9 @@ export function SleepToolCall({ data }: { data: SleepView }) {
 
 function Metric({ label, value, divided = false }: { label: string; value: string; divided?: boolean }) {
     return (
-        <div className={cn("min-w-0 px-4 py-2.5", divided && "border-l")}>
-            <p className="text-[10px] tracking-wide text-muted-foreground uppercase">{label}</p>
-            <p className="mt-0.5 truncate font-mono text-xs tabular-nums">{value}</p>
+        <div className={cn("min-w-0 px-3.5 py-2", divided && "border-l border-border")}>
+            <p className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">{label}</p>
+            <p className="mt-0.5 truncate font-mono text-xs text-foreground tabular-nums">{value}</p>
         </div>
     );
 }
@@ -103,7 +105,7 @@ function ToolError({ output, visible }: { output: string; visible: boolean }) {
         return null;
     }
     return (
-        <p className="border-t px-4 py-2 text-xs leading-relaxed text-destructive">
+        <p className="border-t border-border px-3.5 py-2 text-xs leading-relaxed text-destructive">
             {output}
         </p>
     );

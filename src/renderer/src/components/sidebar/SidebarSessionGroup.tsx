@@ -50,26 +50,26 @@ export function SidebarSessionGroup({
                 ref={setNodeRef}
                 data-project-group={projectId ?? "temporary"}
                 className={cn(
-                    "relative rounded-lg transition-shadow",
-                    isOver && "z-10 ring-2 ring-primary/60 ring-offset-2 ring-offset-sidebar"
+                    "relative rounded-xl transition-colors",
+                    isOver && "z-10 bg-accent/60 ring-1 ring-foreground/25"
                 )}
             >
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-0.5">
                     <CollapsibleTrigger asChild>
                         <button
                             type="button"
-                            className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-left text-sm font-medium text-foreground outline-none transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/50"
+                            className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 text-left text-sm font-medium text-foreground outline-none transition-colors hover:bg-accent/70 focus-visible:ring-2 focus-visible:ring-ring/25"
                             title={label}
                         >
                             <motion.span
                                 aria-hidden="true"
                                 animate={{ rotate: open ? 90 : 0 }}
                                 transition={quickTransition}
-                                className="inline-flex shrink-0"
+                                className="inline-flex shrink-0 text-muted-foreground"
                             >
                                 <ChevronRight className="size-3.5" />
                             </motion.span>
-                            <GroupIcon className="size-4 shrink-0" />
+                            <GroupIcon className="size-4 shrink-0 text-muted-foreground" />
                             <span className="min-w-0 flex-1 truncate">{label}</span>
                         </button>
                     </CollapsibleTrigger>
@@ -82,6 +82,7 @@ export function SidebarSessionGroup({
                             title={t("projects.newSession")}
                             onClick={() => onNewSession(group.project!.id)}
                             disabled={busy}
+                            className="text-muted-foreground hover:text-foreground"
                         >
                             <Plus />
                         </Button>

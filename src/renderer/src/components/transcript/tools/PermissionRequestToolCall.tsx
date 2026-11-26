@@ -34,7 +34,7 @@ export function PermissionRequestToolCall({
         >
             <CollapsibleTrigger
                 type="button"
-                className="group -ml-5 flex w-fit items-center gap-1.5 rounded-md text-[13px] text-muted-foreground transition-colors outline-none select-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                className="group -ml-2 flex w-fit items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors outline-none select-none hover:bg-accent/65 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30"
             >
                 <motion.span
                     aria-hidden="true"
@@ -44,17 +44,27 @@ export function PermissionRequestToolCall({
                 >
                     <ChevronRight className="size-3.5" />
                 </motion.span>
-                <ShieldAlert aria-hidden="true" className="size-3.5 shrink-0" />
-                <span className={cn(pending && "animate-pulse")}>
+                <ShieldAlert aria-hidden="true" className={cn("size-3.5 shrink-0", pending && "text-warning")} />
+                <span className={cn("font-medium", pending && "animate-pulse")}>
                     {t("permissionRequest.title")}
                 </span>
-                <span aria-hidden="true">·</span>
-                <span>{statusLabel(data.decision, isError, t)}</span>
+                <span aria-hidden="true" className="opacity-50">·</span>
+                <span
+                    className={cn(
+                        isError
+                            ? "text-destructive"
+                            : pending
+                                ? "text-warning"
+                                : "text-muted-foreground"
+                    )}
+                >
+                    {statusLabel(data.decision, isError, t)}
+                </span>
             </CollapsibleTrigger>
 
             <AnimatedCollapsibleContent>
-                <div className="flex flex-col gap-2 border-l-2 pl-3">
-                    <p className="text-xs text-muted-foreground">
+                <div className="ml-1.5 flex flex-col gap-2 border-l border-border pl-3.5">
+                    <p className="text-xs leading-relaxed text-muted-foreground">
                         {t("permissionRequest.description")}
                     </p>
                     <PermissionResourceList

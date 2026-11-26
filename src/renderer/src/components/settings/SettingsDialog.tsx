@@ -123,14 +123,14 @@ export function SettingsDialog({
                 data-testid="settings-dialog"
                 className="h-[clamp(28rem,72dvh,46rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-5xl"
             >
-                <DialogHeader className="border-b px-6 py-4">
+                <DialogHeader className="flex h-14 justify-center border-b border-border px-6">
                     <DialogTitle>{t("settings.title")}</DialogTitle>
                 </DialogHeader>
 
                 <form id="settings-form" onSubmit={handleSave} className="flex h-full min-h-0 min-w-0">
                     <nav
                         aria-label={t("settings.title")}
-                        className="flex w-44 shrink-0 flex-col gap-1 border-r bg-secondary/20 p-3"
+                        className="flex w-48 shrink-0 flex-col gap-1 border-r border-border bg-sidebar p-3"
                     >
                         <SettingsSectionButton
                             active={section === "model"}
@@ -155,7 +155,7 @@ export function SettingsDialog({
                         />
                     </nav>
 
-                    <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-6">
+                    <div className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-card p-6">
                         <div className={section === "model" ? undefined : "hidden"}>
                             <ProviderSettings
                                 providers={providers}
@@ -198,7 +198,7 @@ export function SettingsDialog({
                     </div>
                 </form>
 
-                <DialogFooter error={error} className="gap-3 border-t px-6 py-3">
+                <DialogFooter error={error} className="gap-2.5 border-t border-border bg-sidebar/50 px-6 py-3.5">
                     <Button
                         type="button"
                         variant="outline"

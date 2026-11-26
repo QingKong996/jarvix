@@ -29,7 +29,7 @@ export function RightSidebarNewTab({ onOpenPanel }: RightSidebarNewTabProps) {
         >
             <div className="mx-auto my-auto w-full max-w-88">
                 <div className="relative">
-                    <Search className="pointer-events-none absolute top-1/2 left-4 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <Search className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground" />
                     <input
                         type="search"
                         autoFocus
@@ -38,18 +38,18 @@ export function RightSidebarNewTab({ onOpenPanel }: RightSidebarNewTabProps) {
                         aria-label={t("rightSidebar.search")}
                         placeholder={t("rightSidebar.searchPlaceholder")}
                         data-testid="right-sidebar-new-tab-search"
-                        className="h-11 w-full rounded-full border border-border bg-muted/70 pr-4 pl-10 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-ring"
+                        className="h-10 w-full rounded-xl border border-input bg-background pr-3.5 pl-10 text-sm text-foreground transition-colors outline-none placeholder:text-muted-foreground hover:border-border-strong focus:border-foreground/40 focus:ring-2 focus:ring-ring/20"
                     />
                 </div>
 
-                <div className="mt-8 flex items-center justify-between">
-                    <h3 className="text-[11px] font-semibold text-foreground">
+                <div className="mt-7 flex items-center justify-between">
+                    <h3 className="text-xs font-medium text-muted-foreground">
                         {t("rightSidebar.newSection")}
                     </h3>
                 </div>
 
                 {options.length > 0 ? (
-                    <div className="mt-3 grid grid-cols-2 gap-2.5">
+                    <div className="mt-3 grid grid-cols-2 gap-3">
                         {options.map((option) => {
                             const Icon = option.icon;
                             return (
@@ -58,10 +58,10 @@ export function RightSidebarNewTab({ onOpenPanel }: RightSidebarNewTabProps) {
                                     type="button"
                                     onClick={() => onOpenPanel(option.panel)}
                                     data-testid={`right-sidebar-new-tab-${option.panel}`}
-                                    className="flex h-24 flex-col items-start justify-between rounded-xl border border-transparent bg-muted/65 p-3.5 text-left text-foreground outline-none hover:border-border hover:bg-muted focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
+                                    className="flex h-26 flex-col items-start justify-between rounded-xl border border-border bg-surface-subtle p-4 text-left text-foreground transition-colors duration-150 outline-none hover:border-border-strong hover:bg-accent/70 focus-visible:border-foreground/40 focus-visible:ring-2 focus-visible:ring-ring/20"
                                 >
                                     <Icon className="size-4 text-muted-foreground" />
-                                    <span className="text-xs font-medium">
+                                    <span className="text-sm font-medium">
                                         {t(option.labelKey)}
                                     </span>
                                 </button>
@@ -69,7 +69,7 @@ export function RightSidebarNewTab({ onOpenPanel }: RightSidebarNewTabProps) {
                         })}
                     </div>
                 ) : (
-                    <p className="mt-4 text-xs text-muted-foreground">
+                    <p className="mt-4 text-sm text-muted-foreground">
                         {t("rightSidebar.noMatches")}
                     </p>
                 )}

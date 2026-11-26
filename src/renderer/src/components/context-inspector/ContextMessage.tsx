@@ -17,23 +17,23 @@ const TYPE_STYLE: Record<ContextMessageEntry["kind"], {
 }> = {
     system: {
         labelKey: "rightSidebar.context.roles.system",
-        badge: "border-amber-400/25 bg-amber-400/10 text-amber-700 dark:text-amber-200"
+        badge: "border-border bg-secondary text-muted-foreground"
     },
     user: {
         labelKey: "rightSidebar.context.roles.user",
-        badge: "border-sky-400/25 bg-sky-400/10 text-sky-700 dark:text-sky-200"
+        badge: "border-border-strong bg-foreground/8 text-foreground"
     },
     assistant: {
         labelKey: "rightSidebar.context.roles.assistant",
-        badge: "border-fuchsia-400/25 bg-fuchsia-400/10 text-fuchsia-700 dark:text-fuchsia-200"
+        badge: "border-border bg-muted text-foreground/85"
     },
     toolCall: {
         labelKey: "rightSidebar.context.roles.toolCall",
-        badge: "border-cyan-400/25 bg-cyan-400/10 text-cyan-700 dark:text-cyan-200"
+        badge: "border-border bg-surface-subtle text-muted-foreground"
     },
     toolResult: {
         labelKey: "rightSidebar.context.roles.toolResult",
-        badge: "border-emerald-400/25 bg-emerald-400/10 text-emerald-700 dark:text-emerald-200"
+        badge: "border-border bg-surface-subtle text-muted-foreground"
     }
 };
 
@@ -44,14 +44,14 @@ export function ContextMessage({ entry }: { entry: ContextMessageEntry }) {
     const text = useMemo(() => open ? entry.text() : "", [entry, open]);
 
     return (
-        <article className="border-b border-border/60 last:border-b-0 [contain-intrinsic-size:auto_3rem] [content-visibility:auto]">
+        <article className="border-b border-border/70 last:border-b-0 [contain-intrinsic-size:auto_3rem] [content-visibility:auto]">
             <details
                 className="group"
                 onToggle={(event) => setOpen(event.currentTarget.open)}
             >
-                <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 outline-none focus-visible:bg-muted/30 [&::-webkit-details-marker]:hidden">
+                <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 transition-colors outline-none hover:bg-muted/50 focus-visible:bg-muted/60 [&::-webkit-details-marker]:hidden">
                     <span className={cn(
-                        "inline-flex shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                        "inline-flex shrink-0 rounded-full border px-2 py-0.5 text-[10px] leading-tight font-medium",
                         style.badge
                     )}>
                         {t(style.labelKey)}
@@ -59,10 +59,10 @@ export function ContextMessage({ entry }: { entry: ContextMessageEntry }) {
                     <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
                         {entry.preview || t("rightSidebar.context.emptyMessage")}
                     </span>
-                    <ChevronRight className="size-3.5 shrink-0 text-muted-foreground group-open:rotate-90" />
+                    <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
                 </summary>
                 {open ? (
-                    <pre className="border-t border-border/40 px-3 py-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-foreground/85">
+                    <pre className="border-t border-border bg-surface-subtle px-3 py-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-foreground/90">
                         {text || t("rightSidebar.context.emptyMessage")}
                     </pre>
                 ) : null}

@@ -88,8 +88,8 @@ export function ComposerPermissionMenu({
                     data-testid="permission-menu-trigger"
                     data-permission={permission}
                     className={cn(
-                        "h-8 min-w-0 max-w-36 shrink justify-start gap-1 px-2 text-xs font-normal",
-                        fullAccess && "text-orange-600 hover:text-orange-600 dark:text-orange-400 dark:hover:text-orange-400"
+                        "h-8 min-w-0 max-w-40 shrink justify-start gap-1.5 px-2.5 text-[13px] font-normal text-muted-foreground hover:text-foreground",
+                        fullAccess && "text-warning hover:text-warning"
                     )}
                     title={`${t(current.label)}: ${t(current.description)}`}
                 >
@@ -105,7 +105,7 @@ export function ComposerPermissionMenu({
                 collisionPadding={8}
                 className="w-80 max-w-[calc(100vw-2rem)] p-1.5"
             >
-                <div className="px-2 pt-1 pb-2 text-[13px] text-muted-foreground">
+                <div className="px-2.5 pt-1.5 pb-2 text-xs font-medium text-muted-foreground">
                     {t("composer.permissions.title")}
                 </div>
                 <DropdownMenuSeparator className="mx-0" />
@@ -114,6 +114,7 @@ export function ComposerPermissionMenu({
                     const option = PERMISSION_OPTIONS[value];
                     const Icon = option.icon;
                     const selected = value === permission;
+                    const risky = value === "full-access";
                     return (
                         <DropdownMenuItem
                             key={value}
@@ -125,23 +126,35 @@ export function ComposerPermissionMenu({
                                 void selectPermission(value);
                             }}
                             className={cn(
-                                "items-start gap-2.5 rounded-lg px-2.5 py-2.5",
-                                selected && "text-orange-600 focus:text-orange-600 dark:text-orange-400 dark:focus:text-orange-400"
+                                "items-start gap-2.5 rounded-lg px-2.5 py-2",
+                                selected && "bg-accent/60 text-foreground",
+                                risky && selected && "text-warning focus:text-warning"
                             )}
                         >
-                            <Icon className="mt-0.5 size-4 shrink-0" />
+                            <Icon
+                                className={cn(
+                                    "mt-0.5 size-4 shrink-0",
+                                    risky
+                                        ? "text-warning"
+                                        : selected
+                                            ? "text-foreground"
+                                            : "text-muted-foreground"
+                                )}
+                            />
                             <span className="min-w-0 flex-1">
                                 <span className="block text-xs font-medium">{t(option.label)}</span>
-                                <span
-                                    className={cn(
-                                        "mt-0.5 block text-[11px] leading-4 text-muted-foreground",
-                                        selected && "text-orange-600/75 dark:text-orange-400/75"
-                                    )}
-                                >
+                                <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">
                                     {t(option.description)}
                                 </span>
                             </span>
-                            {selected ? <Check className="mt-0.5 size-3.5 shrink-0" /> : null}
+                            {selected ? (
+                                <Check
+                                    className={cn(
+                                        "mt-0.5 size-4 shrink-0",
+                                        risky ? "text-warning" : "text-foreground"
+                                    )}
+                                />
+                            ) : null}
                         </DropdownMenuItem>
                     );
                 })}

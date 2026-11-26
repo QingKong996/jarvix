@@ -36,11 +36,13 @@ export function ToolCallBlock({ toolName, data, isError, endReason }: ToolCallBl
         return <PermissionRequestToolCall data={data} isError={isError} />;
     }
 
+    const failed = isError || data.status === "failed";
+
     return (
         <Collapsible open={open} onOpenChange={setOpen} className="flex flex-col gap-1.5">
             <CollapsibleTrigger
                 type="button"
-                className="group -ml-5 flex w-fit items-center gap-1.5 rounded-md text-[13px] text-muted-foreground transition-colors outline-none select-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                className="group -ml-2 flex w-fit items-center gap-1.5 rounded-lg px-2 py-1 text-[13px] text-muted-foreground transition-colors outline-none select-none hover:bg-accent/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/25"
             >
                 <motion.span
                     aria-hidden="true"
@@ -50,13 +52,25 @@ export function ToolCallBlock({ toolName, data, isError, endReason }: ToolCallBl
                 >
                     <ChevronRight className="size-3.5" />
                 </motion.span>
-                <span className={cn(active && "animate-pulse")}>{toolLabel(toolName, data, t)}</span>
-                <span aria-hidden="true">·</span>
-                <span>{statusLabel(data.status, isError, endReason, t)}</span>
+                <span className={cn("font-medium", active && "animate-pulse")}>
+                    {toolLabel(toolName, data, t)}
+                </span>
+                <span aria-hidden="true" className="opacity-50">·</span>
+                <span
+                    className={cn(
+                        failed
+                            ? "text-destructive"
+                            : active
+                                ? "text-foreground"
+                                : "text-muted-foreground"
+                    )}
+                >
+                    {statusLabel(data.status, isError, endReason, t)}
+                </span>
             </CollapsibleTrigger>
 
             <AnimatedCollapsibleContent>
-                <div className="flex flex-col gap-2 border-l-2 pl-3">
+                <div className="ml-1.5 flex flex-col gap-2 border-l border-border pl-3.5">
                     {data.kind === "apply_patch" ? (
                         <ApplyPatchDiff patch={data.patch} />
                     ) : data.kind === "time.local_time" ? (
@@ -67,7 +81,7 @@ export function ToolCallBlock({ toolName, data, isError, endReason }: ToolCallBl
                         <ViewImageToolCall data={data} />
                     ) : data.kind === "generic" ? (
                         open ? (
-                            <pre className="font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-muted-foreground">
+                            <pre className="overflow-x-auto rounded-xl border border-border/80 bg-surface-subtle p-3.5 font-mono text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
                                 {JSON.stringify(data.arguments, null, 2)}
                             </pre>
                         ) : null
@@ -99,10 +113,10 @@ function ToolOutput({ text, streaming }: { text: string; streaming: boolean }) {
     return (
         <ScrollArea
             viewportRef={ref}
-            className="max-h-80"
+            className="max-h-80 overflow-hidden rounded-xl border border-border/80 bg-surface-subtle"
             viewportClassName="h-auto max-h-[inherit]"
         >
-            <pre className="font-mono text-[12px] leading-relaxed whitespace-pre-wrap break-words text-muted-foreground">
+            <pre className="px-3 py-2.5 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words text-muted-foreground">
                 {text}
             </pre>
         </ScrollArea>

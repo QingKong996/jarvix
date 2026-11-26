@@ -130,16 +130,17 @@ export function ProviderConfigForm({
                 </div>
             </FormField>
 
-            <fieldset className="flex min-w-0 flex-col gap-3 border-t pt-4">
-                <legend className="pr-2 font-medium">{t("settings.providers.models")}</legend>
-                <div className="flex items-center justify-between gap-3">
-                    <Button type="button" variant="outline" disabled={disabled || syncingModels || modelPanelOpen} onClick={onAddModel}>
+            <fieldset className="flex min-w-0 flex-col gap-3 border-t border-border pt-4">
+                <legend className="pr-2 font-medium text-foreground">{t("settings.providers.models")}</legend>
+                <div className="flex items-center justify-between gap-2">
+                    <Button type="button" variant="outline" size="sm" disabled={disabled || syncingModels || modelPanelOpen} onClick={onAddModel}>
                         <Plus />
                         {t("settings.providers.addModel")}
                     </Button>
                     <Button
                         type="button"
                         variant="outline"
+                        size="sm"
                         disabled={disabled || syncingModels || modelPanelOpen}
                         aria-busy={syncingModels}
                         onClick={onSyncModels}
@@ -155,7 +156,7 @@ export function ProviderConfigForm({
                     disabled={modelPanelOpen}
                     onChange={(event) => onQueryChange(event.target.value)}
                 />
-                <ul className="min-h-28 max-h-44 overflow-y-auto rounded-md border [scrollbar-width:thin]">
+                <ul className="min-h-28 max-h-44 overflow-y-auto rounded-xl border border-border/80 bg-background p-1.5">
                     {visibleModels.length > 0 ? visibleModels.map((model) => (
                         <ModelListItem
                             key={model.id}
@@ -167,7 +168,7 @@ export function ProviderConfigForm({
                             onRemove={() => onRemoveModel(model)}
                         />
                     )) : (
-                        <li role="status" className="flex min-h-28 items-center justify-center px-4 text-center text-muted-foreground">
+                        <li role="status" className="flex min-h-24 items-center justify-center px-4 text-center text-xs text-muted-foreground">
                             {t("settings.providers.noModels")}
                         </li>
                     )}
@@ -192,25 +193,25 @@ function ModelListItem({ model, active, disabled, removeDisabled, onSelect, onRe
     return (
         <li
             data-state={active ? "open" : "closed"}
-            className="group flex items-center gap-1 rounded-md px-1 py-1 transition-colors data-[state=closed]:hover:bg-accent data-[state=open]:bg-accent data-[state=open]:text-accent-foreground"
+            className="group flex items-center gap-1 rounded-lg px-1 py-0.5 transition-colors data-[state=closed]:hover:bg-accent/65 data-[state=open]:bg-accent data-[state=open]:text-accent-foreground"
         >
             <button
                 type="button"
                 disabled={disabled}
                 aria-pressed={active}
                 onClick={onSelect}
-                className="min-w-0 flex-1 rounded-sm px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed"
+                className="min-w-0 flex-1 rounded-sm px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed"
             >
                 <span className="block truncate" title={model.id}>{model.name}</span>
             </button>
             <Button
                 type="button"
                 size="icon-xs"
-                variant="secondary"
+                variant="ghost"
                 disabled={removeDisabled}
                 aria-label={t("settings.providers.removeModel")}
                 onClick={onRemove}
-                className="mr-1 border border-border bg-muted/40 hover:bg-muted/60"
+                className="mr-0.5 text-muted-foreground hover:text-destructive"
             >
                 <Minus />
             </Button>

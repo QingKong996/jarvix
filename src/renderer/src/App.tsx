@@ -246,26 +246,26 @@ export function App() {
                             minSize={360}
                             style={{ overflow: "hidden" }}
                         >
-                            <main className="relative flex h-full min-h-0 min-w-0 flex-col">
+                            <main className="relative flex h-full min-h-0 min-w-0 flex-col bg-background">
                                 <AnimatePresence initial={false}>
                                     {!rightSidebarOpen ? (
                                         <motion.div
                                             key="right-sidebar-open"
-                                            initial={{ opacity: 0, scale: 0.88 }}
+                                            initial={{ opacity: 0, scale: 0.94 }}
                                             animate={{ opacity: 1, scale: 1 }}
-                                            exit={{ opacity: 0, scale: 0.88 }}
+                                            exit={{ opacity: 0, scale: 0.94 }}
                                             className="absolute top-3 right-3 z-10"
                                         >
                                             <Button
                                                 ref={rightSidebarTriggerRef}
                                                 type="button"
-                                                variant="secondary"
+                                                variant="ghost"
                                                 size="icon-sm"
                                                 aria-label={t("rightSidebar.open")}
                                                 title={t("rightSidebar.open")}
                                                 onClick={openRightSidebar}
                                                 data-testid="right-sidebar-open"
-                                                className="rounded-lg shadow-sm"
+                                                className="text-muted-foreground hover:bg-accent hover:text-foreground"
                                             >
                                                 <PanelRightOpen />
                                             </Button>
@@ -342,10 +342,10 @@ export function App() {
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
                         transition={quickTransition}
-                        className="pointer-events-none fixed inset-0 z-[100] flex items-center justify-center bg-background/75 p-6 backdrop-blur-[2px]"
+                        className="pointer-events-none fixed inset-0 z-[100] flex items-center justify-center bg-black/35 p-6 dark:bg-black/55"
                         data-testid="file-drop-overlay"
                     >
-                        <div className="flex max-w-md items-center gap-3 rounded-2xl border border-dashed border-border-strong bg-popover px-5 py-4 shadow-xl">
+                        <div className="flex max-w-md items-center gap-3 rounded-2xl border border-dashed border-border-strong bg-popover px-6 py-4 shadow-[0_8px_28px_rgb(0_0_0/0.08)] dark:shadow-[0_12px_32px_rgb(0_0_0/0.4)]">
                             <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary text-foreground">
                                 <FileUp className="size-5" />
                             </div>

@@ -44,7 +44,7 @@ export function ComposerPathMenu({
             transition={quickTransition}
             className={cn(
                 CHAT_COLUMN,
-                "mb-2 overflow-hidden rounded-xl border bg-popover/95 p-1.5 shadow-lg backdrop-blur-sm"
+                "mb-2 overflow-hidden rounded-2xl border border-border-strong bg-popover p-1.5 shadow-[0_6px_20px_rgb(0_0_0/0.07)] dark:shadow-[0_8px_24px_rgb(0_0_0/0.38)]"
             )}
         >
             <div className="max-h-[min(24rem,50vh)] overflow-y-auto">
@@ -70,10 +70,10 @@ export function ComposerPathMenu({
                             onMouseEnter={() => onActiveIndexChange(index)}
                             onClick={() => onSelect(path)}
                             className={cn(
-                                "flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left outline-none transition-colors",
+                                "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left outline-none transition-colors",
                                 active
-                                    ? "border-border bg-accent text-accent-foreground"
-                                    : "border-transparent hover:bg-accent/50"
+                                    ? "bg-accent text-accent-foreground"
+                                    : "hover:bg-accent/60"
                             )}
                         >
                             <Icon
@@ -83,7 +83,7 @@ export function ComposerPathMenu({
                                     active ? "text-foreground" : "text-muted-foreground"
                                 )}
                             />
-                            <span className="shrink-0 text-[13px] font-medium">
+                            <span className="shrink-0 text-sm font-medium">
                                 <HighlightedPath value={path.name} query={nameQuery} />
                             </span>
                             <span className="min-w-0 truncate text-xs text-muted-foreground">
@@ -121,7 +121,7 @@ function HighlightedPath({
                 segment.highlighted ? (
                     <mark
                         key={index}
-                        className="rounded-[2px] bg-primary/20 px-0 text-inherit"
+                        className="rounded-[2px] bg-foreground/12 px-0 text-inherit"
                     >
                         {segment.text}
                     </mark>

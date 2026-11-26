@@ -70,7 +70,7 @@ export function DeleteSessionDialog({
 
                 <DialogFooter error={error}>
                     <DialogClose asChild>
-                        <Button type="button" variant="ghost" disabled={deleting}>
+                        <Button type="button" variant="outline" disabled={deleting}>
                             {t("sessions.cancel")}
                         </Button>
                     </DialogClose>

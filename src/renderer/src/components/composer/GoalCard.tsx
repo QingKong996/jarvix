@@ -39,11 +39,17 @@ export function GoalCard({
             data-testid="goal-card"
             data-running={running ? "true" : "false"}
             className={cn(
-                "flex min-w-0 items-center gap-2 rounded-lg border",
-                "bg-card/80 px-2.5 py-1.5 text-card-foreground shadow-sm"
+                "flex min-w-0 items-center gap-2 rounded-xl border border-border/80",
+                "bg-surface-subtle px-3 py-2 text-foreground"
             )}
         >
-            <Target aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+            <Target
+                aria-hidden="true"
+                className={cn(
+                    "size-4 shrink-0",
+                    running ? "text-foreground" : "text-muted-foreground"
+                )}
+            />
             <span className="shrink-0 text-xs font-medium">
                 {running ? t("composer.goal.running") : t("composer.goal.paused")}
             </span>

@@ -89,7 +89,7 @@ export function SessionContextDialog({
                         icon={<Inbox />}
                     >
                         <span className="min-w-0 flex-1 truncate">{t("projects.temporary")}</span>
-                        {!context.projectId && !context.workingDirectory ? <Check className="size-4" /> : null}
+                        {!context.projectId && !context.workingDirectory ? <Check className="size-4 text-foreground" /> : null}
                     </NavigationItem>
 
                     {projects.length === 0 ? (
@@ -114,17 +114,17 @@ export function SessionContextDialog({
                                         {project.workingDirectories.join(", ")}
                                     </span>
                                 </span>
-                                {context.projectId === project.id ? <Check className="size-4" /> : null}
+                                {context.projectId === project.id ? <Check className="size-4 text-foreground" /> : null}
                             </NavigationItem>
                         ))
                     )}
                 </div>
 
-                <div className="flex items-center justify-between gap-3 border-t pt-4">
+                <div className="flex items-center justify-between gap-3 border-t border-border pt-4">
                     <div className="min-w-0">
-                        <p className="text-sm font-medium">{t("composer.contextDialog.customDirectory")}</p>
+                        <p className="text-sm font-medium text-foreground">{t("composer.contextDialog.customDirectory")}</p>
                         {context.workingDirectory ? (
-                            <p className="truncate text-xs text-muted-foreground" title={context.workingDirectory}>
+                            <p className="truncate font-mono text-xs text-muted-foreground" title={context.workingDirectory}>
                                 {context.workingDirectory}
                             </p>
                         ) : null}
@@ -142,7 +142,7 @@ export function SessionContextDialog({
                     </Button>
                 </div>
 
-                {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+                {error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null}
             </DialogContent>
         </Dialog>
     );

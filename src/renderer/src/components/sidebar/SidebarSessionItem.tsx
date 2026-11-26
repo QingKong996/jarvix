@@ -52,17 +52,17 @@ export function SidebarSessionItem({
                     data-session-working-directory={session.workingDirectory}
                     style={{ opacity: isDragging ? 0.35 : undefined }}
                     className={cn(
-                        "group relative flex w-full items-center overflow-hidden rounded-md text-sm transition-colors",
+                        "group relative flex h-9 w-full items-center overflow-hidden rounded-lg text-sm transition-colors",
                         active
-                            ? "text-accent-foreground"
-                            : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                            ? "font-medium text-accent-foreground"
+                            : "text-muted-foreground hover:bg-accent/70 hover:text-foreground"
                     )}
                 >
                     {active ? (
                         <motion.span
                             aria-hidden="true"
                             layoutId="active-session-highlight"
-                            className="absolute inset-0 rounded-md bg-accent"
+                            className="absolute inset-0 rounded-lg bg-accent"
                             transition={layoutSpring}
                         />
                     ) : null}
@@ -72,7 +72,7 @@ export function SidebarSessionItem({
                         title={isDragging ? undefined : session.name}
                         onClick={() => onSelect(session.id)}
                         disabled={busy}
-                        className="relative z-10 flex min-w-0 flex-1 cursor-grab items-center rounded-md py-2 pl-9 text-left text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring/50 active:cursor-grabbing"
+                        className="relative z-10 flex h-full min-w-0 flex-1 cursor-grab items-center rounded-lg pr-1.5 pl-8 text-left text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring/25 active:cursor-grabbing"
                         {...attributes}
                         {...listeners}
                     >
@@ -86,7 +86,7 @@ export function SidebarSessionItem({
                         title={t("sessions.archive")}
                         disabled={busy}
                         onClick={() => onArchive(session.id)}
-                        className="relative z-10 mr-1 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                        className="relative z-10 mr-1 shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100"
                     >
                         <Archive />
                     </Button>

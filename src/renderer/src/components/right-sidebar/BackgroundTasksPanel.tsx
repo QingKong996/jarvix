@@ -3,6 +3,7 @@ import { ChevronRight, Terminal } from "lucide-react";
 import { motion } from "motion/react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
+import { cn } from "cn";
 import type { ToolTaskSnapshot } from "../../../../runtime/tools/types.ts";
 import { useBackgroundTasks } from "../../background-tasks/store.ts";
 import { AnimatedCollapsibleContent, Collapsible, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -17,10 +18,10 @@ export function BackgroundTasksPanel({ sessionId }: { sessionId: string | null }
         return (
             <div
                 data-testid="background-tasks-empty"
-                className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center"
+                className="flex h-full flex-col items-center justify-center gap-2.5 bg-background px-8 text-center"
             >
-                <div className="rounded-2xl border border-border bg-muted/60 p-3 text-muted-foreground">
-                    <Terminal className="size-5" />
+                <div className="rounded-xl border border-border/60 bg-surface-subtle p-3 text-muted-foreground">
+                    <Terminal className="size-4" />
                 </div>
                 <p className="text-xs text-muted-foreground">
                     {t("rightSidebar.empty")}
@@ -30,7 +31,7 @@ export function BackgroundTasksPanel({ sessionId }: { sessionId: string | null }
     }
 
     return (
-        <ScrollArea className="min-h-0 flex-1">
+        <ScrollArea className="min-h-0 flex-1 bg-background">
             <div className="flex flex-col gap-2 p-3">
                 {tasks.map((task) => (
                     <BackgroundTaskItem key={task.id} task={task} />
@@ -46,11 +47,11 @@ function BackgroundTaskItem({ task }: { task: ToolTaskSnapshot }) {
     const [open, setOpen] = useState(streaming);
 
     return (
-        <Collapsible open={open} onOpenChange={setOpen} className="rounded-md border border-border bg-background/60">
+        <Collapsible open={open} onOpenChange={setOpen} className="overflow-hidden rounded-xl border border-border/75 bg-surface-subtle">
             <CollapsibleTrigger
                 type="button"
                 title={task.command}
-                className="group flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                className="group flex w-full items-center gap-2 px-2.5 py-2 text-left transition-colors outline-none hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/30"
             >
                 <motion.span
                     aria-hidden="true"
@@ -60,10 +61,19 @@ function BackgroundTaskItem({ task }: { task: ToolTaskSnapshot }) {
                 >
                     <ChevronRight className="size-3.5" />
                 </motion.span>
-                <code className="min-w-0 flex-1 truncate font-mono text-xs">
+                <code className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
                     {task.command}
                 </code>
-                <span className="shrink-0 text-xs text-muted-foreground">
+                <span
+                    className={cn(
+                        "shrink-0 text-xs font-medium",
+                        task.status === "running"
+                            ? "text-foreground"
+                            : task.status === "failed"
+                                ? "text-destructive"
+                                : "text-muted-foreground"
+                    )}
+                >
                     {taskStatus(task, t)}
                 </span>
             </CollapsibleTrigger>
@@ -97,11 +107,11 @@ function TaskOutput({ text, truncatedCharacters, streaming, open }: {
     return (
         <ScrollArea
             viewportRef={ref}
-            className="max-h-64 border-t border-border"
+            className="max-h-64 border-t border-border bg-background"
             viewportClassName="h-auto max-h-[inherit]"
         >
             {truncatedCharacters > 0 ? (
-                <p className="sticky top-0 border-b border-border bg-background/95 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+                <p className="sticky top-0 border-b border-border bg-surface-subtle px-2.5 py-1.5 text-[11px] text-muted-foreground">
                     {t("rightSidebar.outputTruncated", {
                         characters: truncatedCharacters.toLocaleString()
                     })}

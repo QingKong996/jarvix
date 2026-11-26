@@ -16,7 +16,7 @@ export function ViewImageToolCall({ data }: ViewImageToolCallProps) {
                     alt={data.path}
                     loading="lazy"
                     decoding="async"
-                    className="max-h-96 max-w-full rounded-lg border object-contain"
+                    className="max-h-96 max-w-full rounded-xl border border-border/80 bg-surface-subtle object-contain"
                 />
             ) : null}
             {data.output.length > 0 ? (

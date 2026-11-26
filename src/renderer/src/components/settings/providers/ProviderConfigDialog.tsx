@@ -223,8 +223,8 @@ export function ProviderConfigDialog({ provider, selectedModel, disabled, onClos
                 } as CSSProperties}
                 contentRef={contentRef}
             >
-                <DialogHeader className="border-b px-6 py-4">
-                    <DialogTitle className="flex items-center gap-3">
+                <DialogHeader className="flex h-14 justify-center border-b border-border px-6">
+                    <DialogTitle className="flex items-center gap-2.5">
                         <ProviderIcon id={draft.id} name={draft.name} />
                         {provider.name}
                     </DialogTitle>
@@ -255,7 +255,7 @@ export function ProviderConfigDialog({ provider, selectedModel, disabled, onClos
                             onSubmit={handleSubmit}
                         />
 
-                        <DialogFooter error={error} className="gap-3 border-t px-6 py-3">
+                        <DialogFooter error={error} className="gap-2.5 border-t border-border bg-sidebar/50 px-6 py-3.5">
                             <Button type="button" variant="outline" onClick={onClose}>{t("settings.cancel")}</Button>
                             <Button type="submit" form={formId} disabled={disabled || syncingModels || modelPanelOpen}>
                                 {t("settings.save")}
@@ -277,7 +277,7 @@ export function ProviderConfigDialog({ provider, selectedModel, disabled, onClos
                             setEditingModel(undefined);
                             setModelDraft(undefined);
                         }}
-                        className={`absolute inset-y-0 right-0 w-full border-l bg-card sm:w-96 ${
+                        className={`absolute inset-y-0 right-0 w-full border-l border-border bg-card sm:w-96 ${
                             modelPanelOpen ? "pointer-events-auto" : "pointer-events-none"
                         }`}
                     >
@@ -299,13 +299,13 @@ export function ProviderConfigDialog({ provider, selectedModel, disabled, onClos
 
             <Dialog open={switchDialogOpen} onOpenChange={(open) => { if (!open) closeSwitchDialog(); }}>
                 <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-md">
-                    <DialogHeader className="border-b px-6 py-4">
+                    <DialogHeader className="flex h-14 justify-center border-b border-border px-6">
                         <DialogTitle>{t("settings.providers.unsavedModelTitle")}</DialogTitle>
                     </DialogHeader>
                     <DialogDescription className="px-6 py-5">
                         {t("settings.providers.unsavedModelDescription", { name: pendingModel?.model.name ?? "" })}
                     </DialogDescription>
-                    <DialogFooter className="gap-3 border-t px-6 py-3">
+                    <DialogFooter className="gap-2.5 border-t border-border bg-sidebar/50 px-6 py-3.5">
                         <Button type="button" variant="outline" onClick={discardAndSwitch}>
                             {t("settings.providers.discardChanges")}
                         </Button>

@@ -5,7 +5,7 @@ import { DEFAULT_THEME, type Theme } from "../protocol/config.ts";
 import { mainLogger } from "./logger.ts";
 
 const WINDOW_BACKGROUND: Record<Theme, string> = {
-    dark: "#0d1117",
+    dark: "#191919",
     light: "#ffffff"
 };
 const log = mainLogger("window");

@@ -11,7 +11,7 @@ export function DialogFooter({ children, error, className }: DialogFooterProps) 
     return (
         <div className={cn("flex items-center justify-end gap-2", className)}>
             {error ? (
-                <p role="alert" className="mr-auto text-xs text-destructive">
+                <p role="alert" className="mr-auto text-xs leading-relaxed text-destructive">
                     {error}
                 </p>
             ) : null}

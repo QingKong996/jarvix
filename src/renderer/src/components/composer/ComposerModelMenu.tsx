@@ -96,10 +96,10 @@ export function ComposerModelMenu({ config, disabled, saving, onSave }: Composer
                     disabled={disabled || !config || saving}
                     data-testid="model-menu-trigger"
                     aria-label={triggerLabel}
-                    className="h-8 min-w-0 max-w-72 shrink justify-start gap-1 px-2 text-xs font-normal"
+                    className="h-8 min-w-0 max-w-72 shrink justify-start gap-1.5 px-2.5 text-[13px] font-normal text-muted-foreground hover:text-foreground"
                     title={triggerLabel}
                 >
-                    <span className="min-w-0 truncate">{model || t("composer.model")}</span>
+                    <span className="min-w-0 truncate text-foreground">{model || t("composer.model")}</span>
                     {reasoningLabel ? (
                         <span className="shrink-0 text-muted-foreground">{reasoningLabel}</span>
                     ) : null}
@@ -162,7 +162,7 @@ export function ComposerModelMenu({ config, disabled, saving, onSave }: Composer
                                             {option.name}
                                             {option.selection.provider === selection?.provider
                                             && option.selection.id === selection?.id
-                                                ? <Check className="ml-auto size-3.5" />
+                                                ? <Check className="ml-auto size-4 text-foreground" />
                                                 : null}
                                         </DropdownMenuItem>
                                     ))}
@@ -179,7 +179,7 @@ export function ComposerModelMenu({ config, disabled, saving, onSave }: Composer
                                 >
                                     {t(`composer.reasoningLevels.${level}`)}
                                     {level === reasoningLevel ? (
-                                        <Check className="ml-auto size-3.5" />
+                                        <Check className="ml-auto size-4 text-foreground" />
                                     ) : null}
                                 </DropdownMenuItem>
                             ))}

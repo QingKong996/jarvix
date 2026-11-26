@@ -43,9 +43,9 @@ export function GeneralSettings({
     const { t } = useTranslation();
 
     return (
-        <div className="flex flex-col gap-4 text-sm">
-            <div className="flex items-center justify-between gap-4">
-                <label htmlFor="settings-language" className="font-medium">
+        <div className="flex flex-col divide-y divide-border text-sm">
+            <div className="flex items-center justify-between gap-4 pb-4">
+                <label htmlFor="settings-language" className="font-medium text-foreground">
                     {t("settings.general.language")}
                 </label>
                 <Select
@@ -70,8 +70,8 @@ export function GeneralSettings({
                 </Select>
             </div>
 
-            <div className="flex items-center justify-between gap-4">
-                <label htmlFor="settings-theme" className="font-medium">
+            <div className="flex items-center justify-between gap-4 py-4">
+                <label htmlFor="settings-theme" className="font-medium text-foreground">
                     {t("settings.general.theme")}
                 </label>
                 <Select
@@ -96,9 +96,9 @@ export function GeneralSettings({
                 </Select>
             </div>
 
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start justify-between gap-4 pt-4">
                 <div className="flex flex-col gap-1">
-                    <label htmlFor="settings-compaction-threshold" className="font-medium">
+                    <label htmlFor="settings-compaction-threshold" className="font-medium text-foreground">
                         {t("settings.general.compactionThreshold")}
                     </label>
                     <p className="text-xs leading-relaxed text-muted-foreground">
@@ -113,7 +113,7 @@ export function GeneralSettings({
                     value={compactionThreshold}
                     placeholder={t("settings.general.compactionThresholdPlaceholder")}
                     disabled={disabled}
-                    className="w-44"
+                    className="w-44 shrink-0"
                     onChange={(event) => onCompactionThresholdChange(event.target.value)}
                 />
             </div>

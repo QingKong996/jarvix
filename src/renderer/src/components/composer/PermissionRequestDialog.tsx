@@ -52,10 +52,10 @@ export function PermissionRequestDialog({
             animate={{ opacity: 1, height: "auto", y: 0 }}
             exit={{ opacity: 0, height: 0, y: -4 }}
             transition={smoothTransition}
-            className="mb-1 flex flex-col gap-3 overflow-hidden rounded-lg border bg-muted/40 p-3 shadow-sm"
+            className="mb-1 flex flex-col gap-3 overflow-hidden rounded-xl border border-border/80 bg-background p-3.5"
         >
             <div className="flex items-start gap-2">
-                <ShieldAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-amber-600" />
+                <ShieldAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-warning" />
                 <div className="min-w-0">
                     <h3
                         id={`permission-request-${request.id}`}
@@ -82,7 +82,7 @@ export function PermissionRequestDialog({
                 <Button
                     type="button"
                     size="sm"
-                    variant="ghost"
+                    variant="outline"
                     disabled={submitting !== null}
                     onClick={() => void respond(false)}
                 >
@@ -94,7 +94,7 @@ export function PermissionRequestDialog({
                 <Button
                     type="button"
                     size="sm"
-                    className="bg-[#1F6FEB] text-white hover:bg-[#1F6FEB]/90"
+                    variant="default"
                     disabled={submitting !== null}
                     onClick={() => void respond(true)}
                 >

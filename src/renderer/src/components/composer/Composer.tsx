@@ -565,7 +565,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
     return (
         <>
-            <div className={cn(CONTENT_GUTTER, "py-3")}>
+            <div className={cn(CONTENT_GUTTER, "py-4")}>
                 <AnimatePresence initial={false}>
                     {pathMenuOpen ? (
                         <ComposerPathMenu
@@ -588,7 +588,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 </AnimatePresence>
                 <form data-testid="composer-form" onSubmit={handleSubmit}>
                     {goal ? (
-                        <div className={cn(CHAT_COLUMN, "mb-1.5")}>
+                        <div className={cn(CHAT_COLUMN, "mb-2")}>
                             <GoalCard
                                 goal={goal}
                                 running={running}
@@ -601,7 +601,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                             />
                         </div>
                     ) : null}
-                    <div className={cn(CHAT_COLUMN, "flex flex-col gap-1 rounded-xl border bg-composer p-1.5 shadow-sm")}>
+                    <div className={cn(CHAT_COLUMN, "flex flex-col gap-2 rounded-2xl border border-border-strong bg-composer px-3.5 pt-3 pb-2.5 shadow-[0_2px_8px_rgb(0_0_0/0.03)] transition-colors focus-within:border-foreground/35 dark:shadow-none")}>
                         <AnimatePresence initial={false}>
                             {permissionRequest ? (
                                 <PermissionRequestDialog
@@ -650,7 +650,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                                 data-testid="session-context-trigger"
                                 data-project-id={sessionContext.projectId}
                                 data-working-directory={sessionContext.workingDirectory}
-                                className="h-8 min-w-0 max-w-[45%] shrink justify-start gap-1 px-2 text-xs font-normal"
+                                className="h-8 min-w-0 max-w-[45%] shrink justify-start gap-1.5 px-2.5 text-[13px] font-normal text-muted-foreground hover:text-foreground"
                                 title={contextLabel}
                             >
                                 <Folder className="size-3.5 shrink-0" />
@@ -669,12 +669,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                                 {goalEditing ? (
                                     <motion.div
                                         key="goal-mode"
-                                        initial={{ opacity: 0, scale: 0.92 }}
+                                        initial={{ opacity: 0, scale: 0.95 }}
                                         animate={{ opacity: 1, scale: 1 }}
-                                        exit={{ opacity: 0, scale: 0.92 }}
+                                        exit={{ opacity: 0, scale: 0.95 }}
                                         transition={quickTransition}
                                         data-testid="composer-goal-mode"
-                                        className="group inline-flex h-8 shrink-0 items-center gap-1 rounded-md text-xs font-normal text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+                                        className="group inline-flex h-8 shrink-0 items-center gap-1 rounded-full border border-border bg-secondary pl-1 text-[13px] font-medium text-foreground transition-colors hover:border-border-strong"
                                     >
                                         <Button
                                             type="button"
@@ -685,19 +685,19 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                                             aria-label={t("composer.goal.exitEdit")}
                                             title={t("composer.goal.exitEdit")}
                                             data-testid="composer-goal-exit"
-                                            className="size-6 rounded-md p-0 text-current hover:bg-transparent"
+                                            className="size-6 rounded-full p-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
                                         >
-                                            <Target className="size-3.5 shrink-0 group-hover:hidden" />
+                                            <Target className="size-3.5 shrink-0 text-foreground group-hover:hidden" />
                                             <X className="hidden size-3.5 shrink-0 group-hover:block" />
                                         </Button>
-                                        <span className="cursor-default pr-2.5 select-none">
+                                        <span className="cursor-default pr-3 select-none">
                                             {t("composer.goal.button")}
                                         </span>
                                     </motion.div>
                                 ) : null}
                             </AnimatePresence>
 
-                            <div className="ml-auto flex min-w-0 items-center justify-end gap-1">
+                            <div className="ml-auto flex min-w-0 items-center justify-end gap-1.5">
                                 <ContextUsageRing usage={contextUsage} />
                                 <ComposerModelMenu
                                     config={config}
@@ -708,7 +708,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
                                 <motion.div
                                     key={running && !goalEditing && value.trim().length === 0 ? "stop" : "send"}
-                                    initial={{ opacity: 0, scale: 0.86 }}
+                                    initial={{ opacity: 0, scale: 0.92 }}
                                     animate={{ opacity: 1, scale: 1 }}
                                     transition={quickTransition}
                                     className="shrink-0"
@@ -716,8 +716,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                                     {running && !goalEditing && value.trim().length === 0 ? (
                                         <Button
                                             type="button"
+                                            variant="default"
                                             size="icon-sm"
-                                            className="shrink-0 p-0 dark:bg-[#E6EDF3] dark:text-[#0D1117] dark:hover:bg-[#E6EDF3]/90"
+                                            className="shrink-0 rounded-full p-0"
                                             aria-label={t("composer.stop")}
                                             title={t("composer.stop")}
                                             onClick={onStop}
@@ -728,8 +729,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                                     ) : (
                                         <Button
                                             type="submit"
+                                            variant="default"
                                             size="icon-sm"
-                                            className="shrink-0 bg-[#1F6FEB] p-0 text-white hover:bg-[#1F6FEB]/90"
+                                            className="shrink-0 rounded-full p-0"
                                             aria-label={t("composer.send")}
                                             disabled={inputDisabled || (
                                                 goalEditing

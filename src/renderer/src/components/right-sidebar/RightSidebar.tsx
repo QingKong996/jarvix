@@ -54,7 +54,7 @@ export function RightSidebar({
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     transition={quickTransition}
-                    className="fixed inset-0 z-20 bg-background/70 backdrop-blur-[1px]"
+                    className="fixed inset-0 z-20 bg-black/35 dark:bg-black/55"
                 />
             ) : null}
             <motion.aside
@@ -75,20 +75,20 @@ export function RightSidebar({
                     : { opacity: 0, transition: quickTransition }}
                 transition={panelTransition}
                 className={cn(
-                    "flex h-full min-h-0 w-full flex-col bg-popover",
+                    "flex h-full min-h-0 w-full flex-col bg-sidebar",
                     variant === "overlay"
-                        ? "fixed inset-y-0 right-0 z-30 w-[min(30rem,calc(100vw-2rem))] border-l border-border shadow-xl"
+                        ? "fixed inset-y-0 right-0 z-30 w-[min(30rem,calc(100vw-2rem))] border-l border-border-strong shadow-[0_0_24px_rgb(0_0_0/0.12)] dark:shadow-[0_0_28px_rgb(0_0_0/0.45)]"
                         : "shrink-0"
                 )}
             >
                 <h2 id={titleId} className="sr-only">
                     {t("rightSidebar.title")}
                 </h2>
-                <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-2">
+                <header className="flex h-14 shrink-0 items-center gap-1.5 border-b border-border bg-sidebar px-3">
                     <div
                         role="tablist"
                         aria-label={t("rightSidebar.title")}
-                        className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                        className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                     >
                         <AnimatePresence initial={false}>
                             {tabs.state.tabs.map((tab) => {
@@ -104,25 +104,25 @@ export function RightSidebar({
                                     <motion.div
                                         key={tab.id}
                                         layout
-                                        initial={{ opacity: 0, scale: 0.92 }}
+                                        initial={{ opacity: 0, scale: 0.96 }}
                                         animate={{ opacity: 1, scale: 1 }}
-                                        exit={{ opacity: 0, scale: 0.92, width: 0 }}
+                                        exit={{ opacity: 0, scale: 0.96, width: 0 }}
                                         transition={quickTransition}
                                         className="shrink-0 overflow-hidden"
                                     >
                                         <div
                                             role="presentation"
                                             className={cn(
-                                                "relative flex h-8 min-w-30 max-w-52 shrink-0 items-center rounded-[10px] border pr-1 pl-2.5",
+                                                "relative flex h-8 min-w-28 max-w-48 shrink-0 items-center rounded-lg border pr-1 pl-2.5 transition-colors",
                                                 active
-                                                    ? "border-border text-foreground"
-                                                    : "border-transparent text-muted-foreground hover:bg-muted/45"
+                                                    ? "border-border/80 text-foreground"
+                                                    : "border-transparent text-muted-foreground hover:bg-accent/70 hover:text-foreground"
                                             )}
                                         >
                                             {active ? (
                                                 <motion.span
                                                     layoutId="right-sidebar-active-tab"
-                                                    className="absolute inset-0 rounded-[10px] bg-muted/70"
+                                                    className="absolute inset-0 rounded-lg bg-background"
                                                     transition={layoutSpring}
                                                 />
                                             ) : null}
@@ -134,10 +134,10 @@ export function RightSidebar({
                                                 data-testid={tab.panel
                                                     ? `right-sidebar-tab-${tab.panel}`
                                                     : "right-sidebar-tab-new"}
-                                                className="relative flex min-w-0 flex-1 items-center gap-2 py-1 text-left outline-none"
+                                                className="relative flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left outline-none"
                                             >
                                                 <Icon className="size-3.5 shrink-0" />
-                                                <span className="truncate text-xs font-medium">
+                                                <span className="truncate text-[13px] font-medium">
                                                     {label}
                                                 </span>
                                             </button>
@@ -146,7 +146,7 @@ export function RightSidebar({
                                                 onClick={() => tabs.closeTab(tab.id)}
                                                 aria-label={t("rightSidebar.closeTab", { name: label })}
                                                 title={t("rightSidebar.closeTab", { name: label })}
-                                                className="relative ml-1 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-background/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+                                                className="relative ml-1 inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/25"
                                             >
                                                 <X className="size-3" />
                                             </button>
@@ -161,7 +161,7 @@ export function RightSidebar({
                             aria-label={t("rightSidebar.newTab")}
                             title={t("rightSidebar.newTab")}
                             data-testid="right-sidebar-add-tab"
-                            className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none hover:bg-muted/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+                            className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/25"
                         >
                             <Plus className="size-4" />
                         </button>
@@ -174,7 +174,7 @@ export function RightSidebar({
                         title={t("rightSidebar.close")}
                         onClick={onClose}
                         data-testid="right-sidebar-close"
-                        className="shrink-0 text-muted-foreground"
+                        className="shrink-0 text-muted-foreground hover:text-foreground"
                     >
                         <PanelRightClose />
                     </Button>

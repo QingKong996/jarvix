@@ -22,25 +22,31 @@ const linkSafety: LinkSafetyConfig = { enabled: false };
 
 const components: Components = {
     h1: ({ className, ...props }) => (
-        <defaultComponents.h1 {...props} className={cn("mt-4 mb-1 text-lg", className)} />
+        <defaultComponents.h1 {...props} className={cn("mt-4 mb-1.5 text-lg font-semibold tracking-tight", className)} />
     ),
     h2: ({ className, ...props }) => (
-        <defaultComponents.h2 {...props} className={cn("mt-4 mb-1 text-base", className)} />
+        <defaultComponents.h2 {...props} className={cn("mt-4 mb-1 text-base font-semibold tracking-tight", className)} />
     ),
     h3: ({ className, ...props }) => (
-        <defaultComponents.h3 {...props} className={cn("mt-3 mb-1 text-sm", className)} />
+        <defaultComponents.h3 {...props} className={cn("mt-3 mb-1 text-sm font-semibold", className)} />
     ),
     h4: ({ className, ...props }) => (
-        <defaultComponents.h4 {...props} className={cn("mt-3 mb-1 text-sm", className)} />
+        <defaultComponents.h4 {...props} className={cn("mt-3 mb-1 text-sm font-semibold", className)} />
     ),
     h5: ({ className, ...props }) => (
-        <defaultComponents.h5 {...props} className={cn("mt-3 mb-1 text-sm", className)} />
+        <defaultComponents.h5 {...props} className={cn("mt-3 mb-1 text-sm font-medium", className)} />
     ),
     h6: ({ className, ...props }) => (
-        <defaultComponents.h6 {...props} className={cn("mt-3 mb-1 text-sm", className)} />
+        <defaultComponents.h6 {...props} className={cn("mt-3 mb-1 text-sm font-medium", className)} />
     ),
     inlineCode: ({ node: _node, ...props }) => (
-        <code {...props} className={cn("rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]", props.className)} />
+        <code
+            {...props}
+            className={cn(
+                "rounded-sm border border-border/70 bg-muted px-1.5 py-0.5 font-mono text-[0.85em]",
+                props.className
+            )}
+        />
     )
 };
 
@@ -90,7 +96,7 @@ export const Markdown = memo(function Markdown({ text, streaming = false, classN
     return (
         <Streamdown
             data-slot="markdown"
-            className={cn("text-sm leading-relaxed break-words", className)}
+            className={cn("text-sm leading-7 break-words", className)}
             mode={streaming ? "streaming" : "static"}
             isAnimating={streaming}
             parseIncompleteMarkdown={streaming}
