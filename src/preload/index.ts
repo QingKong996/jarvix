@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { IpcRendererEvent } from "electron";
 import type { JarvixBridge, JarvixEventBatch } from "../protocol/ipc.ts";
 import { IPC_CHANNELS } from "../protocol/ipc.ts";
@@ -16,6 +16,13 @@ const bridge: JarvixBridge = {
     completePaths: (query, context) => ipcRenderer.invoke(
         IPC_CHANNELS.pathsComplete,
         { query, context }
+    ),
+    pathForFile: (file) => webUtils.getPathForFile(
+        file as Parameters<typeof webUtils.getPathForFile>[0]
+    ),
+    resolvePaths: (paths, context) => ipcRenderer.invoke(
+        IPC_CHANNELS.pathsResolve,
+        { paths, context }
     ),
     onEvents: (listener) => {
         const handler = (_event: IpcRendererEvent, batch: JarvixEventBatch): void => {

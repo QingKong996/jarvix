@@ -17,6 +17,7 @@ export const IPC_CHANNELS = {
     requestInject: "jarvix:request:inject",
     requestStop: "jarvix:request:stop",
     pathsComplete: "jarvix:paths:complete",
+    pathsResolve: "jarvix:paths:resolve",
     event: "jarvix:event",
     configGet: "jarvix:config:get",
     configSet: "jarvix:config:set",
@@ -74,6 +75,11 @@ export type JarvixBridge = {
     stopRequest(sessionId: string): Promise<void>;
     completePaths(
         query: string,
+        context: JarvixSessionContext
+    ): Promise<JarvixPathCompletionResult>;
+    pathForFile(file: unknown): string;
+    resolvePaths(
+        paths: readonly string[],
         context: JarvixSessionContext
     ): Promise<JarvixPathCompletionResult>;
     onEvents(listener: (batch: JarvixEventBatch) => void): () => void;

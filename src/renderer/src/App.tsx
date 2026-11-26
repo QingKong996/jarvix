@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
-import { PanelRightOpen } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { FileUp, PanelRightOpen } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { useDefaultLayout } from "react-resizable-panels";
-import { Composer } from "./components/composer/Composer.tsx";
+import {
+    Composer,
+    type ComposerHandle
+} from "./components/composer/Composer.tsx";
 import { CreateProjectDialog } from "./components/projects/CreateProjectDialog.tsx";
 import { RightSidebar } from "./components/right-sidebar/RightSidebar.tsx";
 import {
@@ -21,6 +24,7 @@ import { useSessions } from "./use-sessions.ts";
 import type { JarvixConfig } from "../../protocol/config.ts";
 import type { JarvixPathCompletionResult } from "../../protocol/path-completion.ts";
 import type { JarvixSessionContext } from "../../protocol/session.ts";
+import { quickTransition } from "./motion.ts";
 
 const bridge = window.jarvix;
 
@@ -31,6 +35,9 @@ export function App() {
     const [createProjectOpen, setCreateProjectOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [config, setConfig] = useState<JarvixConfig | null>(null);
+    const [draggingFiles, setDraggingFiles] = useState(false);
+    const composerRef = useRef<ComposerHandle>(null);
+    const dragDepthRef = useRef(0);
     const rightSidebarTabs = useRightSidebarTabs();
     const {
         open: rightSidebarOpen,
@@ -100,6 +107,90 @@ export function App() {
             entries: []
         });
     }, []);
+
+    const addDroppedFiles = useCallback(async (files: readonly File[]): Promise<void> => {
+        if (!bridge || !ready || files.length === 0) {
+            return;
+        }
+        const paths: string[] = [];
+        for (const file of files.slice(0, 64)) {
+            try {
+                const path = bridge.pathForFile(file);
+                if (path) {
+                    paths.push(path);
+                }
+            } catch {
+                continue;
+            }
+        }
+        if (paths.length === 0) {
+            return;
+        }
+        try {
+            const result = await bridge.resolvePaths(paths, sessionContext);
+            composerRef.current?.addPathMentions(result.entries);
+        } catch {}
+    }, [ready, sessionContext]);
+
+    useEffect(() => {
+        const clearDragState = (): void => {
+            dragDepthRef.current = 0;
+            setDraggingFiles(false);
+        };
+        const handleDragEnter = (event: DragEvent): void => {
+            if (!isFileDrag(event)) {
+                return;
+            }
+            event.preventDefault();
+            dragDepthRef.current += 1;
+            if (ready) {
+                setDraggingFiles(true);
+            }
+        };
+        const handleDragOver = (event: DragEvent): void => {
+            if (!isFileDrag(event)) {
+                return;
+            }
+            event.preventDefault();
+            if (event.dataTransfer) {
+                event.dataTransfer.dropEffect = "copy";
+            }
+            if (ready) {
+                setDraggingFiles(true);
+            }
+        };
+        const handleDragLeave = (): void => {
+            if (dragDepthRef.current === 0) {
+                return;
+            }
+            dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+            if (dragDepthRef.current === 0) {
+                clearDragState();
+            }
+        };
+        const handleDrop = (event: DragEvent): void => {
+            const files = Array.from(event.dataTransfer?.files ?? []);
+            if (files.length === 0) {
+                return;
+            }
+            event.preventDefault();
+            clearDragState();
+            void addDroppedFiles(files);
+        };
+
+        window.addEventListener("dragenter", handleDragEnter);
+        window.addEventListener("dragover", handleDragOver);
+        window.addEventListener("dragleave", handleDragLeave);
+        window.addEventListener("drop", handleDrop);
+        window.addEventListener("blur", clearDragState);
+        return () => {
+            window.removeEventListener("dragenter", handleDragEnter);
+            window.removeEventListener("dragover", handleDragOver);
+            window.removeEventListener("dragleave", handleDragLeave);
+            window.removeEventListener("drop", handleDrop);
+            window.removeEventListener("blur", clearDragState);
+        };
+    }, [addDroppedFiles, ready]);
 
     const openSettings = useCallback(() => {
         setSettingsOpen(true);
@@ -183,6 +274,7 @@ export function App() {
                                 </AnimatePresence>
                                 <Transcript key={activeSessionId ?? "new"} sessionId={activeSessionId} />
                                 <Composer
+                                    ref={composerRef}
                                     disabled={!bridge || !ready || (busy && !running)}
                                     running={running}
                                     projects={projects}
@@ -242,6 +334,29 @@ export function App() {
                 </AnimatePresence>
             </div>
 
+            <AnimatePresence>
+                {draggingFiles ? (
+                    <motion.div
+                        key="file-drop-overlay"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={quickTransition}
+                        className="pointer-events-none fixed inset-0 z-[100] flex items-center justify-center bg-background/75 p-6 backdrop-blur-[2px]"
+                        data-testid="file-drop-overlay"
+                    >
+                        <div className="flex max-w-md items-center gap-3 rounded-2xl border border-dashed border-border-strong bg-popover px-5 py-4 shadow-xl">
+                            <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary text-foreground">
+                                <FileUp className="size-5" />
+                            </div>
+                            <p className="text-sm font-medium text-foreground">
+                                {t("composer.paths.drop.title")}
+                            </p>
+                        </div>
+                    </motion.div>
+                ) : null}
+            </AnimatePresence>
+
             <CreateProjectDialog
                 open={createProjectOpen}
                 onOpenChange={setCreateProjectOpen}
@@ -260,4 +375,8 @@ export function App() {
             <SandboxSetupDialog />
         </>
     );
+}
+
+function isFileDrag(event: DragEvent): boolean {
+    return Array.from(event.dataTransfer?.types ?? []).includes("Files");
 }

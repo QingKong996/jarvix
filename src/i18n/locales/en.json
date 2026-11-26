@@ -59,7 +59,10 @@
             }
         },
         "paths": {
-            "label": "Files and directories"
+            "label": "Files and directories",
+            "drop": {
+                "title": "Drop to add files or folders"
+            }
         },
         "goal": {
             "button": "Goal",

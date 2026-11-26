@@ -22,7 +22,7 @@ import {
 import { mainLogger } from "./logger.ts";
 import type { ModelCatalogService } from "./services/model-catalog.ts";
 import { syncProviderModels } from "./services/provider-model-sync.ts";
-import { completePaths } from "./services/path-completion.ts";
+import { completePaths, describePaths } from "./services/path-completion.ts";
 import type { SandboxSetupService } from "./services/sandbox-setup.ts";
 import type { MainWindowController } from "./window.ts";
 
@@ -175,6 +175,15 @@ export function registerIpc(dependencies: IpcDependencies): void {
         }
         return completePaths(
             query.data,
+            parseSessionContext(request.context)
+        );
+    });
+
+    handle(IPC_CHANNELS.pathsResolve, async (event, payload: unknown) => {
+        assertSender(event);
+        const request = requirePayload(payload, "Invalid path resolution payload");
+        return describePaths(
+            parseSandboxPaths(request.paths),
             parseSessionContext(request.context)
         );
     });

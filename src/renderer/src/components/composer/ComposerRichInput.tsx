@@ -14,7 +14,10 @@ import History from "@tiptap/extension-history";
 import Paragraph from "@tiptap/extension-paragraph";
 import Text from "@tiptap/extension-text";
 import type { SelectedPathMention } from "./composer-path-mentions.ts";
-import { insertSelectedPathMention } from "./composer-path-insertion.ts";
+import {
+    insertPathMentionsAtSelection,
+    insertSelectedPathMention
+} from "./composer-path-insertion.ts";
 import {
     mentionsFromDocument,
     positionAtTextOffset,
@@ -39,6 +42,7 @@ export type ComposerRichInputHandle = {
     clear(): void;
     replaceRange(start: number, end: number, text: string): void;
     insertMention(mention: SelectedPathMention): boolean;
+    insertPathMentions(mentions: readonly SelectedPathMention[]): boolean;
     setPlainText(text: string): void;
 };
 
@@ -158,6 +162,12 @@ export const ComposerRichInput = forwardRef<
                 return false;
             }
             return insertSelectedPathMention(editor, mention);
+        },
+        insertPathMentions(mentions) {
+            if (!editor) {
+                return false;
+            }
+            return insertPathMentionsAtSelection(editor, mentions);
         },
         setPlainText(text) {
             if (!editor) {

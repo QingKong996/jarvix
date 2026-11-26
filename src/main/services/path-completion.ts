@@ -1,4 +1,4 @@
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import {
     basename,
@@ -60,6 +60,37 @@ export async function completePaths(
         });
     });
     return { entries: results.slice(0, PATH_COMPLETION_LIMIT) };
+}
+
+export async function describePaths(
+    paths: readonly string[],
+    context: JarvixSessionContext
+): Promise<JarvixPathCompletionResult> {
+    const roots = workingDirectoriesFor(context).map((root) => resolve(root));
+    const seen = new Set<string>();
+    const results: JarvixPathCompletion[] = [];
+    for (const input of paths) {
+        const path = resolve(input);
+        const key = comparablePath(path);
+        if (seen.has(key)) {
+            continue;
+        }
+        let kind: JarvixPathKind;
+        try {
+            kind = (await stat(path)).isDirectory() ? "directory" : "file";
+        } catch {
+            continue;
+        }
+        seen.add(key);
+        results.push({
+            path,
+            relativePath: displayPathForRoots(path, roots),
+            name: basename(path) || path,
+            kind
+        });
+    }
+    disambiguateRelativePaths(results);
+    return { entries: results };
 }
 
 function disambiguateRelativePaths(results: JarvixPathCompletion[]): void {
@@ -196,6 +227,23 @@ function displayPath(path: string, root: string | null): string {
         || isAbsolute(value)
         ? path
         : `./${portablePath(value)}`;
+}
+
+function displayPathForRoots(path: string, roots: readonly string[]): string {
+    for (const root of roots) {
+        const value = relative(root, path);
+        if (
+            value.length === 0
+            || (
+                value !== ".."
+                && !value.startsWith(`..${sep}`)
+                && !isAbsolute(value)
+            )
+        ) {
+            return displayPath(path, root);
+        }
+    }
+    return path;
 }
 
 function expandHome(query: string): string {
