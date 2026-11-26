@@ -4,10 +4,10 @@ import {
     type ChildProcessWithoutNullStreams,
     type StdioOptions
 } from "node:child_process";
+import { parseWindowsSandboxError } from "@anthropic-ai/sandbox-runtime";
 import {
     type SandboxLaunch
 } from "../../../core/permissions/sandbox-launch.ts";
-import { isSandboxRunnerMessage } from "../../../core/permissions/sandbox-protocol.ts";
 import { shellLaunch } from "./launch.ts";
 import {
     addSandboxViolations,
@@ -38,12 +38,10 @@ export function startShellSession(options: StartShellSessionOptions): ShellSessi
     const launch = sandboxed?.launch ?? shellLaunch(command);
     let child: ChildProcessWithoutNullStreams;
     try {
-        const stdio: StdioOptions = sandboxed
-            ? ["pipe", "pipe", "pipe", "ipc"]
-            : ["pipe", "pipe", "pipe"];
+        const stdio: StdioOptions = ["pipe", "pipe", "pipe"];
         child = spawn(launch.command, launch.args, {
             cwd,
-            env: sandboxed?.env ?? process.env,
+            env: sandboxed?.launch.env ?? process.env,
             stdio,
             windowsHide: true,
             detached: process.platform !== "win32"
@@ -52,6 +50,7 @@ export function startShellSession(options: StartShellSessionOptions): ShellSessi
         sandboxed?.cleanup();
         throw error;
     }
+
     let resolveDone!: () => void;
     const done = new Promise<void>((resolvePromise) => {
         resolveDone = resolvePromise;
@@ -80,8 +79,7 @@ export function startShellSession(options: StartShellSessionOptions): ShellSessi
                 violations: [],
                 seenViolations: new Set(),
                 omittedViolations: 0,
-                intercepted: false,
-                done: false
+                intercepted: false
             }
             : null,
         done,
@@ -108,67 +106,72 @@ export function startShellSession(options: StartShellSessionOptions): ShellSessi
     };
     register(session);
 
+    const sandbox = session.sandbox;
+    const unsubscribeViolations = sandboxed && sandbox
+        ? sandboxed.onViolations((violations) => {
+            addSandboxViolations(sandbox, violations);
+        })
+        : undefined;
+    let ending = false;
+    let sandboxCompletion: Promise<void> | null = null;
+
+    const finishSession = (): void => {
+        if (ending) {
+            return;
+        }
+        ending = true;
+        unsubscribeViolations?.();
+        session.finish();
+    };
+    const completeSandbox = (): Promise<void> => {
+        if (!sandboxed || !sandbox || sandboxCompletion) {
+            return sandboxCompletion ?? Promise.resolve();
+        }
+        sandboxCompletion = sandboxed.complete()
+            .then((violations) => {
+                addSandboxViolations(sandbox, violations);
+            })
+            .catch((error: unknown) => {
+                session.error ??= `Sandbox cleanup failed: ${errorMessage(error)}`;
+            });
+        return sandboxCompletion;
+    };
+    const finishAfterSandbox = (): void => {
+        if (ending) {
+            return;
+        }
+        void completeSandbox().finally(finishSession);
+    };
+
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => appendOutput(session, chunk));
     child.stderr.on("data", (chunk: string) => appendOutput(session, chunk));
-    let closeReceived = false;
-    let completionTimer: NodeJS.Timeout | undefined;
-    const finishWhenReady = (): void => {
-        if (!closeReceived || (session.sandbox !== null && !session.sandbox.done)) {
-            return;
-        }
-        if (completionTimer !== undefined) {
-            clearTimeout(completionTimer);
-            completionTimer = undefined;
-        }
-        session.finish();
-    };
-    child.on("message", (message: unknown) => {
-        const sandbox = session.sandbox;
-        if (
-            !sandboxed ||
-            !sandbox ||
-            !isSandboxRunnerMessage(message) ||
-            message.commandId !== sandboxed.commandId
-        ) {
-            return;
-        }
-        if (message.type === "violations") {
-            addSandboxViolations(sandbox, message.violations);
-            return;
-        }
-        sandbox.done = true;
-        session.exitCode = message.exitCode;
-        finishWhenReady();
-    });
     child.once("error", (error) => {
         session.error = error.message;
-        if (completionTimer !== undefined) {
-            clearTimeout(completionTimer);
-        }
-        session.finish();
+        finishAfterSandbox();
     });
     child.once("close", (code) => {
-        closeReceived = true;
         session.exitCode = code;
-        if (session.sandbox !== null) {
-            completionTimer = setTimeout(() => {
-                completionTimer = undefined;
-                if (session.sandbox !== null) {
-                    session.sandbox.done = true;
-                }
-                finishWhenReady();
-            }, 75);
+        if (process.platform === "win32" && code === 16) {
+            const launchError = parseWindowsSandboxError(session.output);
+            if (launchError?.code === "mapped_drive_cwd") {
+                session.error = [
+                    "The Windows sandbox could not start with this working directory.",
+                    "The sandbox account may not be able to access it, or it may be on a mapped network drive.",
+                    "Use a local working directory inside the session's readable roots."
+                ].join(" ");
+            }
         }
-        finishWhenReady();
+        finishAfterSandbox();
     });
     child.stdin.on("error", (error) => {
         session.error = error.message;
-        if (completionTimer !== undefined) {
-            clearTimeout(completionTimer);
-        }
-        session.finish();
+        finishAfterSandbox();
     });
     return session;
+}
+
+function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
 }

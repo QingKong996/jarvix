@@ -1,4 +1,10 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+    existsSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
@@ -12,6 +18,7 @@ import {
     ShellTool,
     type ShellSessionExit
 } from "./shell.ts";
+import { writeFakeSandboxRunner } from "./fake-sandbox-runner.ts";
 import type { ToolExecutionResult } from "../types.ts";
 import type { LlmToolCallBlock } from "../../../protocol/llm.ts";
 
@@ -513,26 +520,13 @@ test("aborts a running command before timeout and returns its output", async () 
 
 test("returns sandbox violations from the runner under the invocation id", async () => {
     const directory = mkdtempSync(join(tmpdir(), "jarvix-shell-sandbox-"));
-    const runner = join(directory, "fake-sandbox-runner.mjs");
-    writeFileSync(runner, [
-        "import { readFileSync } from 'node:fs';",
-        "const invocation = JSON.parse(readFileSync(process.argv[2], 'utf8'));",
-        "process.stdout.write('sandboxed output\\n');",
-        "process.send?.({",
-        "  type: 'violations',",
-        "  commandId: invocation.commandId,",
-        "  violations: [{",
-        "    line: `blocked for ${invocation.commandId}`,",
-        "    timestamp: Date.now()",
-        "  }]",
-        "});",
-        "process.send?.({",
-        "  type: 'done',",
-        "  commandId: invocation.commandId,",
-        "  exitCode: 0",
-        "}, () => process.exit(0));",
-        "setTimeout(() => process.exit(0), 250).unref();"
-    ].join("\n"), "utf8");
+    const runner = writeFakeSandboxRunner(directory, {
+        launch: {
+            command: process.execPath,
+            args: ["-e", "process.stdout.write('sandboxed output\\n')"]
+        },
+        immediateViolations: ["blocked for {commandId}"]
+    });
     const tool = new ShellTool({
         sandboxPolicy: () => createSandboxPolicy("read-only", [directory]),
         sandboxPreflight: readySandboxPreflight,
@@ -571,27 +565,101 @@ test("returns sandbox violations from the runner under the invocation id", async
     }
 });
 
+test("reuses one sandbox runner across sequential commands", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-shell-sandbox-reuse-"));
+    const logPath = join(directory, "runner.log");
+    const runner = writeFakeSandboxRunner(directory, {
+        launch: {
+            command: process.execPath,
+            args: ["-e", "process.exit(0)"]
+        },
+        logPath
+    });
+    const tool = new ShellTool({
+        sandboxPolicy: () => createSandboxPolicy("read-only", [directory]),
+        sandboxPreflight: readySandboxPreflight,
+        sandboxRunnerPath: runner
+    });
+    tools.push(tool);
+
+    try {
+        await tool.execute(call("exec_command", {
+            command: "first",
+            cwd: directory,
+            timeoutMs: 5_000
+        }, "call-reuse-1"), { onOutput: () => undefined });
+        await tool.execute(call("exec_command", {
+            command: "second",
+            cwd: directory,
+            timeoutMs: 5_000
+        }, "call-reuse-2"), { onOutput: () => undefined });
+
+        const entries = readFileSync(logPath, "utf8").trim().split("\n");
+        expect(entries.filter((entry) => entry === "start")).toHaveLength(1);
+        expect(entries.filter((entry) => entry.startsWith("prepare:"))).toHaveLength(2);
+    } finally {
+        tool.dispose();
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
+test.skipIf(process.platform !== "win32")(
+    "does not report an inaccessible working directory as only a mapped drive",
+    async () => {
+        const directory = mkdtempSync(join(tmpdir(), "jarvix-shell-sandbox-cwd-"));
+        const launchError = `${JSON.stringify({
+            code: "mapped_drive_cwd",
+            message: "mapped/network-drive working directory",
+            drive: "C:\\"
+        })}\n`;
+        const runner = writeFakeSandboxRunner(directory, {
+            launch: {
+                command: process.execPath,
+                args: [
+                    "-e",
+                    `process.stderr.write(${JSON.stringify(launchError)}); process.exit(16)`
+                ]
+            }
+        });
+        const tool = new ShellTool({
+            sandboxPolicy: () => createSandboxPolicy("read-only", [directory]),
+            sandboxPreflight: readySandboxPreflight,
+            sandboxRunnerPath: runner
+        });
+        tools.push(tool);
+
+        try {
+            const result = await tool.execute(call("exec_command", {
+                command: "ignored",
+                cwd: directory,
+                timeoutMs: 5_000
+            }, "call-cwd-error"), { onOutput: () => undefined });
+
+            expect(result.content).toContain(
+                "The Windows sandbox could not start with this working directory."
+            );
+            expect(result.content).toContain("mapped network drive");
+            expect(result.content).toContain("readable roots");
+        } finally {
+            tool.dispose();
+            rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        }
+    }
+);
+
 test("returns only new sandbox violations when a timed-out task exits", async () => {
     const directory = mkdtempSync(join(tmpdir(), "jarvix-shell-sandbox-background-"));
-    const runner = join(directory, "fake-sandbox-runner.mjs");
-    writeFileSync(runner, [
-        "import { readFileSync } from 'node:fs';",
-        "const invocation = JSON.parse(readFileSync(process.argv[2], 'utf8'));",
-        "const sendViolation = (line) => process.send?.({",
-        "  type: 'violations',",
-        "  commandId: invocation.commandId,",
-        "  violations: [{ line, timestamp: Date.now() }]",
-        "});",
-        "sendViolation('blocked before timeout');",
-        "setTimeout(() => {",
-        "  sendViolation('blocked after timeout');",
-        "  process.send?.({",
-        "    type: 'done',",
-        "    commandId: invocation.commandId,",
-        "    exitCode: 0",
-        "  }, () => process.exit(0));",
-        "}, 1_500);"
-    ].join("\n"), "utf8");
+    const runner = writeFakeSandboxRunner(directory, {
+        launch: {
+            command: process.execPath,
+            args: ["-e", "setTimeout(() => process.exit(0), 2_000)"]
+        },
+        immediateViolations: ["blocked before timeout"],
+        delayedViolations: [{
+            delayMs: 1_500,
+            line: "blocked after timeout"
+        }]
+    });
     const tool = new ShellTool({
         sandboxPolicy: () => createSandboxPolicy("read-only", [directory]),
         sandboxPreflight: readySandboxPreflight,
@@ -627,24 +695,16 @@ test("returns only new sandbox violations when a timed-out task exits", async ()
 
 test("bounds pending sandbox violations in a long-running session", async () => {
     const directory = mkdtempSync(join(tmpdir(), "jarvix-shell-sandbox-bounded-"));
-    const runner = join(directory, "fake-sandbox-runner.mjs");
-    writeFileSync(runner, [
-        "import { readFileSync } from 'node:fs';",
-        "const invocation = JSON.parse(readFileSync(process.argv[2], 'utf8'));",
-        "const violations = Array.from({ length: 300 }, (_, index) => ({",
-        "  line: `blocked-${index}`,",
-        "  timestamp: Date.now() + index",
-        "}));",
-        "process.send?.({",
-        "  type: 'violations',",
-        "  commandId: invocation.commandId,",
-        "  violations",
-        "}, () => process.send?.({",
-        "  type: 'done',",
-        "  commandId: invocation.commandId,",
-        "  exitCode: 0",
-        "}, () => process.exit(0)));"
-    ].join("\n"), "utf8");
+    const runner = writeFakeSandboxRunner(directory, {
+        launch: {
+            command: process.execPath,
+            args: ["-e", "process.exit(0)"]
+        },
+        immediateViolations: Array.from(
+            { length: 300 },
+            (_, index) => `blocked-${index}`
+        )
+    });
     const tool = new ShellTool({
         sandboxPolicy: () => createSandboxPolicy("read-only", [directory]),
         sandboxPreflight: readySandboxPreflight,

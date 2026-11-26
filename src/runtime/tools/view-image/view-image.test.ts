@@ -49,7 +49,9 @@ test("loads an image as pi-ai image content", async () => {
 
 test("rejects invalid image data and sandbox-denied paths", async () => {
     const directory = workspace();
+    const deniedPath = join(directory, "pixel.png");
     writeFileSync(join(directory, "notes.txt"), "not an image", "utf8");
+    writeFileSync(deniedPath, Buffer.from(PNG_BASE64, "base64"));
     const tool = new ViewImageTool({ defaultCwd: directory });
 
     const invalid = await tool.execute(
@@ -61,12 +63,12 @@ test("rejects invalid image data and sandbox-denied paths", async () => {
     expect(invalid.content).toContain("invalid or unsupported image data");
 
     const policy = createSandboxPolicy("read-only", [directory]);
-    policy!.filesystem.denyRead.push({ path: directory, literal: true });
+    policy!.filesystem.denyRead.push({ path: deniedPath, literal: true });
     const denied = await new ViewImageTool({
         defaultCwd: directory,
         sandboxPolicy: () => policy
     }).execute(
-        call(VIEW_IMAGE_TOOL, { path: join(directory, "pixel.png") }),
+        call(VIEW_IMAGE_TOOL, { path: deniedPath }),
         observer
     );
     expect(denied.isError).toBe(true);

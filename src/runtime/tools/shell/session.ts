@@ -58,7 +58,6 @@ type SandboxSessionState = {
     seenViolations: Set<string>;
     omittedViolations: number;
     intercepted: boolean;
-    done: boolean;
 };
 
 export type WriteCommandState = "none" | "queued" | "rejected" | "overflowed";

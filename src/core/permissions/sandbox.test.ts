@@ -8,15 +8,16 @@ const resolvedWorkingDirectories = [...new Set(
 )];
 
 test.each([
-    ["read-only", []],
-    ["project-read-write", resolvedWorkingDirectories],
-    ["auto-review", resolvedWorkingDirectories]
-] as const)("maps %s to filesystem write restrictions", (permission, expected) => {
+    ["read-only", resolvedWorkingDirectories, []],
+    ["project-read-write", [], resolvedWorkingDirectories],
+    ["auto-review", [], resolvedWorkingDirectories]
+] as const)("maps %s to filesystem restrictions", (permission, allowRead, allowWrite) => {
     const policy = createSandboxPolicy(permission, workingDirectories);
 
     expect(policy?.filesystem).toEqual({
         denyRead: [],
-        allowWrite: expected,
+        allowRead,
+        allowWrite,
         denyWrite: []
     });
     expect(policy?.network).toEqual({
