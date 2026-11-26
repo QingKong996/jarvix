@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, expect, test } from "vitest";
-import { completePaths } from "./path-completion.ts";
+import { completePaths, describePaths } from "./path-completion.ts";
 
 const directories: string[] = [];
 
@@ -148,6 +148,37 @@ test("returns no entries for missing directories", async () => {
     await expect(completePaths(join(root, "missing", "child"), {
         workingDirectory: root
     })).resolves.toEqual({ entries: [] });
+});
+
+test("describes dropped paths in order and skips missing or duplicate entries", async () => {
+    const root = workspace();
+    const external = workspace();
+    const directory = join(root, "src");
+    const file = join(external, "outside.txt");
+    mkdirSync(directory);
+    writeFileSync(file, "");
+
+    const result = await describePaths([
+        directory,
+        file,
+        join(root, "missing.txt"),
+        directory
+    ], { workingDirectory: root });
+
+    expect(result.entries).toEqual([
+        {
+            path: directory,
+            relativePath: "./src",
+            name: "src",
+            kind: "directory"
+        },
+        {
+            path: file,
+            relativePath: file,
+            name: "outside.txt",
+            kind: "file"
+        }
+    ]);
 });
 
 test("caps completion results at the protocol limit", async () => {

@@ -1,5 +1,7 @@
 import {
+    forwardRef,
     useEffect,
+    useImperativeHandle,
     useRef,
     useState,
     type FormEvent,
@@ -96,7 +98,11 @@ type PathNavigation = {
     path?: string;
 };
 
-export function Composer({
+export type ComposerHandle = {
+    addPathMentions(completions: readonly JarvixPathCompletion[]): void;
+};
+
+export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer({
     disabled,
     running,
     projects,
@@ -115,7 +121,7 @@ export function Composer({
     onPermissionChange,
     onPermissionResponse,
     onPathComplete
-}: ComposerProps) {
+}, ref) {
     const { t } = useTranslation();
     const [value, setValue] = useState("");
     const [goalEditing, setGoalEditing] = useState(false);
@@ -193,6 +199,29 @@ export function Composer({
                 : Math.min(pathNavigation.index, matchingPaths.length - 1)
             : 0;
     const activePath = matchingPaths[activePathIndex];
+
+    useImperativeHandle(ref, () => ({
+        addPathMentions(completions) {
+            if (inputDisabled || completions.length === 0) {
+                return;
+            }
+            const existing = new Set(pathMentions.map((mention) => mention.path));
+            const mentions = completions
+                .filter((completion) => !existing.has(completion.path))
+                .map((completion) => pathMentionFor(completion));
+            if (
+                mentions.length === 0
+                || !richInputRef.current?.insertPathMentions(mentions)
+            ) {
+                return;
+            }
+            setPathNavigation({ menuKey: "", index: 0 });
+            setPathCompletions({
+                menuKey: "",
+                result: { entries: [] }
+            });
+        }
+    }), [inputDisabled, pathMentions]);
 
     useEffect(() => {
         if (!pathTrigger || !inputFocused || inputDisabled) {
@@ -742,4 +771,4 @@ export function Composer({
             />
         </>
     );
-}
+});

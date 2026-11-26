@@ -63,3 +63,24 @@ export function insertSelectedPathMention(
         .setTextSelection(from + 1)
         .run();
 }
+
+export function insertPathMentionsAtSelection(
+    editor: Editor,
+    mentions: readonly SelectedPathMention[]
+): boolean {
+    if (mentions.length === 0) {
+        return false;
+    }
+    editor.commands.focus();
+    let inserted = false;
+    for (const mention of mentions) {
+        inserted = editor
+            .chain()
+            .insertContent({
+                type: PATH_MENTION_NODE_NAME,
+                attrs: mention
+            })
+            .run() || inserted;
+    }
+    return inserted;
+}

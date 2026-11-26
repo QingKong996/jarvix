@@ -5,6 +5,7 @@ import Text from "@tiptap/extension-text";
 import { expect, test } from "vitest";
 import { PathMention } from "./PathMentionNode.tsx";
 import {
+    insertPathMentionsAtSelection,
     insertSelectedPathMention,
     pathMentionInsertionRange
 } from "./composer-path-insertion.ts";
@@ -122,6 +123,33 @@ test("consumes an existing space after the trigger", () => {
         type: "pathMention",
         attrs: mention
     }]);
+});
+
+test("inserts selected paths at the current selection", () => {
+    const directory: SelectedPathMention = {
+        token: "@./src",
+        path: "C:\\workspace\\src",
+        name: "src",
+        kind: "directory"
+    };
+    const editor = createEditor([{ type: "text", text: "review " }]);
+    setCursorAtTextOffset(editor, 7);
+
+    expect(insertPathMentionsAtSelection(editor, [mention, directory])).toBe(true);
+    expect(editor.getJSON().content?.[0]?.content).toEqual([
+        {
+            type: "text",
+            text: "review "
+        },
+        {
+            type: "pathMention",
+            attrs: mention
+        },
+        {
+            type: "pathMention",
+            attrs: directory
+        }
+    ]);
 });
 
 function createEditor(content: object[]): Editor {
