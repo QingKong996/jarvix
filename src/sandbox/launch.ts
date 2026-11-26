@@ -26,8 +26,9 @@ import {
     type SandboxRunnerMessage,
     type SandboxRunnerRequest,
     type SandboxRunnerViolation
-} from "./sandbox-protocol.ts";
-import type { SandboxPolicy } from "./sandbox.ts";
+} from "./protocol.ts";
+import type { SandboxReadiness } from "../core/execution/sandbox.ts";
+import type { SandboxPolicy } from "./policy.ts";
 
 const SANDBOX_REQUIRE = createRequire(import.meta.url);
 const WINDOWS_HELPER_DIRECTORY = "JarvixSandbox";
@@ -55,16 +56,7 @@ export type SandboxLaunchOptions = {
     binShell?: string | WindowsBinShell;
 };
 
-export type SandboxPreflightResult =
-    | {
-        ready: true;
-        warnings: readonly string[];
-    }
-    | {
-        ready: false;
-        errors: readonly string[];
-        warnings: readonly string[];
-    };
+export type SandboxPreflightResult = SandboxReadiness;
 
 export type SandboxPreflight = () => Promise<SandboxPreflightResult>;
 

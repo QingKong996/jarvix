@@ -8,8 +8,9 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
-import type { SandboxPreflight } from "../../../core/permissions/sandbox-launch.ts";
-import { createSandboxPolicy } from "../../../core/permissions/sandbox.ts";
+import type { SandboxReadiness } from "../../../core/execution/sandbox.ts";
+import { createPermissionRules } from "../../../core/permissions/rules.ts";
+import { createToolSandbox } from "../../../sandbox/tool-sandbox.ts";
 import { MAX_TOOL_OUTPUT_CHARS } from "../output.ts";
 import {
     MAX_STDIN_COMMAND_CHARS,
@@ -18,15 +19,28 @@ import {
     ShellTool,
     type ShellSessionExit
 } from "./shell.ts";
-import { writeFakeSandboxRunner } from "./fake-sandbox-runner.ts";
+import { writeFakeSandboxRunner } from "../../../sandbox/fake-runner.ts";
 import type { ToolExecutionResult } from "../types.ts";
 import type { LlmToolCallBlock } from "../../../protocol/llm.ts";
 
 const tools: ShellTool[] = [];
-const readySandboxPreflight: SandboxPreflight = async () => ({
+const readySandboxPreflight = async (): Promise<SandboxReadiness> => ({
     ready: true,
     warnings: []
 });
+
+function sandboxCommand(
+    directory: string,
+    runner: string,
+    preflight: () => Promise<SandboxReadiness> = readySandboxPreflight
+) {
+    return createToolSandbox({
+        permissionRules: () => createPermissionRules("read-only", [directory])
+    }, {
+        preflight,
+        runnerPath: runner
+    }).command;
+}
 
 afterEach(() => {
     for (const tool of tools.splice(0)) {
@@ -528,9 +542,7 @@ test("returns sandbox violations from the runner under the invocation id", async
         immediateViolations: ["blocked for {commandId}"]
     });
     const tool = new ShellTool({
-        sandboxPolicy: () => createSandboxPolicy("read-only", [directory]),
-        sandboxPreflight: readySandboxPreflight,
-        sandboxRunnerPath: runner
+        sandbox: sandboxCommand(directory, runner)
     });
     tools.push(tool);
 
@@ -576,9 +588,7 @@ test("reuses one sandbox runner across sequential commands", async () => {
         logPath
     });
     const tool = new ShellTool({
-        sandboxPolicy: () => createSandboxPolicy("read-only", [directory]),
-        sandboxPreflight: readySandboxPreflight,
-        sandboxRunnerPath: runner
+        sandbox: sandboxCommand(directory, runner)
     });
     tools.push(tool);
 
@@ -622,9 +632,7 @@ test.skipIf(process.platform !== "win32")(
             }
         });
         const tool = new ShellTool({
-            sandboxPolicy: () => createSandboxPolicy("read-only", [directory]),
-            sandboxPreflight: readySandboxPreflight,
-            sandboxRunnerPath: runner
+            sandbox: sandboxCommand(directory, runner)
         });
         tools.push(tool);
 
@@ -661,9 +669,7 @@ test("returns only new sandbox violations when a timed-out task exits", async ()
         }]
     });
     const tool = new ShellTool({
-        sandboxPolicy: () => createSandboxPolicy("read-only", [directory]),
-        sandboxPreflight: readySandboxPreflight,
-        sandboxRunnerPath: runner
+        sandbox: sandboxCommand(directory, runner)
     });
     tools.push(tool);
 
@@ -706,9 +712,7 @@ test("bounds pending sandbox violations in a long-running session", async () => 
         )
     });
     const tool = new ShellTool({
-        sandboxPolicy: () => createSandboxPolicy("read-only", [directory]),
-        sandboxPreflight: readySandboxPreflight,
-        sandboxRunnerPath: runner
+        sandbox: sandboxCommand(directory, runner)
     });
     tools.push(tool);
 
@@ -730,12 +734,18 @@ test("bounds pending sandbox violations in a long-running session", async () => 
 
 test("returns a setup error before starting a sandboxed command", async () => {
     const tool = new ShellTool({
-        sandboxPolicy: () => createSandboxPolicy("project-read-write", [process.cwd()]),
-        sandboxPreflight: async () => ({
-            ready: false,
-            errors: ["Sandbox user is not provisioned (user=false, cred=false)."],
-            warnings: []
-        })
+        sandbox: createToolSandbox({
+            permissionRules: () => createPermissionRules(
+                "project-read-write",
+                [process.cwd()]
+            )
+        }, {
+            preflight: async () => ({
+                ready: false,
+                errors: ["Sandbox user is not provisioned (user=false, cred=false)."],
+                warnings: []
+            })
+        }).command
     });
     tools.push(tool);
 

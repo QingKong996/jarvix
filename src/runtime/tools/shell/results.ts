@@ -1,4 +1,4 @@
-import type { SandboxPreflightResult } from "../../../core/permissions/sandbox-launch.ts";
+import type { SandboxReadiness } from "../../../core/execution/sandbox.ts";
 import { appendSandboxViolations } from "../../../core/permissions/violations.ts";
 import type { LlmToolCallBlock } from "../../../protocol/llm.ts";
 import type { ToolExecutionResult } from "../types.ts";
@@ -73,7 +73,7 @@ export function sharedSessionLimitResult(
 
 export function sandboxPreflightResult(
     command: string,
-    preflight: Extract<SandboxPreflightResult, { ready: false }>
+    preflight: Extract<SandboxReadiness, { ready: false }>
 ): ToolExecutionResult {
     const message = [
         "The command was not executed because the local sandbox is not ready.",

@@ -11,9 +11,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
 import type { LlmToolCallBlock } from "../../../protocol/llm.ts";
-import { createSandboxPolicy } from "../../../core/permissions/sandbox.ts";
+import type { PermissionMode } from "../../../protocol/permission.ts";
+import { createPermissionRules } from "../../../core/permissions/rules.ts";
+import { createToolSandbox } from "../../../sandbox/tool-sandbox.ts";
 import { createDefaultTools } from "../index.ts";
 import { APPLY_PATCH_TOOL, ApplyPatchTool } from "./apply-patch.ts";
+
+function sandboxAccess(permission: PermissionMode, directory: string) {
+    return createToolSandbox({
+        permissionRules: () => createPermissionRules(permission, [directory])
+    }).access;
+}
 
 test("rejects updates to files above the safe size limit", async () => {
     const directory = mkdtempSync(join(tmpdir(), "jarvix-apply-patch-large-"));
@@ -309,7 +317,7 @@ test("returns completed changes when cancelled between file hunks", async () => 
 test("rejects apply_patch writes in read-only mode", async () => {
     const directory = mkdtempSync(join(tmpdir(), "jarvix-apply-patch-readonly-"));
     const tool = new ApplyPatchTool({
-        sandboxPolicy: () => createSandboxPolicy("read-only", [directory])
+        sandbox: sandboxAccess("read-only", directory)
     });
     try {
         const result = await tool.execute(call(directory, [
@@ -339,7 +347,7 @@ test("rejects apply_patch writes in read-only mode", async () => {
 test("checks every apply_patch target before writing any file", async () => {
     const directory = mkdtempSync(join(tmpdir(), "jarvix-apply-patch-targets-"));
     const tool = new ApplyPatchTool({
-        sandboxPolicy: () => createSandboxPolicy("project-read-write", [directory])
+        sandbox: sandboxAccess("project-read-write", directory)
     });
     const outside = join(directory, "..", `jarvix-outside-${Date.now()}.txt`);
     try {
@@ -367,7 +375,7 @@ test("rejects an apply_patch move whose destination is outside the workspace", a
     const source = join(directory, "source.txt");
     const outside = join(directory, "..", `jarvix-move-${Date.now()}.txt`);
     const tool = new ApplyPatchTool({
-        sandboxPolicy: () => createSandboxPolicy("project-read-write", [directory])
+        sandbox: sandboxAccess("project-read-write", directory)
     });
     try {
         writeFileSync(source, "old\n", "utf8");

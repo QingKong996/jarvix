@@ -11,7 +11,7 @@ import {
     noopAgentObserver,
     type AgentObserver
 } from "../observability/index.ts";
-import type { SandboxPreflight } from "../permissions/sandbox-launch.ts";
+import type { ToolSandboxFactory } from "../execution/sandbox.ts";
 import { SessionPermissions } from "../permissions/session-permissions.ts";
 import {
     createDefaultToolManager,
@@ -47,7 +47,7 @@ import type { LlmUserMessage } from "../../protocol/llm.ts";
 export class SessionManager {
     private readonly sessions = new Map<string, Session>();
     private readonly permissions = new Map<string, SessionPermissions>();
-    private readonly sandboxPreflight?: SandboxPreflight;
+    private readonly sandboxFactory?: ToolSandboxFactory;
     private readonly contextManagerFactory: ContextManagerFactory;
     private readonly toolManagers = new Map<string, ToolManager>();
     private readonly shellSessionBudget = new ShellSessionBudget();
@@ -55,13 +55,13 @@ export class SessionManager {
     private readonly observer: AgentObserver;
 
     constructor(
-        sandboxPreflight?: SandboxPreflight,
+        sandboxFactory?: ToolSandboxFactory,
         contextManagerFactory: ContextManagerFactory = createDefaultContextManager,
         toolManagers: readonly ToolManager[] = [],
         logger: JarvixLogger = noopLogger,
         observer: AgentObserver = noopAgentObserver
     ) {
-        this.sandboxPreflight = sandboxPreflight;
+        this.sandboxFactory = sandboxFactory;
         this.contextManagerFactory = contextManagerFactory;
         this.logger = logger;
         this.observer = observer;
@@ -362,7 +362,7 @@ export class SessionManager {
         try {
             tools.registerManager(createDefaultToolManager({
                 permissions,
-                sandboxPreflight: this.sandboxPreflight,
+                sandboxFactory: this.sandboxFactory,
                 sharedBudget: this.shellSessionBudget
             }));
             for (const manager of this.toolManagers.values()) {

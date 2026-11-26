@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { WindowsBinShell } from "@anthropic-ai/sandbox-runtime";
+import type { SandboxShell } from "../../../core/execution/sandbox.ts";
 
 export type ShellLaunch = {
     command: string;
@@ -9,7 +9,7 @@ export type ShellLaunch = {
 
 const WINDOWS_POWERSHELL = findWindowsPowerShell();
 
-export function sandboxBinShell(): string | WindowsBinShell | undefined {
+export function sandboxBinShell(): SandboxShell | undefined {
     if (process.platform === "win32") {
         return WINDOWS_POWERSHELL
             ? {

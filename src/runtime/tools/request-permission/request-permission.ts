@@ -7,7 +7,6 @@ import {
     type PermissionGrantInput,
     type PermissionMode
 } from "../../../protocol/permission.ts";
-import type { SandboxPolicy } from "../../../core/permissions/sandbox.ts";
 import { permissionPathKey } from "../../../core/permissions/path-key.ts";
 import type {
     ToolExecutionResult,
@@ -90,15 +89,15 @@ export const REQUEST_PERMISSION_TOOL_DEFINITIONS: readonly LlmToolDefinition[] =
 }];
 
 export type RequestPermissionToolOptions = {
-    sandboxPolicy?: () => SandboxPolicy | null;
+    sandboxActive?: () => boolean;
 };
 
 export class RequestPermissionTool implements ToolExecutor {
     readonly definitions = REQUEST_PERMISSION_TOOL_DEFINITIONS;
-    private readonly sandboxPolicy?: () => SandboxPolicy | null;
+    private readonly sandboxActive?: () => boolean;
 
     constructor(options: RequestPermissionToolOptions = {}) {
-        this.sandboxPolicy = options.sandboxPolicy;
+        this.sandboxActive = options.sandboxActive;
     }
 
     getRegisteredTools(permission: PermissionMode): readonly LlmToolDefinition[] {
@@ -118,7 +117,7 @@ export class RequestPermissionTool implements ToolExecutor {
         if (!parsed.success) {
             return result(call, "cancelled", parsed.error.message, true, "failed");
         }
-        if (this.sandboxPolicy && this.sandboxPolicy() === null) {
+        if (this.sandboxActive && !this.sandboxActive()) {
             return result(
                 call,
                 "cancelled",

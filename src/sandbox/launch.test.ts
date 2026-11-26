@@ -3,7 +3,7 @@ import {
     createSandboxPreflight,
     createSandboxProfileReadiness,
     installSandbox
-} from "./sandbox-launch.ts";
+} from "./launch.ts";
 
 const srtWin = {
     exe: "srt-win.exe",

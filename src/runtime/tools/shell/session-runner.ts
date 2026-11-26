@@ -4,10 +4,7 @@ import {
     type ChildProcessWithoutNullStreams,
     type StdioOptions
 } from "node:child_process";
-import { parseWindowsSandboxError } from "@anthropic-ai/sandbox-runtime";
-import {
-    type SandboxLaunch
-} from "../../../core/permissions/sandbox-launch.ts";
+import type { SandboxedCommand } from "../../../core/execution/sandbox.ts";
 import { shellLaunch } from "./launch.ts";
 import {
     addSandboxViolations,
@@ -19,7 +16,7 @@ type StartShellSessionOptions = {
     command: string;
     cwd: string;
     listener: (chunk: string) => void;
-    sandboxed: SandboxLaunch | null;
+    sandboxed: SandboxedCommand | null;
     sharedSlotHeld: boolean;
     register(session: ShellSession): void;
     onFinished(session: ShellSession): void;
@@ -35,13 +32,13 @@ export function startShellSession(options: StartShellSessionOptions): ShellSessi
         register,
         onFinished
     } = options;
-    const launch = sandboxed?.launch ?? shellLaunch(command);
+    const launch = sandboxed ?? shellLaunch(command);
     let child: ChildProcessWithoutNullStreams;
     try {
         const stdio: StdioOptions = ["pipe", "pipe", "pipe"];
         child = spawn(launch.command, launch.args, {
             cwd,
-            env: sandboxed?.launch.env ?? process.env,
+            env: sandboxed?.env ?? process.env,
             stdio,
             windowsHide: true,
             detached: process.platform !== "win32"
@@ -153,15 +150,9 @@ export function startShellSession(options: StartShellSessionOptions): ShellSessi
     });
     child.once("close", (code) => {
         session.exitCode = code;
-        if (process.platform === "win32" && code === 16) {
-            const launchError = parseWindowsSandboxError(session.output);
-            if (launchError?.code === "mapped_drive_cwd") {
-                session.error = [
-                    "The Windows sandbox could not start with this working directory.",
-                    "The sandbox account may not be able to access it, or it may be on a mapped network drive.",
-                    "Use a local working directory inside the session's readable roots."
-                ].join(" ");
-            }
+        const launchError = sandboxed?.explainExitError?.(code, session.output);
+        if (launchError) {
+            session.error = launchError;
         }
         finishAfterSandbox();
     });

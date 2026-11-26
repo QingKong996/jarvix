@@ -2,8 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, expect, test } from "vitest";
-import { authorizeSandboxRead, authorizeSandboxWrite } from "./path-access.ts";
-import { createSandboxPolicy } from "./sandbox.ts";
+import { createPermissionRules } from "../core/permissions/rules.ts";
+import { authorizeSandboxRead, authorizeSandboxWrite } from "./access.ts";
+import { createSandboxPolicy } from "./policy.ts";
 
 const directories: string[] = [];
 
@@ -15,7 +16,7 @@ afterEach(() => {
 
 test("read-only policies deny every write", () => {
     const directory = workspace();
-    const policy = createSandboxPolicy("read-only", [directory]);
+    const policy = createSandboxPolicy(createPermissionRules("read-only", [directory]));
 
     const decision = authorizeSandboxWrite(policy, join(directory, "new.txt"));
 
@@ -27,7 +28,9 @@ test("read-only policies deny every write", () => {
 
 test("project write policies allow descendants and deny paths outside them", () => {
     const directory = workspace();
-    const policy = createSandboxPolicy("project-read-write", [directory]);
+    const policy = createSandboxPolicy(
+        createPermissionRules("project-read-write", [directory])
+    );
 
     expect(authorizeSandboxWrite(policy, join(directory, "nested", "new.txt")))
         .toMatchObject({ allowed: true });
@@ -42,7 +45,7 @@ test("denyWrite rules take precedence over allowWrite roots", () => {
     const directory = workspace();
     const blocked = join(directory, "blocked");
     mkdirSync(blocked);
-    const policy = createSandboxPolicy("auto-review", [directory]);
+    const policy = createSandboxPolicy(createPermissionRules("auto-review", [directory]));
     policy!.filesystem.denyWrite.push(resolve(blocked));
 
     expect(authorizeSandboxWrite(policy, join(directory, "allowed.txt")))
@@ -57,7 +60,9 @@ test("denyWrite rules take precedence over allowWrite roots", () => {
 test("missing files are checked through their nearest existing ancestor", () => {
     const directory = workspace();
     writeFileSync(join(directory, "existing.txt"), "existing", "utf8");
-    const policy = createSandboxPolicy("project-read-write", [directory]);
+    const policy = createSandboxPolicy(
+        createPermissionRules("project-read-write", [directory])
+    );
 
     expect(authorizeSandboxWrite(policy, join(directory, "missing", "deep", "file.txt")))
         .toMatchObject({ allowed: true });
@@ -72,7 +77,9 @@ test("read access allows a more specific allowRead root", () => {
     const directory = workspace();
     const publicDirectory = join(directory, "public");
     mkdirSync(publicDirectory);
-    const policy = createSandboxPolicy("read-only", [directory])!;
+    const policy = createSandboxPolicy(
+        createPermissionRules("read-only", [directory])
+    )!;
     policy.filesystem.denyRead.push({ path: directory, literal: true });
     policy.filesystem.allowRead = [{ path: publicDirectory, literal: true }];
 
