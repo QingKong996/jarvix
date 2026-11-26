@@ -3,6 +3,7 @@ import type { LlmToolCallBlock } from "../../../protocol/llm.ts";
 import {
     createSandboxLaunch,
     preflightSandbox,
+    SandboxRunnerHost,
     type SandboxLaunch,
     type SandboxPreflight
 } from "../../../core/permissions/sandbox-launch.ts";
@@ -89,7 +90,9 @@ export class ShellTool implements ToolExecutor {
     private readonly sandboxPolicy?: () => SandboxPolicy | null;
     private readonly sandboxPreflight: SandboxPreflight;
     private readonly sandboxRunnerPath?: string;
+    private sandboxRunnerHost?: SandboxRunnerHost;
     private readonly maxSessions: number;
+    private startingSessions = 0;
     readonly sharedBudget?: ShellSessionBudget;
     private readonly addressableSessions = new Map<string, ShellSession>();
     private readonly children = new Set<ShellSession>();
@@ -148,6 +151,8 @@ export class ShellTool implements ToolExecutor {
         }
         this.children.clear();
         this.addressableSessions.clear();
+        this.sandboxRunnerHost?.dispose();
+        this.sandboxRunnerHost = undefined;
     }
 
     async stop(): Promise<readonly ToolStopEvent[]> {
@@ -275,7 +280,8 @@ export class ShellTool implements ToolExecutor {
         }
         let session: ShellSession;
         try {
-            session = this.start(command, this.resolveCwd(parsed.data.cwd), (chunk) => {
+            this.startingSessions += 1;
+            session = await this.start(command, this.resolveCwd(parsed.data.cwd), (chunk) => {
                 session.broadcastOffset = session.output.length;
                 observer.onOutput({ kind: "shell.exec_command", output: chunk });
             }, call.id, this.sharedBudget !== undefined);
@@ -339,7 +345,7 @@ export class ShellTool implements ToolExecutor {
     }
 
     private sessionCount(): number {
-        let count = this.children.size;
+        let count = this.children.size + this.startingSessions;
         for (const session of this.addressableSessions.values()) {
             if (!this.children.has(session)) {
                 count += 1;
@@ -427,14 +433,35 @@ export class ShellTool implements ToolExecutor {
         };
     }
 
-    private start(
+    private async start(
         command: string,
         cwd: string,
         listener: (chunk: string) => void,
         toolCallId: string,
         sharedSlotHeld: boolean
+    ): Promise<ShellSession> {
+        let sandboxed: SandboxLaunch | null;
+        try {
+            sandboxed = await this.sandboxLaunch(command, cwd, toolCallId);
+        } finally {
+            this.startingSessions -= 1;
+        }
+        return this.startWithSandbox(
+            command,
+            cwd,
+            listener,
+            sandboxed,
+            sharedSlotHeld
+        );
+    }
+
+    private startWithSandbox(
+        command: string,
+        cwd: string,
+        listener: (chunk: string) => void,
+        sandboxed: SandboxLaunch | null,
+        sharedSlotHeld: boolean
     ): ShellSession {
-        const sandboxed = this.sandboxLaunch(command, cwd, toolCallId);
         return startShellSession({
             command,
             cwd,
@@ -453,23 +480,25 @@ export class ShellTool implements ToolExecutor {
         });
     }
 
-    private sandboxLaunch(
+    private async sandboxLaunch(
         command: string,
         cwd: string,
         toolCallId: string
-    ): SandboxLaunch | null {
+    ): Promise<SandboxLaunch | null> {
         const policy = this.sandboxPolicy?.();
         if (!policy) {
             return null;
         }
 
-        return createSandboxLaunch({
+        this.sandboxRunnerHost ??= new SandboxRunnerHost({
+            runnerPath: this.sandboxRunnerPath
+        });
+        return createSandboxLaunch(this.sandboxRunnerHost, {
             command,
             cwd,
             commandId: toolCallId,
             policy,
-            binShell: sandboxBinShell(),
-            runnerPath: this.sandboxRunnerPath
+            binShell: sandboxBinShell()
         });
     }
 

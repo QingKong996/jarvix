@@ -46,12 +46,15 @@ export function createSandboxPolicy(
         return null;
     }
 
-    const allowWrite = profile.writable === "workspace"
-        ? [...new Set(workingDirectories.map((directory) => resolve(directory)))]
-        : [];
+    const workspacePaths = [...new Set(
+        workingDirectories.map((directory) => resolve(directory))
+    )];
+    const allowRead = profile.writable === "none" ? workspacePaths : [];
+    const allowWrite = profile.writable === "workspace" ? workspacePaths : [];
     return {
         filesystem: {
             denyRead: [],
+            allowRead,
             allowWrite,
             denyWrite: []
         },

@@ -9,6 +9,7 @@ import {
     BackgroundTaskManager,
     MAX_BACKGROUND_SUBSCRIPTIONS
 } from "./background-task-manager.ts";
+import { writeFakeSandboxRunner } from "./fake-sandbox-runner.ts";
 import { ShellSessionBudget, ShellTool } from "./shell.ts";
 import type { ToolBackgroundEnd, ToolTaskEvent } from "../types.ts";
 
@@ -384,23 +385,17 @@ test("evicts only the oldest completed unread task when the shared budget is ful
 
 test("keeps a timed-out task failed without repeating reported violations", async () => {
     const directory = mkdtempSync(join(tmpdir(), "jarvix-background-sandbox-"));
-    const runner = join(directory, "fake-sandbox-runner.mjs");
-    writeFileSync(runner, [
-        "import { readFileSync } from 'node:fs';",
-        "const invocation = JSON.parse(readFileSync(process.argv[2], 'utf8'));",
-        "process.send?.({",
-        "  type: 'violations',",
-        "  commandId: invocation.commandId,",
-        "  violations: [{ line: 'blocked before timeout', timestamp: Date.now() }]",
-        "});",
-        "setTimeout(() => {",
-        "  process.send?.({",
-        "    type: 'done',",
-        "    commandId: invocation.commandId,",
-        "    exitCode: 0",
-        "  }, () => process.exit(0));",
-        "}, 1_500);"
-    ].join("\n"), "utf8");
+    const runner = writeFakeSandboxRunner(directory, {
+        launch: {
+            command: process.execPath,
+            args: ["-e", "setTimeout(() => process.exit(0), 2_000)"]
+        },
+        immediateViolations: ["blocked before timeout"],
+        delayedViolations: [{
+            delayMs: 1_500,
+            line: "blocked after timeout"
+        }]
+    });
     const manager = new BackgroundTaskManager(new ShellTool({
         sandboxPolicy: () => createSandboxPolicy("read-only", [directory]),
         sandboxPreflight: readySandboxPreflight,
