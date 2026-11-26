@@ -236,6 +236,42 @@ export function usePromptController(options: PromptControllerOptions) {
         startRequest
     ]);
 
+    const loadSkill = useCallback(async (name: string): Promise<void> => {
+        if (!bridge || !ready) {
+            throw new Error("Jarvix is not ready");
+        }
+        if (busy || requestInFlightRef.current) {
+            throw new Error("Wait for the active request to finish");
+        }
+        setBusy(true);
+        try {
+            let sessionId = activeSessionIdRef.current;
+            if (!sessionId) {
+                const created = await bridge.createSession(
+                    sessionContextRef.current,
+                    sessionPermissionRef.current
+                );
+                activateSession(created);
+                await refreshSessions();
+                sessionId = created.meta.id;
+            }
+            await bridge.loadSkill(sessionId, name);
+        } finally {
+            setBusy(false);
+        }
+    }, [
+        activateSession,
+        activeSessionIdRef,
+        bridge,
+        busy,
+        ready,
+        refreshSessions,
+        requestInFlightRef,
+        sessionContextRef,
+        sessionPermissionRef,
+        setBusy
+    ]);
+
     const stop = useCallback(async (): Promise<void> => {
         const sessionId = requestSessionIdRef.current;
         if (!bridge || !sessionId) {
@@ -298,5 +334,5 @@ export function usePromptController(options: PromptControllerOptions) {
         setRunning
     ]);
 
-    return { send, stop, submitGoal, clearGoal };
+    return { send, stop, submitGoal, clearGoal, loadSkill };
 }

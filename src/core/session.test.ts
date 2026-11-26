@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, test, vi } from "vitest";
@@ -24,6 +24,7 @@ import {
     type AgentTurnStarted
 } from "./observability/index.ts";
 import { SESSION_NAME_MAX_LENGTH } from "../protocol/session.ts";
+import { SkillCatalog } from "./skills/skill-catalog.ts";
 
 const home = vi.hoisted(() => ({ path: "" }));
 
@@ -178,6 +179,57 @@ test("persists each turn and resumes the stored history for the next request", a
 
     const reloaded = loadSession(stored.meta.id, directory);
     expect(reloaded?.messages.map((message) => message.role)).toEqual(["user", "assistant", "user", "assistant"]);
+});
+
+test("loads model-disabled skills manually as hidden tail context", async () => {
+    home.path = join(base, "manual-skill-home");
+    const workspace = join(home.path, "workspace");
+    const skillDirectory = join(
+        home.path,
+        ".agents",
+        "skills",
+        "pdf-processing"
+    );
+    mkdirSync(skillDirectory, { recursive: true });
+    writeFileSync(join(skillDirectory, "SKILL.md"), [
+        "---",
+        "name: pdf-processing",
+        "description: Process PDF files when the task requires it.",
+        "disable-model-invocation: true",
+        "---",
+        "",
+        "# PDF processing"
+    ].join("\n"), "utf8");
+    const requests: LlmMessage[][] = [];
+    const jarvix = new Jarvix({
+        llm: fakeLlm("ok", requests),
+        config: TEST_CONFIG,
+        skillCatalog: new SkillCatalog({ homeDirectory: home.path })
+    });
+    const project = jarvix.createProject("Skill project", [workspace]);
+    const session = jarvix.createSession({ projectId: project.id }, SESSION_NAME);
+
+    expect(jarvix.listSkills([workspace])[0]).toMatchObject({
+        name: "pdf-processing",
+        disableModelInvocation: true,
+        modelInvocable: false
+    });
+    expect(jarvix.loadSkill(session.meta.id, "pdf-processing"))
+        .toBe("pdf-processing");
+    expect(jarvix.loadSession(session.meta.id)?.messages).toEqual([]);
+
+    await jarvix.request("Use the loaded skill", session.meta.id);
+
+    expect(requests[0]?.some((message) => (
+        message.role === "system" && message.context === "skills"
+    ))).toBe(false);
+    expect(requests[0]?.find((message) => (
+        message.role === "system" && message.context === "skill"
+    ))).toMatchObject({
+        content: expect.stringContaining("# PDF processing")
+    });
+    expect(jarvix.loadSession(session.meta.id)?.messages.map((message) => message.role))
+        .toEqual(["user", "assistant"]);
 });
 
 test.each<{ language: Language; name: string }>([

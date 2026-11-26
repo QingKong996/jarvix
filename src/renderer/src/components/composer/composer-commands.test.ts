@@ -1,9 +1,13 @@
+import type { TFunction } from "i18next";
 import { describe, expect, test } from "vitest";
+import type { JarvixSkill } from "../../../../protocol/skill.ts";
+import { composerCommands } from "./composer-command-catalog.ts";
 import {
     cycleCommandIndex,
     detectSlashCommand,
     filterSlashCommands,
     parseGoalCommand,
+    parseSkillCommand,
     removeSlashCommandToken
 } from "./composer-commands.ts";
 
@@ -73,6 +77,26 @@ describe("filterSlashCommands", () => {
     test("keeps the catalog order for an empty query", () => {
         expect(filterSlashCommands(commands, "").map((command) => command.id))
             .toEqual(commands.map((command) => command.id));
+    });
+
+    test("fuzzy matches enabled skills and keeps manual-only skills available", () => {
+        const t = ((key: string) => key) as unknown as TFunction;
+        const catalog = composerCommands(t, [
+            skill("pdf-processing"),
+            skill("manual-only", {
+                disableModelInvocation: true,
+                modelInvocable: false
+            }),
+            skill("disabled", {
+                enabled: false,
+                modelInvocable: false
+            })
+        ]);
+
+        expect(filterSlashCommands(catalog, "pdfp")[0]?.label)
+            .toBe("/pdf-processing");
+        expect(catalog.some((command) => command.id === "manual-only")).toBe(true);
+        expect(catalog.some((command) => command.id === "disabled")).toBe(false);
     });
 });
 
@@ -144,3 +168,43 @@ describe("parseGoalCommand", () => {
         });
     });
 });
+
+describe("parseSkillCommand", () => {
+    test("extracts a skill name from a direct slash command", () => {
+        expect(parseSkillCommand("/pdf-processing")).toEqual({
+            name: "pdf-processing"
+        });
+        expect(parseSkillCommand("\n/tdd\r\n")).toEqual({
+            name: "tdd"
+        });
+    });
+
+    test("ignores non-command input and reserves built-in commands", () => {
+        expect(parseSkillCommand("/goal")).toBeNull();
+        expect(parseSkillCommand("/GOAL")).toBeNull();
+        expect(parseSkillCommand("/pdf-processing extra")).toBeNull();
+        expect(parseSkillCommand("hello\n/tdd")).toBeNull();
+        expect(parseSkillCommand("hello /tdd")).toBeNull();
+        expect(parseSkillCommand("/")).toEqual({ name: "" });
+    });
+});
+
+function skill(
+    name: string,
+    overrides: Partial<JarvixSkill> = {}
+): JarvixSkill {
+    return {
+        name,
+        description: `${name} description`,
+        location: `/skills/${name}/SKILL.md`,
+        directory: `/skills/${name}`,
+        directoryName: name,
+        scope: "user",
+        source: "jarvix",
+        disableModelInvocation: false,
+        nameMatchesDirectory: true,
+        enabled: true,
+        modelInvocable: true,
+        ...overrides
+    };
+}

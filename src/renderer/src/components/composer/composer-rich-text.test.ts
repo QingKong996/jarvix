@@ -33,6 +33,15 @@ const schema = new Schema({
                 name: { default: "" },
                 kind: { default: "file" }
             }
+        },
+        skillMention: {
+            inline: true,
+            group: "inline",
+            atom: true,
+            attrs: {
+                name: { default: "" },
+                description: { default: "" }
+            }
         }
     },
     marks: {}
@@ -101,6 +110,27 @@ test("serializes leading and trailing spacing into the mention atom", () => {
     expect(serializeDocument(doc)).toBe(" @index.html ");
     expect(textOffsetAt(doc, 2)).toBe(13);
     expect(positionAtTextOffset(doc, 13)).toBe(2);
+});
+
+test("maps skill mention tokens by their serialized command length", () => {
+    const doc = document([
+        paragraph([
+            text("use "),
+            {
+                type: "skillMention",
+                attrs: {
+                    name: "tdd",
+                    description: "Test-driven development"
+                }
+            },
+            text(" now")
+        ])
+    ]);
+
+    expect(serializeDocument(doc)).toBe("use /tdd now");
+    expect(textOffsetAt(doc, 5)).toBe(4);
+    expect(positionAtTextOffset(doc, 4)).toBe(5);
+    expect(positionAtTextOffset(doc, 8)).toBe(6);
 });
 
 test("maps offsets across adjacent and hard-break-separated mentions", () => {

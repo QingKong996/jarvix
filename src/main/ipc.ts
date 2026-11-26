@@ -19,6 +19,7 @@ import {
     sessionNameSchema,
     type JarvixSessionContext
 } from "../protocol/session.ts";
+import type { JarvixSkillListScope } from "../protocol/skill.ts";
 import { mainLogger } from "./logger.ts";
 import type { ModelCatalogService } from "./services/model-catalog.ts";
 import { syncProviderModels } from "./services/provider-model-sync.ts";
@@ -125,6 +126,36 @@ function parseSandboxPaths(value: unknown): string[] {
     return unique;
 }
 
+function parseWorkingDirectories(value: unknown): string[] {
+    if (value === undefined) {
+        return [];
+    }
+    if (!Array.isArray(value) || value.length > 64) {
+        throw new Error("Working directories must be an array");
+    }
+    const directories = value.filter(
+        (directory): directory is string => typeof directory === "string"
+    );
+    if (directories.length !== value.length) {
+        throw new Error("Working directories must be strings");
+    }
+    const unique = [...new Set(directories)];
+    if (unique.some((directory) => !isAbsolute(directory))) {
+        throw new Error("Working directories must be absolute");
+    }
+    return unique;
+}
+
+function parseSkillListScope(value: unknown): JarvixSkillListScope {
+    if (value === undefined || value === "all") {
+        return "all";
+    }
+    if (value === "user" || value === "project") {
+        return value;
+    }
+    throw new Error("Invalid skill scope");
+}
+
 export function registerIpc(dependencies: IpcDependencies): void {
     const { jarvix, windows, catalog, sandboxSetup, getConfig, updateConfig } = dependencies;
     const assertSender = (event: IpcMainInvokeEvent): void => windows.assertSender(event);
@@ -206,6 +237,30 @@ export function registerIpc(dependencies: IpcDependencies): void {
     handle(IPC_CHANNELS.configSet, (event, payload: unknown) => {
         assertSender(event);
         return updateConfig(payload);
+    });
+
+    handle(IPC_CHANNELS.skillsList, (event, workingDirectories: unknown, scope: unknown) => {
+        assertSender(event);
+        return jarvix.listSkills(
+            parseWorkingDirectories(workingDirectories),
+            parseSkillListScope(scope)
+        );
+    });
+
+    handle(IPC_CHANNELS.skillLoad, (event, payload: unknown) => {
+        assertSender(event);
+        const request = requirePayload(payload, "Invalid skill load payload");
+        if (
+            typeof request.name !== "string"
+            || request.name.trim().length === 0
+            || request.name.length > 256
+        ) {
+            throw new Error("Skill name must be a non-empty string");
+        }
+        return jarvix.loadSkill(
+            requireSessionId(request.sessionId),
+            request.name.trim()
+        );
     });
 
     handle(IPC_CHANNELS.projectCreate, (event, payload: unknown) => {

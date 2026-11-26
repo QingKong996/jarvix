@@ -210,7 +210,9 @@ function isLlmMessage(value: unknown): value is LlmMessage {
             value.context === undefined ||
             value.context === "environment" ||
             value.context === "goal" ||
-            value.context === "agent-instructions"
+            value.context === "agent-instructions" ||
+            value.context === "skills" ||
+            value.context === "skill"
         ) && (
             value.environmentKey === undefined ||
             typeof value.environmentKey === "string"

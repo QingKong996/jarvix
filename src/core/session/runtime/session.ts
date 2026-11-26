@@ -50,6 +50,8 @@ import {
     agentInstructionPathsForToolCall,
     agentInstructionsMessage
 } from "./agent-instructions.ts";
+import { skillContentMessage } from "../../skills/skill-catalog.ts";
+import type { JarvixSkill } from "../../../protocol/skill.ts";
 import {
     CONTEXT_COMPACTION_BLOCK_TOKENS,
     CONTEXT_COMPACTION_SYSTEM_PROMPT,
@@ -722,6 +724,13 @@ export class Session {
 
     registerToolManager(manager: ToolManager): void {
         this.toolRunner.registerToolManager(manager);
+    }
+
+    loadSkill(skill: JarvixSkill, body: string): void {
+        if (this.running) {
+            throw new Error("Stop the active request before loading a skill");
+        }
+        this.append(skillContentMessage(skill, body));
     }
 
     async unregisterToolManager(managerId: string): Promise<void> {

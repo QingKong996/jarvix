@@ -1,3 +1,5 @@
+import type { JarvixSkillSettings } from "./skill.ts";
+
 import type { ModelSelection, ProviderConfig, ReasoningLevel } from "./providers.ts";
 
 export const SUPPORTED_LANGUAGES = ["zh", "en"] as const;
@@ -19,4 +21,6 @@ export type JarvixConfig = {
     theme?: Theme;
     /** Remaining context headroom in tokens that triggers local compaction. */
     contextCompactionThreshold?: number;
+    /** Per-skill overrides keyed by the absolute SKILL.md path. */
+    skills?: JarvixSkillSettings;
 };

@@ -4,6 +4,10 @@ import {
     serializedPathMention,
     type SelectedPathMention
 } from "./composer-path-mentions.ts";
+import {
+    SKILL_MENTION_NODE_NAME,
+    serializedSkillMention
+} from "./composer-skill-mentions.ts";
 
 const HARD_BREAK_NODE_NAME = "hardBreak";
 
@@ -117,6 +121,9 @@ function serializedNodeLength(node: ProseMirrorNode): number {
 function serializedLeafText(node: ProseMirrorNode): string {
     if (node.type.name === PATH_MENTION_NODE_NAME) {
         return serializedPathMention(node.attrs.token as string);
+    }
+    if (node.type.name === SKILL_MENTION_NODE_NAME) {
+        return serializedSkillMention(node.attrs.name as string);
     }
     if (node.type.name === HARD_BREAK_NODE_NAME) {
         return "\n";

@@ -37,6 +37,15 @@ const bridge: JarvixBridge = {
     getModelCatalog: (force = false) => ipcRenderer.invoke(IPC_CHANNELS.catalogGet, force),
     syncProviderModels: (provider) => ipcRenderer.invoke(IPC_CHANNELS.providerModelsSync, provider),
     setConfig: (config) => ipcRenderer.invoke(IPC_CHANNELS.configSet, config),
+    listSkills: (workingDirectories, scope = "all") => ipcRenderer.invoke(
+        IPC_CHANNELS.skillsList,
+        workingDirectories,
+        scope
+    ),
+    loadSkill: (sessionId, name) => ipcRenderer.invoke(
+        IPC_CHANNELS.skillLoad,
+        { sessionId, name }
+    ),
     createProject: (name, workingDirectories) => ipcRenderer.invoke(
         IPC_CHANNELS.projectCreate,
         { name, workingDirectories }

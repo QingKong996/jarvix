@@ -1,4 +1,5 @@
 import type { ToolSandboxFactory } from "../../core/execution/sandbox.ts";
+import { skillRootDirectories } from "../../core/skills/skill-catalog.ts";
 import {
     createPermissionRules,
     mergePermissionRules
@@ -27,7 +28,8 @@ export function createDefaultToolManager(
                 permissionRules: () => mergePermissionRules(
                     createPermissionRules(
                         context.permission(),
-                        context.workingDirectories()
+                        context.workingDirectories(),
+                        skillRootDirectories(context.workingDirectories())
                     ),
                     options.permissions.grants()
                 )

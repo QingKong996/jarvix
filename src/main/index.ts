@@ -23,6 +23,7 @@ import { configPaths, loadConfig, parseConfig, saveConfig, systemDefaults } from
 import { ModelCatalogService } from "./services/model-catalog.ts";
 import { SandboxSetupService } from "./services/sandbox-setup.ts";
 import { MainWindowController } from "./window.ts";
+import { SkillCatalog } from "../core/skills/skill-catalog.ts";
 
 const log = mainLogger("main");
 
@@ -139,12 +140,16 @@ function startDesktop(): void {
                 ?? (app.isPackaged ? app.getVersion() : "dev"),
             logger: mainLogger("observability")
         });
+        const skillCatalog = new SkillCatalog({
+            settings: () => config.skills ?? {}
+        });
         const jarvix = new Jarvix({
             llm: createPiAdapter({ providers: () => config.providers }),
             config,
             sandboxFactory,
             logger: mainLogger("core"),
-            observer
+            observer,
+            skillCatalog
         });
         const catalog = new ModelCatalogService(
             join(paths.directory, "tmp", "models-dev.json"),
