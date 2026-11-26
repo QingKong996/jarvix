@@ -40,7 +40,41 @@
         "chooseDirectoryFailed": "Could not open the directory picker.",
         "createFailed": "Could not create the project.",
         "create": "Create",
-        "cancel": "Cancel"
+        "cancel": "Cancel",
+        "details": {
+            "open": "Project details",
+            "title": "Project details",
+            "description": "View project information and manage project skills.",
+            "sections": {
+                "overview": "Overview",
+                "skills": "Skills"
+            },
+            "name": "Project name",
+            "workingDirectories": "Working directories",
+            "save": "Save",
+            "cancel": "Cancel",
+            "saveFailed": "Could not save the project settings."
+        }
+    },
+    "skills": {
+        "userTitle": "User skills",
+        "userDescription": "Manage skills from ~/.jarvix/skills and ~/.agents/skills.",
+        "projectTitle": "Project skills",
+        "projectDescription": "Manage skills from .jarvix/skills and .agents/skills in this project's working directories.",
+        "refresh": "Rescan skills",
+        "empty": "No skills found",
+        "enabled": "Enabled",
+        "toggle": "Enable or disable {{name}}",
+        "manualOnly": "Manual only",
+        "nameMismatch": "The name {{name}} does not match directory {{directory}}. It is disabled by default but can be enabled here.",
+        "scopes": {
+            "user": "User",
+            "project": "Project"
+        },
+        "sources": {
+            "jarvix": "Jarvix",
+            "agents": "Agents"
+        }
     },
     "composer": {
         "placeholder": "Ask a question...",
@@ -56,6 +90,11 @@
             "goal": {
                 "label": "Goal",
                 "description": "Set or update the goal for this session"
+            },
+            "skill": {
+                "nameRequired": "Enter a skill command such as /pdf-processing.",
+                "invalidName": "Skill names may only contain lowercase letters, numbers, and hyphens, for example /pdf-processing.",
+                "running": "Stop the active request before loading a skill."
             }
         },
         "paths": {
@@ -226,6 +265,7 @@
         "title": "Settings",
         "sections": {
             "model": "Model",
+            "skills": "Skills",
             "archived": "Archived",
             "general": "General"
         },

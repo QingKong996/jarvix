@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
-import { ChevronRight, Folder, Inbox, Plus } from "lucide-react";
+import { ChevronRight, Folder, Inbox, Plus, Settings2 } from "lucide-react";
 import { motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
+import type { JarvixProject } from "../../../../protocol/project.ts";
 import type { JarvixSessionSummary } from "../../../../protocol/session.ts";
 import { quickTransition, smoothTransition } from "../../motion.ts";
 import { Button } from "../ui/button.tsx";
@@ -21,6 +22,7 @@ type SidebarSessionGroupProps = {
     onAutoNameSession(sessionId: string): void;
     onArchiveSession(sessionId: string): void;
     onRequestDeleteSession(session: JarvixSessionSummary): void;
+    onOpenProjectDetails(project: JarvixProject): void;
 };
 
 export function SidebarSessionGroup({
@@ -32,7 +34,8 @@ export function SidebarSessionGroup({
     onRenameSession,
     onAutoNameSession,
     onArchiveSession,
-    onRequestDeleteSession
+    onRequestDeleteSession,
+    onOpenProjectDetails
 }: SidebarSessionGroupProps) {
     const { t } = useTranslation();
     const [open, setOpen] = useState(true);
@@ -74,18 +77,31 @@ export function SidebarSessionGroup({
                         </button>
                     </CollapsibleTrigger>
                     {group.project ? (
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-xs"
-                            aria-label={t("projects.newSessionIn", { name: group.project.name })}
-                            title={t("projects.newSession")}
-                            onClick={() => onNewSession(group.project!.id)}
-                            disabled={busy}
-                            className="text-muted-foreground hover:text-foreground"
-                        >
-                            <Plus />
-                        </Button>
+                        <>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-xs"
+                                aria-label={t("projects.newSessionIn", { name: group.project.name })}
+                                title={t("projects.newSession")}
+                                onClick={() => onNewSession(group.project!.id)}
+                                disabled={busy}
+                                className="text-muted-foreground hover:text-foreground"
+                            >
+                                <Plus />
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-xs"
+                                aria-label={t("projects.details.open")}
+                                title={t("projects.details.open")}
+                                onClick={() => onOpenProjectDetails(group.project!)}
+                                className="text-muted-foreground hover:text-foreground"
+                            >
+                                <Settings2 />
+                            </Button>
+                        </>
                     ) : null}
                 </div>
 

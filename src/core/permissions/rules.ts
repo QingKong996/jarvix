@@ -18,19 +18,26 @@ export type PermissionRules = {
 
 export function createPermissionRules(
     permission: PermissionMode,
-    workingDirectories: readonly string[]
+    workingDirectories: readonly string[],
+    readableDirectories: readonly string[] = []
 ): PermissionRules | null {
     if (permission === "full-access") {
         return null;
     }
 
     const workspace = uniquePaths(workingDirectories.map((path) => resolve(path)));
+    const readable = uniquePaths([
+        ...workspace,
+        ...readableDirectories.map((path) => resolve(path))
+    ]);
     const readOnly = permission === "read-only";
     return {
         domains: emptyAccessRules(),
         directories: {
             read: {
-                allow: readOnly ? workspace : [],
+                allow: readOnly ? readable : readableDirectories.map(
+                    (path) => resolve(path)
+                ),
                 deny: []
             },
             write: {

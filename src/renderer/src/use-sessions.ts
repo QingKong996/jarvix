@@ -181,7 +181,7 @@ export function useSessions() {
         setReady
     });
 
-    const { send, stop, submitGoal, clearGoal } = usePromptController({
+    const { send, stop, submitGoal, clearGoal, loadSkill } = usePromptController({
         bridge,
         ready,
         busy,
@@ -220,6 +220,7 @@ export function useSessions() {
         send,
         stop,
         submitGoal,
-        clearGoal
+        clearGoal,
+        loadSkill
     };
 }

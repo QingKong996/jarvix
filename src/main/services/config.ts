@@ -152,7 +152,8 @@ function configSchema(defaults: ConfigDefaults) {
             reasoning: z.enum(REASONING_LEVELS).optional(),
             language: z.enum(SUPPORTED_LANGUAGES).catch(defaults.language),
             theme: z.enum(SUPPORTED_THEMES).catch(defaults.theme),
-            contextCompactionThreshold: z.number().int().positive().optional()
+            contextCompactionThreshold: z.number().int().positive().optional(),
+            skills: z.record(z.string().min(1), z.boolean()).optional()
         })
         .superRefine((config, context) => {
             const selection = config.selectedModel;
@@ -167,7 +168,8 @@ function configSchema(defaults: ConfigDefaults) {
             providers,
             selectedModel,
             reasoning,
-            contextCompactionThreshold
+            contextCompactionThreshold,
+            skills
         }) => {
             const resolved = resolveConfiguredModel(providers, selectedModel);
             const nextSelection = resolved?.selection ?? selectedModel;
@@ -180,6 +182,9 @@ function configSchema(defaults: ConfigDefaults) {
                 ...(nextReasoning ? { reasoning: nextReasoning } : {}),
                 ...(contextCompactionThreshold !== undefined
                     ? { contextCompactionThreshold }
+                    : {}),
+                ...(skills && Object.keys(skills).length > 0
+                    ? { skills }
                     : {}),
                 language,
                 theme

@@ -30,6 +30,10 @@ import type {
     PermissionRequest
 } from "../../../../protocol/permission.ts";
 import type { JarvixProject } from "../../../../protocol/project.ts";
+import {
+    isValidSkillName,
+    type JarvixSkill
+} from "../../../../protocol/skill.ts";
 import type {
     JarvixGoal,
     JarvixSessionContext
@@ -45,7 +49,8 @@ import {
     cycleCommandIndex,
     detectSlashCommand,
     filterSlashCommands,
-    parseGoalCommand
+    parseGoalCommand,
+    parseSkillCommand
 } from "./composer-commands.ts";
 import { ComposerPathMenu } from "./ComposerPathMenu.tsx";
 import {
@@ -55,6 +60,7 @@ import {
     resolvePathMentions,
     type SelectedPathMention
 } from "./composer-path-mentions.ts";
+import { skillMentionFor } from "./composer-skill-mentions.ts";
 import { pathCompletionKeyAction } from "./composer-path-keyboard.ts";
 import {
     ComposerRichInput,
@@ -76,9 +82,11 @@ type ComposerProps = {
     sessionPermission: PermissionMode;
     contextUsage: JarvixContextUsage | null;
     goal: JarvixGoal | null;
+    skills: readonly JarvixSkill[];
     permissionRequest: PermissionRequest | null;
     onSubmit: (question: string, sandboxPaths?: readonly string[]) => void;
     onGoalSubmit: (content: string, sandboxPaths?: readonly string[]) => void;
+    onSkillLoad: (name: string) => Promise<void>;
     onGoalClear: () => void;
     onStop: () => void;
     config: JarvixConfig | null;
@@ -110,9 +118,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     sessionPermission,
     contextUsage,
     goal,
+    skills,
     permissionRequest,
     onSubmit,
     onGoalSubmit,
+    onSkillLoad,
     onGoalClear,
     onStop,
     config,
@@ -149,7 +159,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     const contextLabel = selectedProject?.name ?? workingDirectoryName ?? t("projects.temporary");
     const permissionPending = permissionRequest !== null;
     const inputDisabled = disabled || saving || permissionSaving || permissionPending;
-    const commands = composerCommands(t).filter(
+    const commands = composerCommands(t, skills).filter(
         (command) => !(running && command.id === "goal")
     );
     const slashTrigger = goalEditing
@@ -292,7 +302,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         }
     }
 
-    function handleSubmit(event: FormEvent<HTMLFormElement>): void {
+    async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
         event.preventDefault();
         if (inputDisabled) {
             return;
@@ -306,6 +316,32 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             setGoalEditing(false);
             resetInput();
             onGoalSubmit(resolved.text, resolved.paths);
+            return;
+        }
+        const skillCommand = parseSkillCommand(value);
+        if (skillCommand) {
+            if (!skillCommand.name) {
+                setError(t("composer.commands.skill.nameRequired"));
+                return;
+            }
+            if (!isValidSkillName(skillCommand.name)) {
+                setError(t("composer.commands.skill.invalidName"));
+                return;
+            }
+            if (running) {
+                setError(t("composer.commands.skill.running"));
+                return;
+            }
+            setSaving(true);
+            setError("");
+            try {
+                await onSkillLoad(skillCommand.name);
+                resetInput();
+            } catch (cause) {
+                setError(cause instanceof Error ? cause.message : String(cause));
+            } finally {
+                setSaving(false);
+            }
             return;
         }
         const goalCommand = running ? null : parseGoalCommand(value);
@@ -455,6 +491,16 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 ""
             );
             setGoalEditing(true);
+            setCommandNavigation({ menuKey: "", index: 0 });
+            return;
+        }
+
+        if (command.skill) {
+            richInputRef.current?.replaceRangeWithSkillMention(
+                slashTrigger.tokenStart,
+                slashTrigger.tokenEnd,
+                skillMentionFor(command.skill)
+            );
             setCommandNavigation({ menuKey: "", index: 0 });
             return;
         }

@@ -15,10 +15,16 @@ export type GoalCommandMatch = {
     content: string;
 };
 
+export type SkillCommandMatch = {
+    name: string;
+};
+
 export type CommandTextEdit = {
     value: string;
     caret: number;
 };
+
+const RESERVED_SKILL_COMMANDS = new Set(["goal"]);
 
 export function detectSlashCommand(
     value: string,
@@ -79,6 +85,20 @@ export function parseGoalCommand(value: string): GoalCommandMatch | null {
         ...lines.slice(commandIndex + 1)
     ].join("\n").trim();
     return { content };
+}
+
+export function parseSkillCommand(value: string): SkillCommandMatch | null {
+    const command = value.trim();
+    if (
+        !command.startsWith("/")
+        || /\s/u.test(command)
+        || RESERVED_SKILL_COMMANDS.has(command.slice(1).toLowerCase())
+    ) {
+        return null;
+    }
+    return {
+        name: command.slice(1)
+    };
 }
 
 export function filterSlashCommands<T extends SlashCommand>(

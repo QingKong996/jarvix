@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileUp, PanelRightOpen } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useTranslation } from "react-i18next";
@@ -8,6 +8,7 @@ import {
     type ComposerHandle
 } from "./components/composer/Composer.tsx";
 import { CreateProjectDialog } from "./components/projects/CreateProjectDialog.tsx";
+import { ProjectDetailsDialog } from "./components/projects/ProjectDetailsDialog.tsx";
 import { RightSidebar } from "./components/right-sidebar/RightSidebar.tsx";
 import {
     RIGHT_SIDEBAR_PANEL_ID,
@@ -23,7 +24,9 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./componen
 import { useSessions } from "./use-sessions.ts";
 import type { JarvixConfig } from "../../protocol/config.ts";
 import type { JarvixPathCompletionResult } from "../../protocol/path-completion.ts";
+import type { JarvixProject } from "../../protocol/project.ts";
 import type { JarvixSessionContext } from "../../protocol/session.ts";
+import type { JarvixSkill } from "../../protocol/skill.ts";
 import { quickTransition } from "./motion.ts";
 
 const bridge = window.jarvix;
@@ -33,8 +36,10 @@ const LAYOUT_ID = "jarvix:main";
 export function App() {
     const { t } = useTranslation();
     const [createProjectOpen, setCreateProjectOpen] = useState(false);
+    const [detailsProject, setDetailsProject] = useState<JarvixProject | null>(null);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [config, setConfig] = useState<JarvixConfig | null>(null);
+    const [skills, setSkills] = useState<JarvixSkill[]>([]);
     const [draggingFiles, setDraggingFiles] = useState(false);
     const composerRef = useRef<ComposerHandle>(null);
     const dragDepthRef = useRef(0);
@@ -81,7 +86,8 @@ export function App() {
         send,
         stop,
         submitGoal,
-        clearGoal
+        clearGoal,
+        loadSkill
     } = useSessions();
 
     useEffect(() => {
@@ -196,8 +202,45 @@ export function App() {
         setSettingsOpen(true);
     }, []);
 
+    const skillWorkingDirectories = useMemo(() => {
+        if (sessionContext.projectId) {
+            return projects.find(
+                (project) => project.id === sessionContext.projectId
+            )?.workingDirectories ?? [];
+        }
+        return sessionContext.workingDirectory
+            ? [sessionContext.workingDirectory]
+            : [];
+    }, [projects, sessionContext]);
+
+    useEffect(() => {
+        if (!bridge) {
+            setSkills([]);
+            return;
+        }
+        let active = true;
+        void bridge.listSkills(skillWorkingDirectories, "all")
+            .then((next) => {
+                if (active) {
+                    setSkills(next);
+                }
+            })
+            .catch(() => {
+                if (active) {
+                    setSkills([]);
+                }
+            });
+        return () => {
+            active = false;
+        };
+    }, [config?.skills, skillWorkingDirectories]);
+
     const openCreateProject = useCallback(() => {
         setCreateProjectOpen(true);
+    }, []);
+
+    const openProjectDetails = useCallback((project: JarvixProject) => {
+        setDetailsProject(project);
     }, []);
 
     return (
@@ -235,6 +278,7 @@ export function App() {
                                 onAutoNameSession={autoNameSession}
                                 onArchiveSession={archiveSession}
                                 onDeleteSession={deleteSession}
+                                onOpenProjectDetails={openProjectDetails}
                                 onOpenSettings={openSettings}
                             />
                         </ResizablePanel>
@@ -282,9 +326,11 @@ export function App() {
                                     sessionPermission={sessionPermission}
                                     contextUsage={contextUsage}
                                     goal={goal}
+                                    skills={skills}
                                     permissionRequest={permissionRequest}
                                     onSubmit={send}
                                     onGoalSubmit={submitGoal}
+                                    onSkillLoad={loadSkill}
                                     onGoalClear={clearGoal}
                                     onStop={stop}
                                     config={config}
@@ -370,6 +416,18 @@ export function App() {
                 onSaved={handleSaved}
                 archivedSessions={archivedSessions}
                 onUnarchiveSession={unarchiveSession}
+            />
+
+            <ProjectDetailsDialog
+                project={detailsProject}
+                open={detailsProject !== null}
+                config={config}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setDetailsProject(null);
+                    }
+                }}
+                onSaved={handleSaved}
             />
 
             <SandboxSetupDialog />

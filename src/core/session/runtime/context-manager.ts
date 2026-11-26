@@ -10,6 +10,10 @@ import {
     AgentInstructions,
     type AgentInstructionSource
 } from "./agent-instructions.ts";
+import {
+    availableSkillsMessage,
+    type SkillCatalog
+} from "../../skills/skill-catalog.ts";
 import { estimateContextUsage } from "./context-usage.ts";
 import {
     SYSTEM_PROMPT,
@@ -100,17 +104,20 @@ export class DefaultContextManager implements ContextManager {
     readonly systemPrompt: string;
     private readonly permission: () => PermissionMode;
     private readonly agentInstructions: AgentInstructions;
+    private readonly skills: SkillCatalog | null;
     private contextMessage: LlmSystemMessage | null = null;
     private environmentKey: string | null = null;
 
     constructor(
         permission: () => PermissionMode,
         systemPrompt = SYSTEM_PROMPT,
-        agentInstructions = new AgentInstructions()
+        agentInstructions = new AgentInstructions(),
+        skills: SkillCatalog | null = null
     ) {
         this.permission = permission;
         this.systemPrompt = systemPrompt;
         this.agentInstructions = agentInstructions;
+        this.skills = skills;
     }
 
     initializeHistory(messages: readonly LlmMessage[]): LlmMessage[] {
@@ -194,6 +201,16 @@ export class DefaultContextManager implements ContextManager {
                 );
             }
         }
+        const skills = this.skills
+            ? availableSkillsMessage(this.skills.discover(workingDirectories))
+            : null;
+        if (skills) {
+            const environmentIndex = messages[0]?.role === "system"
+                && messages[0].context === "environment"
+                ? 1
+                : 0;
+            messages.splice(environmentIndex, 0, skills);
+        }
         if (options.goal) {
             messages.push(goalContextMessage(options.goal));
         }
@@ -210,6 +227,8 @@ export class DefaultContextManager implements ContextManager {
                 message.context === "environment"
                 || message.context === "goal"
                 || message.context === "agent-instructions"
+                || message.context === "skills"
+                || message.context === "skill"
             )
         ));
     }
@@ -230,7 +249,13 @@ export class DefaultContextManager implements ContextManager {
 }
 
 export function createDefaultContextManager(
-    permission: () => PermissionMode
+    permission: () => PermissionMode,
+    skills: SkillCatalog | null = null
 ): ContextManager {
-    return new DefaultContextManager(permission);
+    return new DefaultContextManager(
+        permission,
+        SYSTEM_PROMPT,
+        new AgentInstructions(),
+        skills
+    );
 }

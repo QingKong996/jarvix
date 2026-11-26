@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { Archive, Cpu, LoaderCircle, Settings2 } from "lucide-react";
+import { Archive, Cpu, LoaderCircle, Settings2, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
     DEFAULT_THEME,
@@ -9,6 +9,7 @@ import {
 } from "../../../../protocol/config.ts";
 import type { ModelSelection, ProviderConfig } from "../../../../protocol/providers.ts";
 import type { JarvixSessionSummary } from "../../../../protocol/session.ts";
+import type { JarvixSkillSettings } from "../../../../protocol/skill.ts";
 import { DialogFooter } from "../common/DialogFooter.tsx";
 import { NavigationItem } from "../common/NavigationItem.tsx";
 import { Button } from "../ui/button.tsx";
@@ -16,6 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog.t
 import { ArchivedSettings } from "./ArchivedSettings.tsx";
 import { GeneralSettings } from "./GeneralSettings.tsx";
 import { ProviderSettings } from "./providers/ProviderSettings.tsx";
+import { SkillsSettings } from "./SkillsSettings.tsx";
 
 type SettingsDialogProps = {
     open: boolean;
@@ -26,7 +28,7 @@ type SettingsDialogProps = {
     onUnarchiveSession: (sessionId: string) => Promise<boolean>;
 };
 
-type SettingsSection = "model" | "archived" | "general";
+type SettingsSection = "model" | "skills" | "archived" | "general";
 
 const bridge = window.jarvix;
 
@@ -58,6 +60,9 @@ export function SettingsDialog({
     const [language, setLanguage] = useState<Language>(activeLanguage(i18n.language));
     const [theme, setTheme] = useState<Theme>(config?.theme ?? DEFAULT_THEME);
     const [compactionThreshold, setCompactionThreshold] = useState("");
+    const [skillSettings, setSkillSettings] = useState<JarvixSkillSettings>(
+        config?.skills ?? {}
+    );
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -73,6 +78,7 @@ export function SettingsDialog({
         setCompactionThreshold(
             config?.contextCompactionThreshold?.toString() ?? ""
         );
+        setSkillSettings(config?.skills ?? {});
     }, [open, config, i18n.language]);
 
     async function handleSave(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -97,7 +103,8 @@ export function SettingsDialog({
                 selectedModel,
                 ...(threshold !== undefined
                     ? { contextCompactionThreshold: threshold }
-                    : {})
+                    : {}),
+                skills: skillSettings
             });
             onSaved(next);
             setLanguage(next.language ?? language);
@@ -105,6 +112,7 @@ export function SettingsDialog({
             setCompactionThreshold(
                 next.contextCompactionThreshold?.toString() ?? ""
             );
+            setSkillSettings(next.skills ?? {});
             await i18n.changeLanguage(next.language ?? language);
             onOpenChange(false);
         } catch (cause) {
@@ -147,6 +155,13 @@ export function SettingsDialog({
                             testId="settings-section-general"
                         />
                         <SettingsSectionButton
+                            active={section === "skills"}
+                            icon={<Sparkles />}
+                            label={t("settings.sections.skills")}
+                            onClick={() => setSection("skills")}
+                            testId="settings-section-skills"
+                        />
+                        <SettingsSectionButton
                             active={section === "archived"}
                             icon={<Archive />}
                             label={t("settings.sections.archived")}
@@ -184,6 +199,17 @@ export function SettingsDialog({
                                 }}
                                 onCompactionThresholdChange={(next) => {
                                     setCompactionThreshold(next);
+                                    setError(null);
+                                }}
+                            />
+                        </div>
+                        <div className={section === "skills" ? undefined : "hidden"}>
+                            <SkillsSettings
+                                scope="user"
+                                settings={skillSettings}
+                                disabled={disabled}
+                                onChange={(next) => {
+                                    setSkillSettings(next);
                                     setError(null);
                                 }}
                             />

@@ -177,6 +177,18 @@ test("round-trips the context compaction threshold and rejects invalid values", 
     });
 });
 
+test("round-trips skill enablement overrides", () => {
+    const skills = {
+        "C:\\skills\\one\\SKILL.md": false,
+        "C:\\skills\\two\\SKILL.md": true
+    };
+    expect(parseConfig({ skills }, defaults)).toMatchObject({ skills });
+
+    const paths = configPaths(join(base, "skills"));
+    saveConfig({ language: "en", theme: "light", skills }, paths, defaults);
+    expect(loadConfig(paths, defaults)).toMatchObject({ skills });
+});
+
 test("saveConfig removes its temporary file when replacement fails", () => {
     const paths = configPaths(join(base, "failed-replace"));
     mkdirSync(paths.file, { recursive: true });

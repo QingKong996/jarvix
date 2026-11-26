@@ -9,7 +9,7 @@ import {
     type DragEndEvent,
     type DragStartEvent
 } from "@dnd-kit/core";
-import { FolderPlus, Plus, Settings } from "lucide-react";
+import { FolderPlus, Plus, Settings, Settings2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { JarvixProject } from "../../../../protocol/project.ts";
 import type { JarvixSessionSummary } from "../../../../protocol/session.ts";
@@ -33,6 +33,7 @@ type SidebarProps = {
     onAutoNameSession(sessionId: string): Promise<boolean>;
     onArchiveSession(sessionId: string): Promise<boolean>;
     onDeleteSession(sessionId: string): Promise<boolean>;
+    onOpenProjectDetails(project: JarvixProject): void;
     onOpenSettings(): void;
 };
 
@@ -49,6 +50,7 @@ export function Sidebar({
     onAutoNameSession,
     onArchiveSession,
     onDeleteSession,
+    onOpenProjectDetails,
     onOpenSettings
 }: SidebarProps) {
     const { t } = useTranslation();
@@ -149,6 +151,7 @@ export function Sidebar({
                                     void onArchiveSession(sessionId);
                                 }}
                                 onRequestDeleteSession={setDeleteTarget}
+                                onOpenProjectDetails={onOpenProjectDetails}
                             />
                         ))}
                     </nav>

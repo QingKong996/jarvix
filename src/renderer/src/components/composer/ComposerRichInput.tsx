@@ -18,6 +18,8 @@ import {
     insertPathMentionsAtSelection,
     insertSelectedPathMention
 } from "./composer-path-insertion.ts";
+import { replaceRangeWithSkillMention } from "./composer-skill-insertion.ts";
+import type { SelectedSkillMention } from "./composer-skill-mentions.ts";
 import {
     mentionsFromDocument,
     positionAtTextOffset,
@@ -25,6 +27,7 @@ import {
     textOffsetAt
 } from "./composer-rich-text.ts";
 import { PathMention } from "./PathMentionNode.tsx";
+import { SkillMention } from "./SkillMentionNode.tsx";
 
 export type EditorSelection = {
     start: number;
@@ -41,6 +44,11 @@ export type ComposerRichInputHandle = {
     focus(): void;
     clear(): void;
     replaceRange(start: number, end: number, text: string): void;
+    replaceRangeWithSkillMention(
+        start: number,
+        end: number,
+        mention: SelectedSkillMention
+    ): boolean;
     insertMention(mention: SelectedPathMention): boolean;
     insertPathMentions(mentions: readonly SelectedPathMention[]): boolean;
     setPlainText(text: string): void;
@@ -66,7 +74,8 @@ const extensions = [
     Text,
     HardBreak,
     History,
-    PathMention
+    PathMention,
+    SkillMention
 ];
 
 export const ComposerRichInput = forwardRef<
@@ -156,6 +165,12 @@ export const ComposerRichInput = forwardRef<
                 return;
             }
             replaceTextRange(editor, start, end, text);
+        },
+        replaceRangeWithSkillMention(start, end, mention) {
+            if (!editor) {
+                return false;
+            }
+            return replaceRangeWithSkillMention(editor, start, end, mention);
         },
         insertMention(mention) {
             if (!editor) {

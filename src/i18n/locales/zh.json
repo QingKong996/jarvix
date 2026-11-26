@@ -40,7 +40,41 @@
         "chooseDirectoryFailed": "无法打开目录选择器。",
         "createFailed": "无法创建项目。",
         "create": "创建",
-        "cancel": "取消"
+        "cancel": "取消",
+        "details": {
+            "open": "项目详情",
+            "title": "项目详情",
+            "description": "查看项目信息并管理项目级技能。",
+            "sections": {
+                "overview": "概览",
+                "skills": "技能"
+            },
+            "name": "项目名称",
+            "workingDirectories": "工作目录",
+            "save": "保存",
+            "cancel": "取消",
+            "saveFailed": "无法保存项目设置。"
+        }
+    },
+    "skills": {
+        "userTitle": "用户技能",
+        "userDescription": "管理来自 ~/.jarvix/skills 和 ~/.agents/skills 的技能。",
+        "projectTitle": "项目技能",
+        "projectDescription": "管理项目工作目录下 .jarvix/skills 和 .agents/skills 中的技能。",
+        "refresh": "重新扫描 skills",
+        "empty": "未发现可用的 skills",
+        "enabled": "启用",
+        "toggle": "启用或禁用 {{name}}",
+        "manualOnly": "仅手动调用",
+        "nameMismatch": "名称 {{name}} 与目录名 {{directory}} 不一致，默认未启用；可在此手动启用。",
+        "scopes": {
+            "user": "用户",
+            "project": "项目"
+        },
+        "sources": {
+            "jarvix": "Jarvix",
+            "agents": "Agents"
+        }
     },
     "composer": {
         "placeholder": "输入问题...",
@@ -56,6 +90,11 @@
             "goal": {
                 "label": "目标",
                 "description": "设置或更新当前会话目标"
+            },
+            "skill": {
+                "nameRequired": "请输入 /技能名，例如 /pdf-processing。",
+                "invalidName": "技能名只能包含小写字母、数字和连字符，例如 /pdf-processing。",
+                "running": "请先停止当前请求，再加载 skill。"
             }
         },
         "paths": {
@@ -225,6 +264,7 @@
         "title": "设置",
         "sections": {
             "model": "模型",
+            "skills": "技能",
             "archived": "已归档",
             "general": "通用"
         },

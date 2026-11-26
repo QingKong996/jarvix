@@ -11,6 +11,10 @@ import type {
     JarvixSessionContext,
     JarvixSessionSummary
 } from "./session.ts";
+import type {
+    JarvixSkill,
+    JarvixSkillListScope
+} from "./skill.ts";
 
 export const IPC_CHANNELS = {
     request: "jarvix:request",
@@ -21,6 +25,8 @@ export const IPC_CHANNELS = {
     event: "jarvix:event",
     configGet: "jarvix:config:get",
     configSet: "jarvix:config:set",
+    skillsList: "jarvix:skills:list",
+    skillLoad: "jarvix:skill:load",
     catalogGet: "jarvix:catalog:get",
     providerModelsSync: "jarvix:provider-models:sync",
     projectCreate: "jarvix:project:create",
@@ -87,6 +93,11 @@ export type JarvixBridge = {
     getModelCatalog(force?: boolean): Promise<ModelCatalog>;
     syncProviderModels(provider: ProviderModelSyncRequest): Promise<ModelDefinition[]>;
     setConfig(config: JarvixConfig): Promise<JarvixConfig>;
+    listSkills(
+        workingDirectories: readonly string[],
+        scope?: JarvixSkillListScope
+    ): Promise<JarvixSkill[]>;
+    loadSkill(sessionId: string, name: string): Promise<string>;
     createProject(name: string, workingDirectories: string[]): Promise<JarvixProject>;
     listProjects(): Promise<JarvixProject[]>;
     pickWorkingDirectories(): Promise<string[]>;

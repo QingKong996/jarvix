@@ -8,6 +8,10 @@ import type { JarvixEvent, JarvixListener } from "../protocol/event.ts";
 import type { JarvixProject } from "../protocol/project.ts";
 import type { JarvixProviderContext } from "../protocol/provider-context.ts";
 import type {
+    JarvixSkill,
+    JarvixSkillListScope
+} from "../protocol/skill.ts";
+import type {
     JarvixGoal,
     JarvixSession,
     JarvixSessionContext,
@@ -36,9 +40,13 @@ import {
 } from "./project/store.ts";
 import { workingDirectoriesFor } from "./session/directories.ts";
 import { SessionManager } from "./session/manager.ts";
-import type { ContextManagerFactory } from "./session/runtime/context-manager.ts";
+import {
+    createDefaultContextManager,
+    type ContextManagerFactory
+} from "./session/runtime/context-manager.ts";
 import type { Session } from "./session/runtime/session.ts";
 import { generateSessionNameResult } from "./session/naming.ts";
+import type { SkillCatalog } from "./skills/skill-catalog.ts";
 
 export type JarvixOptions = {
     llm: LlmAdapter;
@@ -48,6 +56,7 @@ export type JarvixOptions = {
     toolManagers?: readonly ToolManager[];
     logger?: JarvixLogger;
     observer?: AgentObserver;
+    skillCatalog?: SkillCatalog;
 };
 
 export class Jarvix {
@@ -55,6 +64,7 @@ export class Jarvix {
     private config: JarvixConfig;
     private readonly llm: LlmAdapter;
     private readonly sessions: SessionManager;
+    private readonly skills: SkillCatalog | null;
     private readonly logger: JarvixLogger;
     private readonly observer: AgentObserver;
 
@@ -63,9 +73,12 @@ export class Jarvix {
         this.llm = options.llm;
         this.logger = options.logger ?? noopLogger;
         this.observer = options.observer ?? noopAgentObserver;
+        this.skills = options.skillCatalog ?? null;
         this.sessions = new SessionManager(
             options.sandboxFactory,
-            options.contextManagerFactory,
+            options.contextManagerFactory ?? ((permission) => (
+                createDefaultContextManager(permission, this.skills)
+            )),
             options.toolManagers,
             this.logger,
             this.observer
@@ -168,6 +181,37 @@ export class Jarvix {
     getProviderContext(sessionId: string): JarvixProviderContext {
         const session = this.sessions.require(sessionId);
         return session.providerContext(workingDirectoriesFor(session.meta));
+    }
+
+    listSkills(
+        workingDirectories: readonly string[] = [],
+        scope: JarvixSkillListScope = "all"
+    ): JarvixSkill[] {
+        return this.skills?.discover(workingDirectories, scope) ?? [];
+    }
+
+    loadSkill(sessionId: string, name: string): string {
+        if (!this.skills) {
+            throw new Error("Skill support is not configured");
+        }
+        const session = this.sessions.require(sessionId);
+        const workingDirectories = workingDirectoriesFor(session.meta);
+        const skill = this.skills.discover(workingDirectories)
+            .find((candidate) => candidate.name === name);
+        if (!skill) {
+            throw new Error(`Skill not found: ${name}`);
+        }
+        if (!skill.enabled) {
+            throw new Error(`Skill is disabled: ${name}`);
+        }
+        session.loadSkill(skill, this.skills.read(skill));
+        this.emitContextUsage(session);
+        this.logger.info("Skill loaded into context", {
+            sessionId,
+            name: skill.name,
+            location: skill.location
+        });
+        return skill.name;
     }
 
     setGoal(sessionId: string, content: string): JarvixGoal {

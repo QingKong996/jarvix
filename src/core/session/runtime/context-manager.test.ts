@@ -1,4 +1,14 @@
+import {
+    mkdirSync,
+    mkdtempSync,
+    rmSync,
+    writeFileSync
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { expect, test } from "vitest";
+import { AgentInstructions } from "./agent-instructions.ts";
+import { SkillCatalog } from "../../skills/skill-catalog.ts";
 import { DefaultContextManager } from "./context-manager.ts";
 import { environmentContextFor } from "./environment.ts";
 
@@ -91,3 +101,53 @@ test("appends the hidden goal to the latest request and only adds the finish pro
     });
     expect(manager.visibleHistory(continuation.messages)).toEqual([]);
 });
+
+test("injects the available skill catalog after agent instructions", () => {
+    const root = mkdtempSync(join(tmpdir(), "jarvix-context-skills-"));
+    const home = join(root, "home");
+    const workspace = join(root, "workspace");
+    writeFile(join(home, ".jarvix", "AGENTS.md"), "global rules");
+    writeFile(join(workspace, "AGENTS.md"), "project rules");
+    writeFile(join(home, ".agents", "skills", "tdd", "SKILL.md"), [
+        "---",
+        "name: tdd",
+        "description: Test-driven development",
+        "---",
+        "",
+        "# TDD"
+    ].join("\n"));
+
+    try {
+        const manager = new DefaultContextManager(
+            () => "read-only",
+            undefined,
+            new AgentInstructions({ homeDirectory: home }),
+            new SkillCatalog({ homeDirectory: home })
+        );
+        const environment = manager.ensureEnvironmentContext([workspace]);
+
+        const request = manager.prepareRequest(
+            environment ? [environment] : [],
+            [workspace]
+        );
+
+        expect(request.messages[0]).toMatchObject({
+            role: "system",
+            context: "environment",
+            content: expect.stringContaining("project rules")
+        });
+        expect(request.messages[1]).toMatchObject({
+            role: "system",
+            context: "skills",
+            content: expect.stringContaining("<name>tdd</name>")
+        });
+        expect(manager.visibleHistory(request.messages)).toEqual([]);
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+function writeFile(path: string, content: string): void {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, content, "utf8");
+}

@@ -133,7 +133,7 @@ export type LlmSystemMessage = {
     timestamp: number;
     notice?: LlmSystemNotice;
     /** Internal marker for injected system context. */
-    context?: "environment" | "goal" | "agent-instructions";
+    context?: "environment" | "goal" | "agent-instructions" | "skills" | "skill";
     /** Fingerprint used to detect environment changes without rewriting the snapshot. */
     environmentKey?: string;
 };
