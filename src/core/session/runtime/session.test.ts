@@ -1,4 +1,9 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+    mkdirSync,
+    mkdtempSync,
+    rmSync,
+    writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, expect, test, vi } from "vitest";
@@ -29,7 +34,13 @@ import {
 } from "../../../runtime/tools/index.ts";
 import { SessionPermissions } from "../../permissions/session-permissions.ts";
 import { estimateContextUsage } from "./context-usage.ts";
-import { createDefaultContextManager } from "./context-manager.ts";
+import {
+    DefaultContextManager,
+    createDefaultContextManager,
+    type ContextManagerFactory
+} from "./context-manager.ts";
+import { AgentInstructions } from "./agent-instructions.ts";
+import { SYSTEM_PROMPT } from "./environment.ts";
 import { CONTEXT_COMPACTION_SYSTEM_PROMPT } from "./context-compaction.ts";
 
 vi.mock("../persistence/store.ts", () => ({
@@ -882,6 +893,104 @@ test("executes tool calls, streams tool data, and resumes with the tool result",
         "toolResult",
         "assistant"
     ]);
+});
+
+test("appends newly applicable AGENTS.md instructions without changing the prompt prefix", async () => {
+    const root = mkdtempSync(join(tmpdir(), "jarvix-session-agents-"));
+    const workspace = join(root, "workspace");
+    const nested = join(workspace, "packages", "app");
+    mkdirSync(nested, { recursive: true });
+    writeFileSync(join(workspace, "AGENTS.md"), "project rules", "utf8");
+    writeFileSync(join(nested, "AGENTS.md"), "app rules", "utf8");
+
+    try {
+        const toolCall = {
+            type: "toolCall" as const,
+            id: "call-agents",
+            name: "exec_command",
+            arguments: { command: "pwd", cwd: nested, timeoutMs: 1_000 }
+        };
+        const toolUseMessage: LlmAssistantMessage = {
+            ...assistantMessage(),
+            content: [toolCall],
+            stopReason: "toolUse"
+        };
+        const requests: LlmMessage[][] = [];
+        let response = 0;
+        const llm: LlmAdapter = {
+            getModel: () => MODEL,
+            stream(request) {
+                requests.push([...request.messages]);
+                const message = response === 0
+                    ? toolUseMessage
+                    : assistantMessage();
+                response += 1;
+                return (async function* (): AsyncIterable<LlmStreamEvent> {
+                    yield { type: "done", message };
+                })();
+            }
+        };
+        const tools: ToolExecutor = {
+            definitions: [{
+                name: "exec_command",
+                description: "Run a command",
+                parameters: { type: "object", properties: {} }
+            }],
+            handles: (name) => name === "exec_command",
+            execute: async () => ({
+                content: "workspace",
+                data: {
+                    kind: "shell.exec_command",
+                    command: "pwd",
+                    output: "workspace",
+                    status: "completed"
+                },
+                isError: false,
+                endReason: "exited"
+            }),
+            stop: async () => [],
+            dispose: () => undefined
+        };
+        const contextManagerFactory: ContextManagerFactory = (permission) => (
+            new DefaultContextManager(
+                permission,
+                SYSTEM_PROMPT,
+                new AgentInstructions({ homeDirectory: join(root, "home") })
+            )
+        );
+        const session = new Session(
+            meta,
+            [],
+            tools,
+            undefined,
+            contextManagerFactory
+        );
+
+        await session.request("inspect the package", {
+            llm,
+            config: TEST_CONFIG,
+            workingDirectories: [workspace],
+            emit: () => undefined
+        });
+
+        const prefix = requests[0]?.[0];
+        expect(prefix).toMatchObject({
+            role: "system",
+            context: "environment",
+            content: expect.stringContaining("project rules")
+        });
+        expect(requests[1]?.[0]).toBe(prefix);
+        expect(requests[1]?.at(-1)).toMatchObject({
+            role: "system",
+            context: "agent-instructions",
+            content: expect.stringContaining("app rules")
+        });
+        expect(session.snapshot().messages.some((message) => (
+            message.role === "system" && message.context === "agent-instructions"
+        ))).toBe(false);
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
 });
 
 test("injects prompts after the active LLM request and before the next round", async () => {

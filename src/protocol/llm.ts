@@ -132,8 +132,8 @@ export type LlmSystemMessage = {
     content: string;
     timestamp: number;
     notice?: LlmSystemNotice;
-    /** Internal marker for the session's stable leading environment snapshot. */
-    context?: "environment" | "goal";
+    /** Internal marker for injected system context. */
+    context?: "environment" | "goal" | "agent-instructions";
     /** Fingerprint used to detect environment changes without rewriting the snapshot. */
     environmentKey?: string;
 };

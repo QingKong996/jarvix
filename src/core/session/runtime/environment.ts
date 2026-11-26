@@ -9,7 +9,8 @@ export const SYSTEM_PROMPT = `Current operating system: ${process.platform}.`;
 
 export function environmentContextFor(
     permission: PermissionMode,
-    workingDirectories: readonly string[] = []
+    workingDirectories: readonly string[] = [],
+    agentInstructions = ""
 ): LlmSystemMessage {
     const writableRoots = permission === "project-read-write" || permission === "auto-review"
         ? workingDirectories
@@ -52,7 +53,10 @@ export function environmentContextFor(
             ...(writableRootsLine === null ? [] : [writableRootsLine]),
             ...writableRoots.map((root) => `  - ${root}`),
             ...workingDirectoriesLines,
-            "</environment_context>"
+            "</environment_context>",
+            ...(agentInstructions.trim().length > 0
+                ? ["", agentInstructions.trim()]
+                : [])
         ].join("\n"),
         timestamp: Date.now()
     };

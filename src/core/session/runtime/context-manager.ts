@@ -6,6 +6,10 @@ import type {
 } from "../../../protocol/llm.ts";
 import type { JarvixContextUsage } from "../../../protocol/context-usage.ts";
 import type { PermissionMode } from "../../../protocol/permission.ts";
+import {
+    AgentInstructions,
+    type AgentInstructionSource
+} from "./agent-instructions.ts";
 import { estimateContextUsage } from "./context-usage.ts";
 import {
     SYSTEM_PROMPT,
@@ -47,6 +51,10 @@ export interface ContextManager {
     environmentReminderIfChanged(
         workingDirectories?: readonly string[]
     ): EnvironmentReminder | null;
+    discoverAgentInstructions?(
+        paths: readonly string[],
+        workingDirectories?: readonly string[]
+    ): readonly AgentInstructionSource[];
     prepareRequest(
         history: readonly LlmMessage[],
         workingDirectories?: readonly string[],
@@ -91,15 +99,18 @@ export type ContextManagerFactory = (permission: () => PermissionMode) => Contex
 export class DefaultContextManager implements ContextManager {
     readonly systemPrompt: string;
     private readonly permission: () => PermissionMode;
+    private readonly agentInstructions: AgentInstructions;
     private contextMessage: LlmSystemMessage | null = null;
     private environmentKey: string | null = null;
 
     constructor(
         permission: () => PermissionMode,
-        systemPrompt = SYSTEM_PROMPT
+        systemPrompt = SYSTEM_PROMPT,
+        agentInstructions = new AgentInstructions()
     ) {
         this.permission = permission;
         this.systemPrompt = systemPrompt;
+        this.agentInstructions = agentInstructions;
     }
 
     initializeHistory(messages: readonly LlmMessage[]): LlmMessage[] {
@@ -124,7 +135,11 @@ export class DefaultContextManager implements ContextManager {
         }
         const key = environmentKeyFor(this.permission(), workingDirectories);
         const message: LlmSystemMessage = {
-            ...environmentContextFor(this.permission(), workingDirectories),
+            ...environmentContextFor(
+                this.permission(),
+                workingDirectories,
+                this.agentInstructions.staticInstructions(workingDirectories)
+            ),
             context: "environment",
             environmentKey: key
         };
@@ -144,6 +159,13 @@ export class DefaultContextManager implements ContextManager {
         return environmentReminderFor(this.permission(), workingDirectories);
     }
 
+    discoverAgentInstructions(
+        paths: readonly string[],
+        workingDirectories: readonly string[] = []
+    ): readonly AgentInstructionSource[] {
+        return this.agentInstructions.discover(paths, workingDirectories);
+    }
+
     prepareRequest(
         history: readonly LlmMessage[],
         workingDirectories: readonly string[] = [],
@@ -154,7 +176,11 @@ export class DefaultContextManager implements ContextManager {
         if (!this.contextMessage) {
             messages = [
                 {
-                    ...environmentContextFor(this.permission(), workingDirectories),
+                    ...environmentContextFor(
+                        this.permission(),
+                        workingDirectories,
+                        this.agentInstructions.staticInstructions(workingDirectories)
+                    ),
                     context: "environment",
                     environmentKey: key
                 },
@@ -180,19 +206,24 @@ export class DefaultContextManager implements ContextManager {
     visibleHistory(messages: readonly LlmMessage[]): LlmMessage[] {
         return messages.filter((message) => !(
             message.role === "system" &&
-            (message.context === "environment" || message.context === "goal")
+            (
+                message.context === "environment"
+                || message.context === "goal"
+                || message.context === "agent-instructions"
+            )
         ));
     }
 
     estimateUsage(input: ContextManagerUsageInput): JarvixContextUsage {
+        const request = this.prepareRequest(
+            input.history,
+            input.workingDirectories,
+            { goal: input.goal }
+        );
         return estimateContextUsage({
             contextWindow: input.contextWindow,
-            systemPrompt: this.systemPrompt,
-            messages: this.prepareRequest(
-                input.history,
-                input.workingDirectories,
-                { goal: input.goal }
-            ).messages,
+            systemPrompt: request.systemPrompt,
+            messages: request.messages,
             tools: input.tools
         });
     }

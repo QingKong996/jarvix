@@ -47,6 +47,10 @@ import {
     type ContextManagerFactory
 } from "./context-manager.ts";
 import {
+    agentInstructionPathsForToolCall,
+    agentInstructionsMessage
+} from "./agent-instructions.ts";
+import {
     CONTEXT_COMPACTION_BLOCK_TOKENS,
     CONTEXT_COMPACTION_SYSTEM_PROMPT,
     compactBlockContent,
@@ -1020,6 +1024,9 @@ export class Session {
             } finally {
                 this.toolUseOpen = false;
             }
+            if (!signal.aborted) {
+                this.appendAgentInstructionsForToolCalls(toolCalls, runtime);
+            }
         } else {
             this.toolUseOpen = false;
         }
@@ -1237,6 +1244,37 @@ export class Session {
 
     private registeredTools() {
         return this.toolRunner.registeredTools(this.meta.permission);
+    }
+
+    private appendAgentInstructionsForToolCalls(
+        toolCalls: readonly LlmToolCallBlock[],
+        runtime: SessionRuntime
+    ): void {
+        const workingDirectories = runtime.workingDirectories ?? [];
+        if (workingDirectories.length === 0) {
+            return;
+        }
+        const paths = toolCalls.flatMap(
+            (toolCall) => agentInstructionPathsForToolCall(toolCall, workingDirectories)
+        );
+        if (paths.length === 0) {
+            return;
+        }
+        const sources = this.contextManager.discoverAgentInstructions?.(
+            paths,
+            workingDirectories
+        ) ?? [];
+        if (sources.length === 0) {
+            return;
+        }
+
+        const message = agentInstructionsMessage(sources);
+        this.append(message);
+        this.emitContextUsageFor(runtime, this.contextWindow);
+        this.logger.info("Loaded AGENTS.md instructions", {
+            sessionId: this.meta.id,
+            paths: sources.map((source) => source.path)
+        });
     }
 
     private ensureEnvironmentContext(runtime: SessionRuntime): void {
