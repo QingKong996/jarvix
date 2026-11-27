@@ -189,6 +189,34 @@ test("round-trips skill enablement overrides", () => {
     expect(loadConfig(paths, defaults)).toMatchObject({ skills });
 });
 
+test("validates and round-trips MCP server configurations", () => {
+    const mcpServers = {
+        filesystem: {
+            command: "npx",
+            args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
+        },
+        remote: {
+            transport: "sse" as const,
+            url: "https://example.com/mcp",
+            headers: { Authorization: "Bearer test" }
+        }
+    };
+    const parsed = parseConfig({ mcpServers }, defaults);
+    expect(parsed.mcpServers).toMatchObject({
+        filesystem: {
+            transport: "stdio",
+            command: "npx"
+        },
+        remote: {
+            transport: "sse",
+            url: "https://example.com/mcp"
+        }
+    });
+    expect(() => parseConfig({
+        mcpServers: { invalid: {} }
+    }, defaults)).toThrow(/exactly one of command or url/);
+});
+
 test("saveConfig removes its temporary file when replacement fails", () => {
     const paths = configPaths(join(base, "failed-replace"));
     mkdirSync(paths.file, { recursive: true });

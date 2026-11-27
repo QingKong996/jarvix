@@ -1,9 +1,14 @@
 import { app } from "electron";
 import { join } from "node:path";
 import { Jarvix } from "../core/index.ts";
+import { McpRuntime } from "../mcp/runtime.ts";
 import { createPiAdapter } from "../llm/pi.ts";
 import type { JarvixConfig } from "../protocol/config.ts";
 import { IPC_CHANNELS } from "../protocol/ipc.ts";
+import {
+    createMcpToolManager,
+    MCP_TOOL_MANAGER_ID
+} from "../runtime/tools/index.ts";
 import { createToolSandboxFactory } from "../sandbox/index.ts";
 import { attachEventBridge } from "./event-bridge.ts";
 import {
@@ -115,7 +120,7 @@ function startDesktop(): void {
         }
     });
 
-    app.whenReady().then(() => {
+    app.whenReady().then(async () => {
         const paths = configPaths();
         const defaults = systemDefaults(app.getLocale());
         log.info("Application ready", {
@@ -143,13 +148,22 @@ function startDesktop(): void {
         const skillCatalog = new SkillCatalog({
             settings: () => config.skills ?? {}
         });
+        const mcpLogger = mainLogger("mcp");
+        let mcpRuntime = await McpRuntime.connect(
+            config.mcpServers,
+            mcpLogger
+        );
+        let mcpManagerRegistered = mcpRuntime.hasServers;
         const jarvix = new Jarvix({
             llm: createPiAdapter({ providers: () => config.providers }),
             config,
             sandboxFactory,
             logger: mainLogger("core"),
             observer,
-            skillCatalog
+            skillCatalog,
+            toolManagers: mcpManagerRegistered
+                ? [createMcpToolManager(mcpRuntime)]
+                : undefined
         });
         const catalog = new ModelCatalogService(
             join(paths.directory, "tmp", "models-dev.json"),
@@ -157,9 +171,34 @@ function startDesktop(): void {
             mainLogger("catalog")
         );
 
-        const updateConfig = (payload: unknown): typeof config => {
+        const updateConfig = async (payload: unknown): Promise<typeof config> => {
             const next = parseConfig(payload, defaults);
-            saveConfig(next, paths, defaults);
+            const reconnectMcp = mcpServersChanged(
+                config.mcpServers,
+                next.mcpServers
+            );
+            const nextMcpRuntime = reconnectMcp
+                ? await McpRuntime.connect(next.mcpServers, mcpLogger)
+                : undefined;
+            try {
+                saveConfig(next, paths, defaults);
+            } catch (error) {
+                await nextMcpRuntime?.close();
+                throw error;
+            }
+            if (nextMcpRuntime) {
+                if (mcpManagerRegistered) {
+                    await jarvix.unregisterToolManager(MCP_TOOL_MANAGER_ID);
+                    mcpManagerRegistered = false;
+                }
+                mcpRuntime = nextMcpRuntime;
+                if (nextMcpRuntime.hasServers) {
+                    await jarvix.registerToolManager(
+                        createMcpToolManager(nextMcpRuntime)
+                    );
+                    mcpManagerRegistered = true;
+                }
+            }
             config = next;
             jarvix.setConfig(next);
             windows.applyTheme(next.theme);
@@ -202,6 +241,10 @@ function startDesktop(): void {
                 .catch((error: unknown) => {
                     log.error("Failed to shut down sessions and tools", error);
                 })
+                .then(() => mcpRuntime.close())
+                .catch((error: unknown) => {
+                    log.error("Failed to close MCP servers", error);
+                })
                 .then(() => observer.flush(1_000))
                 .catch((error: unknown) => {
                     log.error("Failed to flush Agent observability data", error);
@@ -236,6 +279,14 @@ function configDetails(config: JarvixConfig): Record<string, unknown> {
         reasoning: config.reasoning,
         language: config.language,
         theme: config.theme,
-        contextCompactionThreshold: config.contextCompactionThreshold
+        contextCompactionThreshold: config.contextCompactionThreshold,
+        mcpServerCount: Object.keys(config.mcpServers ?? {}).length
     };
+}
+
+function mcpServersChanged(
+    current: JarvixConfig["mcpServers"],
+    next: JarvixConfig["mcpServers"]
+): boolean {
+    return JSON.stringify(current ?? {}) !== JSON.stringify(next ?? {});
 }

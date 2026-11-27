@@ -37,7 +37,7 @@ export type IpcDependencies = {
     catalog: ModelCatalogService;
     sandboxSetup: SandboxSetupService;
     getConfig(): JarvixConfig;
-    updateConfig(payload: unknown): JarvixConfig;
+    updateConfig(payload: unknown): JarvixConfig | Promise<JarvixConfig>;
 };
 
 type IpcHandler = (

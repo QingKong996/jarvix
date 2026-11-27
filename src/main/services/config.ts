@@ -22,6 +22,7 @@ import {
 } from "../../protocol/providers.ts";
 import {
     DEFAULT_THEME,
+    MCP_SERVER_TRANSPORTS,
     SUPPORTED_LANGUAGES,
     SUPPORTED_THEMES,
     type JarvixConfig,
@@ -153,7 +154,11 @@ function configSchema(defaults: ConfigDefaults) {
             language: z.enum(SUPPORTED_LANGUAGES).catch(defaults.language),
             theme: z.enum(SUPPORTED_THEMES).catch(defaults.theme),
             contextCompactionThreshold: z.number().int().positive().optional(),
-            skills: z.record(z.string().min(1), z.boolean()).optional()
+            skills: z.record(z.string().min(1), z.boolean()).optional(),
+            mcpServers: z.record(
+                z.string().min(1),
+                mcpServerConfigSchema()
+            ).optional()
         })
         .superRefine((config, context) => {
             const selection = config.selectedModel;
@@ -169,7 +174,8 @@ function configSchema(defaults: ConfigDefaults) {
             selectedModel,
             reasoning,
             contextCompactionThreshold,
-            skills
+            skills,
+            mcpServers
         }) => {
             const resolved = resolveConfiguredModel(providers, selectedModel);
             const nextSelection = resolved?.selection ?? selectedModel;
@@ -186,10 +192,87 @@ function configSchema(defaults: ConfigDefaults) {
                 ...(skills && Object.keys(skills).length > 0
                     ? { skills }
                     : {}),
+                ...(mcpServers && Object.keys(mcpServers).length > 0
+                    ? { mcpServers }
+                    : {}),
                 language,
                 theme
             };
         });
+}
+
+function mcpServerConfigSchema() {
+    return z
+        .object({
+            transport: z.enum(MCP_SERVER_TRANSPORTS).optional(),
+            enabled: z.boolean().optional(),
+            command: z.string().min(1).optional(),
+            args: z.array(z.string()).optional(),
+            env: z.record(z.string().min(1), z.string()).optional(),
+            cwd: z.string().min(1).optional(),
+            url: z.url().optional(),
+            headers: z.record(z.string().min(1), z.string()).optional()
+        })
+        .strict()
+        .superRefine((server, context) => {
+            const isStdio = server.command !== undefined;
+            const isRemote = server.url !== undefined;
+            if (isStdio === isRemote) {
+                context.addIssue({
+                    code: "custom",
+                    message: "MCP server requires exactly one of command or url"
+                });
+                return;
+            }
+            if (
+                isStdio
+                && server.transport !== undefined
+                && server.transport !== "stdio"
+            ) {
+                context.addIssue({
+                    code: "custom",
+                    path: ["transport"],
+                    message: "command requires the stdio transport"
+                });
+            }
+            if (
+                isRemote
+                && server.transport === "stdio"
+            ) {
+                context.addIssue({
+                    code: "custom",
+                    path: ["transport"],
+                    message: "url requires the http or sse transport"
+                });
+            }
+            if (
+                isStdio
+                && (server.url !== undefined || server.headers !== undefined)
+            ) {
+                context.addIssue({
+                    code: "custom",
+                    message: "stdio MCP servers cannot use url or headers"
+                });
+            }
+            if (
+                isRemote
+                && (
+                    server.command !== undefined
+                    || server.args !== undefined
+                    || server.env !== undefined
+                    || server.cwd !== undefined
+                )
+            ) {
+                context.addIssue({
+                    code: "custom",
+                    message: "remote MCP servers cannot use command, args, env, or cwd"
+                });
+            }
+        })
+        .transform((server) => ({
+            ...server,
+            transport: server.transport ?? (server.command ? "stdio" : "http")
+        }));
 }
 
 function detectLanguage(locale: string): Language {
