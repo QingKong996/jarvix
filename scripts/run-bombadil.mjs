@@ -500,7 +500,8 @@ async function runNative() {
     const electron = spawn(electronExecutable(), [
         ".",
         `--remote-debugging-port=${debugPort}`,
-        `--user-data-dir=${profile}`
+        `--user-data-dir=${profile}`,
+        ...(process.env.CI ? ["--no-sandbox"] : [])
     ], {
         cwd: repo,
         env: {
