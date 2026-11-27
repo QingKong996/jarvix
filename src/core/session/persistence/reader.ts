@@ -4,7 +4,8 @@ import {
     openSync,
     readdirSync,
     readSync,
-    statSync
+    statSync,
+    type Stats
 } from "node:fs";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
@@ -18,6 +19,7 @@ import { isStorageId } from "../../storage-id.ts";
 import {
     defaultSessionDirectory,
     sessionFile,
+    sessionMetaFileFor,
     SESSION_FILE_EXTENSION
 } from "./paths.ts";
 import {
@@ -34,6 +36,13 @@ const SESSION_HEADER_CHUNK_SIZE = 4 * 1024;
 const SESSION_LOAD_CHUNK_SIZE = 64 * 1024;
 const SESSION_TAIL_CHUNK_SIZE = 64 * 1024;
 
+type SessionSummaryCache = Map<string, {
+    version: string;
+    summary: JarvixSessionSummary | null;
+}>;
+
+const sessionSummaryCaches = new Map<string, SessionSummaryCache>();
+
 /** Load a session, or null when the file is unreadable or has no valid session header. */
 export function loadSession(
     id: string,
@@ -47,7 +56,9 @@ export function loadSession(
         return null;
     }
 
-    const state: { meta: JarvixSessionMeta | null } = { meta: null };
+    const state: { meta: JarvixSessionMeta | null } = {
+        meta: readSessionSidecarMeta(file)
+    };
     const messages: LlmMessage[] = [];
     let messageOrdinal = 0;
     const pending: Buffer[] = [];
@@ -75,8 +86,8 @@ export function loadSession(
     };
 
     try {
+        const buffer = Buffer.allocUnsafe(SESSION_LOAD_CHUNK_SIZE);
         while (true) {
-            const buffer = Buffer.allocUnsafe(SESSION_LOAD_CHUNK_SIZE);
             const bytesRead = readSync(descriptor, buffer, 0, buffer.length, null);
             if (bytesRead === 0) {
                 break;
@@ -86,7 +97,7 @@ export function loadSession(
             while (start < bytesRead) {
                 const newline = chunk.indexOf(0x0a, start);
                 if (newline === -1) {
-                    pending.push(chunk.subarray(start));
+                    pending.push(Buffer.from(chunk.subarray(start)));
                     break;
                 }
                 if (pending.length === 0) {
@@ -122,19 +133,19 @@ function applyCompaction(
     if (record.messageIds.length === 0) {
         return;
     }
-    const positions: number[] = [];
-    for (const id of record.messageIds) {
-        const position = messages.findIndex(
-            (message) => messageRecordId(message) === id
-        );
-        if (position === -1) {
+    const start = messages.findIndex(
+        (message) => messageRecordId(message) === record.messageIds[0]
+    );
+    if (
+        start === -1 ||
+        start + record.messageIds.length > messages.length
+    ) {
+        return;
+    }
+    for (let index = 1; index < record.messageIds.length; index += 1) {
+        if (messageRecordId(messages[start + index]!) !== record.messageIds[index]) {
             return;
         }
-        positions.push(position);
-    }
-    const start = positions[0]!;
-    if (positions.some((position, index) => position !== start + index)) {
-        return;
     }
     assignMessageRecordId(record.message, record.id);
     messages.splice(start, record.messageIds.length, record.message);
@@ -151,7 +162,7 @@ export function listSessionSummaries(
         return [];
     }
 
-    const candidates: { id: string; file: string }[] = [];
+    const candidates: { id: string; file: string; stats: Stats }[] = [];
     for (const entry of entries) {
         if (!entry.endsWith(SESSION_FILE_EXTENSION)) {
             continue;
@@ -170,14 +181,26 @@ export function listSessionSummaries(
         if (!isStorageId(id)) {
             continue;
         }
-        candidates.push({ id, file });
+        candidates.push({ id, file, stats });
     }
 
+    const cache = sessionSummaryCacheFor(directory);
+    const candidateFiles = new Set(candidates.map((candidate) => candidate.file));
     const summaries: JarvixSessionSummary[] = [];
     for (const candidate of candidates) {
-        const summary = readSessionSummary(candidate.file, candidate.id);
+        const summary = readSessionSummary(
+            candidate.file,
+            candidate.id,
+            candidate.stats,
+            cache
+        );
         if (summary) {
             summaries.push(summary);
+        }
+    }
+    for (const file of cache.keys()) {
+        if (!candidateFiles.has(file)) {
+            cache.delete(file);
         }
     }
     return summaries.sort(
@@ -216,8 +239,16 @@ export function readSessionNamingContext(
     };
 }
 
-/** Read only the first JSONL record, which holds the session meta. */
+/** Read session metadata from its sidecar, falling back to the legacy JSONL header. */
 export function readSessionMeta(file: string): JarvixSessionMeta | null {
+    return readSessionSidecarMeta(file) ?? parseSessionMeta(readFirstRecord(file));
+}
+
+function readSessionSidecarMeta(file: string): JarvixSessionMeta | null {
+    return parseSessionMeta(readFirstRecord(sessionMetaFileFor(file)));
+}
+
+function readFirstRecord(file: string): unknown {
     let descriptor: number;
     try {
         descriptor = openSync(file, "r");
@@ -258,7 +289,7 @@ export function readSessionMeta(file: string): JarvixSessionMeta | null {
                 break;
             }
         }
-        return parseSessionMeta(parseRecord(header));
+        return parseRecord(header);
     } catch {
         return null;
     } finally {
@@ -268,13 +299,23 @@ export function readSessionMeta(file: string): JarvixSessionMeta | null {
 
 function readSessionSummary(
     file: string,
-    id: string
+    id: string,
+    dataStats: Stats,
+    cache: SessionSummaryCache
 ): JarvixSessionSummary | null {
+    const metaStats = statsIfExists(sessionMetaFileFor(file));
+    const version = `${fileVersion(dataStats)}|${fileVersion(metaStats)}`;
+    const cached = cache.get(file);
+    if (cached?.version === version) {
+        return cached.summary;
+    }
+
     const meta = readSessionMeta(file);
     if (!meta || meta.id !== id) {
+        cache.set(file, { version, summary: null });
         return null;
     }
-    return {
+    const summary: JarvixSessionSummary = {
         id: meta.id,
         name: meta.name,
         createdAt: meta.createdAt,
@@ -285,6 +326,31 @@ function readSessionSummary(
         ...(meta.projectId ? { projectId: meta.projectId } : {}),
         ...(meta.workingDirectory ? { workingDirectory: meta.workingDirectory } : {})
     };
+    cache.set(file, { version, summary });
+    return summary;
+}
+
+function sessionSummaryCacheFor(directory: string): SessionSummaryCache {
+    let cache = sessionSummaryCaches.get(directory);
+    if (!cache) {
+        cache = new Map();
+        sessionSummaryCaches.set(directory, cache);
+    }
+    return cache;
+}
+
+function fileVersion(stats: Stats | undefined): string {
+    return stats
+        ? `${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeMs}:${stats.ctimeMs}`
+        : "";
+}
+
+function statsIfExists(file: string): Stats | undefined {
+    try {
+        return statSync(file, { throwIfNoEntry: false });
+    } catch {
+        return undefined;
+    }
 }
 
 function readLastMessageTimestamp(file: string): number | null {
@@ -355,8 +421,8 @@ function readFirstUserPrompt(file: string): string | null {
     };
 
     try {
+        const buffer = Buffer.allocUnsafe(SESSION_LOAD_CHUNK_SIZE);
         while (true) {
-            const buffer = Buffer.allocUnsafe(SESSION_LOAD_CHUNK_SIZE);
             const bytesRead = readSync(descriptor, buffer, 0, buffer.length, null);
             if (bytesRead === 0) {
                 break;
@@ -366,7 +432,7 @@ function readFirstUserPrompt(file: string): string | null {
             while (start < bytesRead) {
                 const newline = chunk.indexOf(0x0a, start);
                 if (newline === -1) {
-                    pending.push(chunk.subarray(start));
+                    pending.push(Buffer.from(chunk.subarray(start)));
                     break;
                 }
                 let prompt: string | null;

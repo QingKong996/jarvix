@@ -27,6 +27,7 @@ vi.mock("node:fs", async (importOriginal) => {
 const {
     appendSessionMessage,
     createSession,
+    listArchivedSessionSummaries,
     listSessionSummaries,
     loadSession,
     updateSessionName
@@ -38,7 +39,7 @@ afterAll(() => {
     rmSync(base, { recursive: true, force: true });
 });
 
-test("metadata updates stream large histories without reading them into memory", () => {
+test("metadata updates write a sidecar without streaming the history", () => {
     const created = createSession({}, "Large session", base);
     const message: LlmUserMessage = {
         role: "user",
@@ -47,10 +48,13 @@ test("metadata updates stream large histories without reading them into memory",
     };
     appendSessionMessage(created.meta.id, message, base);
     readFileSyncCalls.length = 0;
+    readSyncBytes.length = 0;
 
     const meta = updateSessionName(created.meta.id, "Renamed large session", base);
 
     expect(readFileSyncCalls).toEqual([]);
+    expect(readSyncBytes.reduce((total, bytes) => total + bytes, 0))
+        .toBeLessThan(32 * 1024);
     const loaded = loadSession(created.meta.id, base);
     expect(loaded).toEqual({
         meta,
@@ -71,4 +75,32 @@ test("rejects an unterminated header without reading the whole file", () => {
     expect(listSessionSummaries(directory)).toEqual([]);
     expect(readSyncBytes.reduce((total, bytes) => total + bytes, 0))
         .toBeLessThanOrEqual(1024 * 1024);
+});
+
+test("reuses unchanged summaries and invalidates them when files change", () => {
+    const directory = join(base, "summary-cache");
+    const session = createSession({}, "Cached session", directory);
+    appendSessionMessage(session.meta.id, {
+        role: "user",
+        content: "first",
+        timestamp: 1_700_000_000_000
+    }, directory);
+
+    const initial = listSessionSummaries(directory);
+    readSyncBytes.length = 0;
+
+    expect(listArchivedSessionSummaries(directory)).toEqual([]);
+    expect(listSessionSummaries(directory)).toEqual(initial);
+    expect(readSyncBytes).toEqual([]);
+
+    updateSessionName(session.meta.id, "Renamed cached session", directory);
+    expect(listSessionSummaries(directory)[0]?.name).toBe("Renamed cached session");
+
+    appendSessionMessage(session.meta.id, {
+        role: "user",
+        content: "second",
+        timestamp: 1_700_000_001_000
+    }, directory);
+    expect(listSessionSummaries(directory)[0]?.updatedAt)
+        .toBe(1_700_000_001_000);
 });
