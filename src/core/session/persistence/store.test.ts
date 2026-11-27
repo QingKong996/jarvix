@@ -531,7 +531,7 @@ test("updateSessionContext switches between a project and a custom working direc
     });
 });
 
-test("updateSessionContext rejects oversized headers and preserves the existing session", () => {
+test("updateSessionContext rejects oversized metadata and preserves the existing session", () => {
     const directory = join(base, "oversized-update");
     const created = createSession({}, SESSION_NAME, directory);
     const file = sessionFile(created.meta.id, directory);
@@ -547,14 +547,19 @@ test("updateSessionContext rejects oversized headers and preserves the existing 
     expect(loadSession(created.meta.id, directory)).toEqual(created);
 });
 
-test("updateSessionName rewrites the header and preserves messages", () => {
+test("updateSessionName writes a sidecar and preserves the original JSONL", () => {
     const directory = join(base, "rename");
     const created = createSession({ projectId: PROJECT_ID }, SESSION_NAME, directory);
     appendSessionMessage(created.meta.id, userMessage, directory);
+    const file = sessionFile(created.meta.id, directory);
+    const sidecar = join(directory, `${created.meta.id}.meta.json`);
+    const before = readFileSync(file, "utf8");
 
     const meta = updateSessionName(created.meta.id, "  Renamed session  ", directory);
 
     expect(meta.name).toBe("Renamed session");
+    expect(readFileSync(file, "utf8")).toBe(before);
+    expect(JSON.parse(readFileSync(sidecar, "utf8"))).toEqual(meta);
     expect(loadSession(created.meta.id, directory)).toEqual({
         meta,
         messages: [userMessage]
@@ -563,7 +568,7 @@ test("updateSessionName rewrites the header and preserves messages", () => {
     expect(() => updateSessionName(created.meta.id, "   ", directory)).toThrow();
 });
 
-test("updateSessionPermission rewrites the header and preserves messages", () => {
+test("updateSessionPermission writes a sidecar and preserves messages", () => {
     const directory = join(base, "permission");
     const created = createSession({ projectId: PROJECT_ID }, SESSION_NAME, directory);
     appendSessionMessage(created.meta.id, userMessage, directory);
@@ -656,7 +661,7 @@ test("ignores malformed goal metadata while preserving the session", () => {
     });
 });
 
-test("updateSessionStatus archives in the header and sorts archives by archive time", () => {
+test("updateSessionStatus archives in the sidecar and sorts archives by archive time", () => {
     const directory = join(base, "archive");
     const first = createSession({ projectId: PROJECT_ID }, "First archived", directory);
     const second = createSession({}, "Second archived", directory);
@@ -688,11 +693,15 @@ test("deleteSession permanently removes the session file", () => {
     const directory = join(base, "delete");
     const session = createSession({}, "Delete me", directory);
     appendSessionMessage(session.meta.id, userMessage, directory);
+    updateSessionName(session.meta.id, "Deleted session", directory);
+    const sidecar = join(directory, `${session.meta.id}.meta.json`);
+    expect(existsSync(sidecar)).toBe(true);
 
     deleteSession(session.meta.id, directory);
 
     expect(loadSession(session.meta.id, directory)).toBeNull();
     expect(listSessionSummaries(directory)).toEqual([]);
+    expect(existsSync(sidecar)).toBe(false);
     expect(() => deleteSession(session.meta.id, directory)).toThrow("Session not found");
 });
 

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { unlinkSync } from "node:fs";
+import { rmSync, unlinkSync } from "node:fs";
 import { i18n } from "../../../i18n/index.ts";
 import type { LlmMessage, LlmUserMessage } from "../../../protocol/llm.ts";
 import {
@@ -16,7 +16,11 @@ import {
     sessionGoalFrom,
     sessionNameSchema
 } from "../../../protocol/session.ts";
-import { defaultSessionDirectory, sessionFile } from "./paths.ts";
+import {
+    defaultSessionDirectory,
+    sessionFile,
+    sessionMetaFileFor
+} from "./paths.ts";
 import { readSessionMeta } from "./reader.ts";
 import {
     ensureMessageRecordId,
@@ -208,6 +212,7 @@ export function deleteSession(
     const file = sessionFile(id, directory);
     requireSessionMeta(file, id);
     unlinkSync(file);
+    rmSync(sessionMetaFileFor(file), { force: true });
 }
 
 /** Append one message to an existing session file as a new JSONL line. */
