@@ -1,15 +1,42 @@
-import { memo, useLayoutEffect, useRef, type RefObject } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import {
+    memo,
+    useLayoutEffect,
+    useRef,
+    type RefObject
+} from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
 import { useCommitted, useInjected, useLive } from "./state/transcript-hooks.ts";
-import { subscribeCommitted, subscribeInjected, subscribeLive } from "./state/transcript-store.ts";
 import type { CommittedTurn, LiveTurn } from "./state/types.ts";
 import { CHAT_COLUMN, CONTENT_GUTTER } from "../../layout.ts";
 import { Markdown } from "./Markdown.tsx";
 import { ThinkingBlock } from "./ThinkingBlock.tsx";
 import { ToolCallBlock } from "./tools/ToolCallBlock.tsx";
 import { quickTransition } from "../../motion.ts";
+
+const TRANSCRIPT_GAP_PX = 24;
+const VIRTUALIZATION_ENABLED = typeof window !== "undefined"
+    && typeof window.ResizeObserver === "function";
+
+type TranscriptEntry =
+    | {
+        kind: "committed";
+        turn: CommittedTurn;
+    } | {
+        kind: "live";
+        turn: LiveTurn;
+    } | {
+        kind: "injected";
+        turn: CommittedTurn;
+    };
+
+type TranscriptData = {
+    committed: readonly CommittedTurn[];
+    live: LiveTurn | null;
+    injected: readonly CommittedTurn[];
+};
 
 const CommittedTurnView = memo(function CommittedTurnView({ turn }: { turn: CommittedTurn }) {
     const { t } = useTranslation();
@@ -56,26 +83,6 @@ const CommittedTurnView = memo(function CommittedTurnView({ turn }: { turn: Comm
     );
 });
 
-function CommittedList() {
-    const committed = useCommitted();
-    return (
-        <AnimatePresence initial={false}>
-            {committed.map((turn) => (
-                <motion.div
-                    key={turn.id}
-                    layout="position"
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={quickTransition}
-                    className={turn.role === "user" ? "flex justify-end" : "min-w-0"}
-                >
-                    <CommittedTurnView turn={turn} />
-                </motion.div>
-            ))}
-        </AnimatePresence>
-    );
-}
-
 function LiveTurnView({ turn }: { turn: LiveTurn }) {
     const { t } = useTranslation();
     const hasText = turn.blocks.some((block) => block.kind === "text" && block.text.length > 0);
@@ -93,116 +100,184 @@ function LiveTurnView({ turn }: { turn: LiveTurn }) {
     );
 }
 
-function LiveSlot() {
-    const live = useLive();
-    return (
-        <AnimatePresence initial={false}>
-            {live ? (
+const TranscriptEntryView = memo(
+    function TranscriptEntryView({ entry }: { entry: TranscriptEntry }) {
+        if (entry.kind === "live") {
+            return (
                 <motion.div
-                    key={live.id}
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    transition={quickTransition}
-                >
-                    <LiveTurnView turn={live} />
-                </motion.div>
-            ) : null}
-        </AnimatePresence>
-    );
-}
-
-function InjectedList() {
-    const injected = useInjected();
-    return (
-        <AnimatePresence initial={false}>
-            {injected.map((turn) => (
-                <motion.div
-                    key={turn.id}
-                    layout="position"
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={quickTransition}
-                    className={turn.role === "user" ? "flex justify-end" : "min-w-0"}
                 >
-                    <CommittedTurnView turn={turn} />
+                    <LiveTurnView turn={entry.turn} />
                 </motion.div>
-            ))}
-        </AnimatePresence>
+            );
+        }
+        const turn = entry.turn;
+        return (
+            <div className={turn.role === "user" ? "flex justify-end" : "min-w-0"}>
+                <CommittedTurnView turn={turn} />
+            </div>
+        );
+    },
+    (previous, next) => (
+        previous.entry.kind === next.entry.kind
+        && previous.entry.turn === next.entry.turn
+    )
+);
+
+function transcriptEntryKey(entry: TranscriptEntry): string {
+    return entry.turn.id;
+}
+
+function transcriptEntryCount({
+    committed,
+    live,
+    injected
+}: TranscriptData): number {
+    return committed.length + (live ? 1 : 0) + injected.length;
+}
+
+function transcriptEntryAt(data: TranscriptData, index: number): TranscriptEntry {
+    if (index < data.committed.length) {
+        return {
+            kind: "committed",
+            turn: data.committed[index]!
+        };
+    }
+    if (data.live && index === data.committed.length) {
+        return {
+            kind: "live",
+            turn: data.live
+        };
+    }
+    return {
+        kind: "injected",
+        turn: data.injected[index - data.committed.length - (data.live ? 1 : 0)]!
+    };
+}
+
+function estimateTranscriptEntrySize(entry: TranscriptEntry): number {
+    if (entry.kind === "live") {
+        return 240;
+    }
+    if (entry.turn.role === "user") {
+        return 64;
+    }
+    if (entry.turn.role === "system") {
+        return 112;
+    }
+    return 200;
+}
+
+function StaticTranscript({ data }: { data: TranscriptData }) {
+    const count = transcriptEntryCount(data);
+    return (
+        <div className={cn("py-8", CONTENT_GUTTER)}>
+            <div className={cn("flex flex-col gap-6", CHAT_COLUMN)}>
+                {Array.from({ length: count }, (_, index) => {
+                    const entry = transcriptEntryAt(data, index);
+                    return (
+                        <TranscriptEntryView
+                            key={transcriptEntryKey(entry)}
+                            entry={entry}
+                        />
+                    );
+                })}
+            </div>
+        </div>
     );
 }
 
-const FOLLOW_THRESHOLD_PX = 80;
+function VirtualizedTranscript({
+    data,
+    sessionId,
+    scrollRef
+}: {
+    data: TranscriptData;
+    sessionId: string | null;
+    scrollRef: RefObject<HTMLElement | null>;
+}) {
+    const count = transcriptEntryCount(data);
+    const virtualizer = useVirtualizer<HTMLElement, HTMLDivElement>({
+        count,
+        getScrollElement: () => scrollRef.current,
+        estimateSize: (index) => estimateTranscriptEntrySize(
+            transcriptEntryAt(data, index)
+        ),
+        getItemKey: (index) => transcriptEntryKey(
+            transcriptEntryAt(data, index)
+        ),
+        paddingStart: 32,
+        paddingEnd: 32,
+        gap: TRANSCRIPT_GAP_PX,
+        overscan: 4,
+        anchorTo: "end",
+        followOnAppend: true,
+        scrollEndThreshold: 80
+    });
+    const previousSessionId = useRef<string | null | undefined>(undefined);
 
-function useFollowBottom(ref: RefObject<HTMLElement | null>): void {
     useLayoutEffect(() => {
-        const container = ref.current;
-        if (!container) {
+        if (previousSessionId.current === sessionId) {
             return;
         }
-        let frame: number | null = null;
-        let follow = true;
-        let autoScrollTop = 0;
+        previousSessionId.current = sessionId;
+        if (count > 0) {
+            virtualizer.scrollToEnd();
+        }
+    }, [count, sessionId, virtualizer]);
 
-        const updateFollow = (): void => {
-            // Ignore scroll events caused by our own auto-scroll so streaming growth never disables following.
-            if (Math.abs(container.scrollTop - autoScrollTop) <= 1) {
-                return;
-            }
-            follow = container.scrollHeight - container.scrollTop - container.clientHeight <= FOLLOW_THRESHOLD_PX;
-        };
-
-        const scrollToBottom = (): void => {
-            if (frame !== null) {
-                return;
-            }
-            frame = requestAnimationFrame(() => {
-                frame = null;
-                if (!follow) {
-                    return;
-                }
-                container.scrollTop = container.scrollHeight;
-                autoScrollTop = container.scrollTop;
-            });
-        };
-
-        // The keyed transcript mounts after hydration, so no store notification
-        // remains to position the new scroll container at the latest turn.
-        container.scrollTop = container.scrollHeight;
-        autoScrollTop = container.scrollTop;
-        container.addEventListener("scroll", updateFollow, { passive: true });
-        const unsubscribeCommitted = subscribeCommitted(scrollToBottom);
-        const unsubscribeLive = subscribeLive(scrollToBottom);
-        const unsubscribeInjected = subscribeInjected(scrollToBottom);
-        return () => {
-            container.removeEventListener("scroll", updateFollow);
-            if (frame !== null) {
-                cancelAnimationFrame(frame);
-            }
-            unsubscribeCommitted();
-            unsubscribeLive();
-            unsubscribeInjected();
-        };
-    }, [ref]);
+    return (
+        <div className={CONTENT_GUTTER}>
+            <div
+                className={cn("relative", CHAT_COLUMN)}
+                style={{ height: `${virtualizer.getTotalSize()}px` }}
+            >
+                {virtualizer.getVirtualItems().map((virtualItem) => {
+                    const entry = transcriptEntryAt(data, virtualItem.index);
+                    return (
+                        <div
+                            key={virtualItem.key}
+                            ref={virtualizer.measureElement}
+                            data-index={virtualItem.index}
+                            className="absolute inset-x-0 top-0"
+                            style={{
+                                transform: `translate3d(0, ${virtualItem.start}px, 0)`
+                            }}
+                        >
+                            <TranscriptEntryView entry={entry} />
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
 }
 
 export function Transcript({ sessionId }: { sessionId: string | null }) {
     const containerRef = useRef<HTMLElement>(null);
-    useFollowBottom(containerRef);
+    const committed = useCommitted();
+    const live = useLive();
+    const injected = useInjected();
+    const data = { committed, live, injected };
 
     return (
         <section
             ref={containerRef}
             data-session-id={sessionId ?? undefined}
             className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto"
+            style={{ overflowAnchor: "none" }}
         >
-            <div className={cn("flex min-h-full flex-col gap-6 py-8", CONTENT_GUTTER)}>
-                <div className={cn("flex flex-col gap-6", CHAT_COLUMN)}>
-                    <CommittedList />
-                    <LiveSlot />
-                    <InjectedList />
-                </div>
-            </div>
+            {VIRTUALIZATION_ENABLED ? (
+                <VirtualizedTranscript
+                    data={data}
+                    sessionId={sessionId}
+                    scrollRef={containerRef}
+                />
+            ) : (
+                <StaticTranscript data={data} />
+            )}
         </section>
     );
 }
