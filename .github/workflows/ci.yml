@@ -82,3 +82,29 @@ jobs:
 
       - name: Electron client tests
         run: xvfb-run -a npm run test:electron
+
+  electron-ui:
+    name: Electron UI
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install display server
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y xvfb
+
+      - name: Electron UI exploration
+        run: xvfb-run -a npm run test:ui -- --time-limit=30s
