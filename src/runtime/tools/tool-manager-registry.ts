@@ -10,11 +10,14 @@ import type {
     ToolManagerContext
 } from "./tool-manager.ts";
 import type {
+    DeferredToolDefinition,
+    DeferredToolLoadResult,
     ToolExecutionObserver,
     ToolExecutionResult,
     ToolExecutor,
     ToolStopEvent
 } from "./types.ts";
+import { DeferredToolLoader } from "./deferred-tools.ts";
 
 type RegisteredTool = {
     managerId: string | null;
@@ -33,6 +36,10 @@ export class ToolManagerRegistry implements ToolExecutor {
     private readonly activeCalls = new Map<Tool, number>();
     private readonly idleWaiters = new Map<Tool, Set<() => void>>();
     private readonly disposedTools = new Set<Tool>();
+    private readonly deferredLoader = new DeferredToolLoader({
+        deferredTools: () => this.deferredTools(),
+        loadDeferredTool: (name) => this.loadDeferredToolDefinition(name)
+    });
 
     constructor(
         context: ToolManagerContext,
@@ -41,13 +48,21 @@ export class ToolManagerRegistry implements ToolExecutor {
         this.context = context;
         const tools = [...new Set(initialTools)];
         this.assertUniqueTools(tools);
+        this.assertUniqueDeferredTools(tools);
         for (const tool of tools) {
             this.addTool(null, tool);
         }
+        this.assertUniqueTools([this.deferredLoader]);
+        this.addTool(null, this.deferredLoader);
     }
 
     get definitions(): readonly LlmToolDefinition[] {
-        return [...this.ownedTools].flatMap((tool) => tool.definitions);
+        return [
+            ...[...this.ownedTools]
+                .filter((tool) => tool !== this.deferredLoader)
+                .flatMap((tool) => tool.definitions),
+            ...this.deferredLoader.definitions
+        ];
     }
 
     handles(name: string): boolean {
@@ -60,9 +75,30 @@ export class ToolManagerRegistry implements ToolExecutor {
     }
 
     getRegisteredTools(permission: PermissionMode): readonly LlmToolDefinition[] {
+        return [
+            ...[...this.ownedTools]
+                .filter((tool) => tool !== this.deferredLoader)
+                .flatMap(
+                    (tool) => tool.getRegisteredTools?.(permission) ?? tool.definitions
+                ),
+            ...(this.deferredLoader.getRegisteredTools?.(permission)
+                ?? this.deferredLoader.definitions)
+        ];
+    }
+
+    private deferredTools(): readonly DeferredToolDefinition[] {
         return [...this.ownedTools].flatMap(
-            (tool) => tool.getRegisteredTools?.(permission) ?? tool.definitions
+            (tool) => tool.getDeferredTools?.() ?? []
         );
+    }
+
+    private loadDeferredToolDefinition(name: string): DeferredToolLoadResult {
+        const owner = [...this.ownedTools].find(
+            (tool) => tool.getDeferredTools?.().some(
+                (deferred) => deferred.definition.name === name
+            ) === true
+        );
+        return owner?.loadDeferredTool?.(name) ?? "unknown";
     }
 
     registerManager(manager: ToolManager): void {
@@ -73,6 +109,7 @@ export class ToolManagerRegistry implements ToolExecutor {
         const tools = [...new Set(manager.create(this.context))];
         try {
             this.assertUniqueTools(tools);
+            this.assertUniqueDeferredTools([...new Set([...this.ownedTools, ...tools])]);
         } catch (error) {
             for (const tool of tools.filter((item) => !this.ownedTools.has(item))) {
                 tool.dispose?.();
@@ -171,6 +208,27 @@ export class ToolManagerRegistry implements ToolExecutor {
                     throw new Error(`Duplicate tool definition: ${definition.name}`);
                 }
                 names.add(definition.name);
+            }
+        }
+    }
+
+    private assertUniqueDeferredTools(tools: readonly Tool[]): void {
+        const owners = new Map<string, Tool>();
+        const builtInNames = new Set(
+            this.deferredLoader.definitions.map((definition) => definition.name)
+        );
+        for (const tool of tools) {
+            for (const deferred of tool.getDeferredTools?.() ?? []) {
+                const name = deferred.definition.name;
+                if (builtInNames.has(name)) {
+                    throw new Error(
+                        `Deferred tool definition conflicts with built-in tool: ${name}`
+                    );
+                }
+                if (owners.has(name)) {
+                    throw new Error(`Duplicate deferred tool definition: ${name}`);
+                }
+                owners.set(name, tool);
             }
         }
     }

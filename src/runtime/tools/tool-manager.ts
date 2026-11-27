@@ -4,6 +4,8 @@ import type {
 } from "../../protocol/llm.ts";
 import type { PermissionMode } from "../../protocol/permission.ts";
 import type {
+    DeferredToolDefinition,
+    DeferredToolLoadResult,
     ToolExecutionObserver,
     ToolExecutionResult,
     ToolExecutor,
@@ -26,6 +28,8 @@ export type ToolExecutionContext = ToolExecutionObserver & {
 export type Tool = {
     readonly definitions: readonly LlmToolDefinition[];
     getRegisteredTools?(permission: PermissionMode): readonly LlmToolDefinition[];
+    getDeferredTools?(): readonly DeferredToolDefinition[];
+    loadDeferredTool?(name: string): DeferredToolLoadResult;
     hasActiveWork?(): boolean;
     execute(
         call: LlmToolCallBlock,
@@ -46,6 +50,8 @@ export function toolFromExecutor(executor: ToolExecutor): Tool {
     return {
         definitions: executor.definitions,
         getRegisteredTools: executor.getRegisteredTools?.bind(executor),
+        getDeferredTools: executor.getDeferredTools?.bind(executor),
+        loadDeferredTool: executor.loadDeferredTool?.bind(executor),
         hasActiveWork: executor.hasActiveWork?.bind(executor),
         execute(call, context) {
             return executor.execute(

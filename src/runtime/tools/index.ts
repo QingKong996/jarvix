@@ -5,6 +5,13 @@ export {
 } from "./default-manager.ts";
 export { createDefaultTools } from "./default-tools.ts";
 export {
+    DEFERRED_TOOL_DEFINITIONS,
+    DeferredToolLoader,
+    LOAD_TOOL,
+    TOOL_SEARCH_TOOL,
+    TOOL_SEARCH_RESULT_LIMIT
+} from "./deferred-tools.ts";
+export {
     createGoalToolManager,
     FINISH_GOAL_TOOL,
     GOAL_TOOL_MANAGER_ID,
@@ -22,5 +29,10 @@ export {
 } from "./mcp/mcp-tool-manager.ts";
 export { REQUEST_PERMISSION_TOOL } from "./request-permission/request-permission.ts";
 export { ToolManagerRegistry } from "./tool-manager-registry.ts";
-export type { ToolExecutionResult, ToolExecutor } from "./types.ts";
+export type {
+    DeferredToolDefinition,
+    DeferredToolLoadResult,
+    ToolExecutionResult,
+    ToolExecutor
+} from "./types.ts";
 export type { ToolManager } from "./tool-manager.ts";

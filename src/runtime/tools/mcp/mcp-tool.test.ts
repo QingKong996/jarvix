@@ -8,13 +8,17 @@ import type {
 } from "../../../mcp/runtime.ts";
 import type { LlmToolCallBlock } from "../../../protocol/llm.ts";
 import type { ToolExecutionContext } from "../tool-manager.ts";
+import { ToolManagerRegistry } from "../tool-manager-registry.ts";
+import type { ToolExecutor } from "../types.ts";
+import {
+    LOAD_TOOL,
+    TOOL_SEARCH_TOOL
+} from "../deferred-tools.ts";
 import {
     LIST_MCP_RESOURCE_TEMPLATES_TOOL,
     LIST_MCP_RESOURCES_TOOL,
-    LOAD_TOOL,
     McpTool,
     READ_MCP_RESOURCE_TOOL,
-    TOOL_SEARCH_TOOL,
     type McpToolHost
 } from "./mcp-tool.ts";
 
@@ -51,9 +55,9 @@ const catalogTool: McpCatalogTool = {
 };
 
 test("tool_search truncates fuzzy descriptions and returns full exact specs", async () => {
-    const tool = new McpTool(host());
+    const tools = registry(new McpTool(host()));
 
-    const fuzzy = await execute(tool, TOOL_SEARCH_TOOL, {
+    const fuzzy = await execute(tools, TOOL_SEARCH_TOOL, {
         query: "read",
         mode: "fuzzy"
     });
@@ -67,7 +71,7 @@ test("tool_search truncates fuzzy descriptions and returns full exact specs", as
     );
     expect(fuzzyPayload.tools[0]).not.toHaveProperty("inputSchema");
 
-    const exact = await execute(tool, TOOL_SEARCH_TOOL, {
+    const exact = await execute(tools, TOOL_SEARCH_TOOL, {
         query: "mcp__filesystem__read_file",
         mode: "exact"
     });
@@ -86,10 +90,10 @@ test("tool_search truncates fuzzy descriptions and returns full exact specs", as
 
 test("load_tool mounts a tool and exposes MCP resource tools", async () => {
     const toolHost = host();
-    const tool = new McpTool(toolHost);
-    expect(tool.getRegisteredTools().map((definition) => definition.name))
+    const tools = registry(new McpTool(toolHost));
+    expect(tools.getRegisteredTools("read-only").map((definition) => definition.name))
         .not.toContain(catalogTool.exposedName);
-    expect(tool.getRegisteredTools().map((definition) => definition.name)).toEqual(
+    expect(tools.getRegisteredTools("read-only").map((definition) => definition.name)).toEqual(
         expect.arrayContaining([
             TOOL_SEARCH_TOOL,
             LOAD_TOOL,
@@ -99,14 +103,14 @@ test("load_tool mounts a tool and exposes MCP resource tools", async () => {
         ])
     );
 
-    const loaded = await execute(tool, LOAD_TOOL, {
+    const loaded = await execute(tools, LOAD_TOOL, {
         name: "filesystem/read_file"
     });
     expect(loaded.isError).toBe(false);
-    expect(tool.getRegisteredTools().map((definition) => definition.name))
+    expect(tools.getRegisteredTools("read-only").map((definition) => definition.name))
         .toContain(catalogTool.exposedName);
 
-    const called = await execute(tool, catalogTool.exposedName, {
+    const called = await execute(tools, catalogTool.exposedName, {
         path: "README.md"
     });
     expect(toolHost.callTool).toHaveBeenCalledWith(
@@ -116,7 +120,7 @@ test("load_tool mounts a tool and exposes MCP resource tools", async () => {
     );
     expect(called.content).toBe("file contents");
 
-    const resources = await execute(tool, LIST_MCP_RESOURCES_TOOL, {});
+    const resources = await execute(tools, LIST_MCP_RESOURCES_TOOL, {});
     expect(JSON.parse(text(resources.content))).toMatchObject({
         resources: [{
             server: "filesystem",
@@ -125,7 +129,7 @@ test("load_tool mounts a tool and exposes MCP resource tools", async () => {
         }]
     });
 
-    const read = await execute(tool, READ_MCP_RESOURCE_TOOL, {
+    const read = await execute(tools, READ_MCP_RESOURCE_TOOL, {
         server: "filesystem",
         uri: "file:///README.md"
     });
@@ -148,13 +152,6 @@ function host(): McpToolHost & {
         tools: [catalogTool],
         findTool: (name: string) => (
             name === catalogTool.exposedName ? catalogTool : undefined
-        ),
-        findToolsByExactName: (name: string) => (
-            name === catalogTool.exposedName
-            || name === catalogTool.toolName
-            || name === "filesystem/read_file"
-                ? [catalogTool]
-                : []
         ),
         callTool: vi.fn(async () => ({
             content: [{ type: "text" as const, text: "file contents" }]
@@ -188,12 +185,22 @@ function host(): McpToolHost & {
     };
 }
 
+function registry(tool: McpTool): ToolManagerRegistry {
+    return new ToolManagerRegistry({
+        sessionId: "session-1",
+        permission: () => "read-only",
+        workingDirectories: () => []
+    }, [tool]);
+}
+
 function execute(
-    tool: McpTool,
+    tool: ToolExecutor,
     name: string,
     arguments_: Record<string, unknown>
 ) {
-    return tool.execute(call(name, arguments_), context());
+    return tool.execute(call(name, arguments_), {
+        onOutput: () => undefined
+    }, context().signal);
 }
 
 function call(

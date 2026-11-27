@@ -47,6 +47,11 @@ import {
     type ContextManagerFactory
 } from "./context-manager.ts";
 import {
+    createRunToolState,
+    syncRunToolState,
+    type RunToolState
+} from "./tool-state.ts";
+import {
     agentInstructionPathsForToolCall,
     agentInstructionsMessage
 } from "./agent-instructions.ts";
@@ -193,6 +198,7 @@ export class Session {
     private contextWindow: number | null = null;
     private shutdownPromise: Promise<void> | null = null;
     private activeRun: RunTelemetry | null = null;
+    private toolState: RunToolState | null = null;
     private goalFinished = false;
     private readonly goalVerifier = new GoalVerifier();
 
@@ -380,6 +386,7 @@ export class Session {
                 runtime.config.reasoning
             );
             const registeredTools = this.registeredTools();
+            this.toolState = createRunToolState(registeredTools);
             run.reasoningLevel = reasoning;
             run.systemPromptHash = hashText(this.contextManager.systemPrompt);
             run.toolsetHash = hashToolset(registeredTools);
@@ -491,6 +498,7 @@ export class Session {
             this.streamOpen = false;
             this.pendingMessages.discardPrompts();
             this.flushPendingSystemMessages(runtime);
+            this.toolState = null;
             observeStart();
             const endedAtMs = Date.now();
             const durationMs = Math.round(performance.now() - startedAt);
@@ -753,6 +761,8 @@ export class Session {
         const turnId = `${run.runId}:t${turnIndex}`;
         const streamStartedAt = performance.now();
         const streamStartedAtMs = Date.now();
+        this.syncToolState();
+        const toolState = this.toolState;
         const requestContext = this.contextManager.prepareRequest(
             this.history,
             runtime.workingDirectories ?? [],
@@ -761,7 +771,9 @@ export class Session {
                 requireFinishGoal: autoContinue
             }
         );
-        const messages = requestContext.messages;
+        const messages = toolState && toolState.changes.length > 0
+            ? [...requestContext.messages, ...toolState.changes]
+            : requestContext.messages;
         const contextTokensBefore = this.contextTokens(
             turn.contextWindow,
             runtime.workingDirectories ?? []
@@ -800,7 +812,7 @@ export class Session {
             for await (const event of runtime.llm.stream({
                 ...turn.request,
                 systemPrompt: requestContext.systemPrompt,
-                tools: this.registeredTools(),
+                tools: toolState?.base ?? this.registeredTools(),
                 messages,
                 signal,
                 onProviderRequest: providerHooks.onProviderRequest,
@@ -1028,6 +1040,7 @@ export class Session {
                         signal,
                         toolTelemetry[index]
                     );
+                    this.syncToolState();
                     this.emitContextUsage(turn);
                 }
             } finally {
@@ -1253,6 +1266,21 @@ export class Session {
 
     private registeredTools() {
         return this.toolRunner.registeredTools(this.meta.permission);
+    }
+
+    private syncToolState(): void {
+        const state = this.toolState;
+        if (!state) {
+            return;
+        }
+        if (syncRunToolState(state, this.registeredTools())) {
+            this.logger.debug("Tool declarations changed", {
+                sessionId: this.meta.id,
+                runId: this.activeRun?.runId,
+                toolCount: state.current.length,
+                changeCount: state.changes.length
+            });
+        }
     }
 
     private appendAgentInstructionsForToolCalls(

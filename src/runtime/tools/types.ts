@@ -37,6 +37,26 @@ export type ToolExecutionResult = {
     task?: ToolTaskSnapshot;
 };
 
+/**
+ * A tool that is searchable before it is advertised to the model.
+ * `loadDeferredTool` moves it into the registered tool set for the session.
+ */
+export type DeferredToolDefinition = {
+    definition: LlmToolDefinition;
+    /** Alternate exact names accepted by load_tool. */
+    aliases?: readonly string[];
+    /** Compact fields included in fuzzy search results. */
+    searchMetadata?: Readonly<Record<string, string | number | boolean>>;
+    /** Full fields included in exact search results. */
+    exactMetadata?: Readonly<Record<string, unknown>>;
+};
+
+export type DeferredToolLoadResult =
+    | "loaded"
+    | "already-loaded"
+    | "unknown"
+    | "failed";
+
 export type ToolOutputHandler = (delta: ToolCallOutputDelta) => void;
 
 export type ToolTaskEvent =
@@ -85,6 +105,8 @@ export type ToolExecutionObserver = {
 export type ToolExecutor = {
     readonly definitions: readonly LlmToolDefinition[];
     getRegisteredTools?(permission: PermissionMode): readonly LlmToolDefinition[];
+    getDeferredTools?(): readonly DeferredToolDefinition[];
+    loadDeferredTool?(name: string): DeferredToolLoadResult;
     hasActiveWork?(): boolean;
     handles(name: string): boolean;
     execute(

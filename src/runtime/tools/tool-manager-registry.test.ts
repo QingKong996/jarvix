@@ -131,3 +131,121 @@ test("waits for an active tool call before disposing an unloaded manager", async
     expect(unloaded).toBe(true);
     expect(dispose).toHaveBeenCalledTimes(1);
 });
+
+test("searches and loads deferred tools through the built-in loader", async () => {
+    let loaded = false;
+    const definition = {
+        name: "external_lookup",
+        description: "Look up an external value",
+        parameters: { type: "object", properties: {} }
+    };
+    const tool: Tool = {
+        definitions: [definition],
+        getRegisteredTools: () => loaded ? [definition] : [],
+        getDeferredTools: () => [{
+            definition,
+            aliases: ["external/lookup"],
+            searchMetadata: { source: "external" }
+        }],
+        loadDeferredTool: (name) => {
+            if (name !== definition.name) {
+                return "unknown";
+            }
+            if (loaded) {
+                return "already-loaded";
+            }
+            loaded = true;
+            return "loaded";
+        },
+        execute: async (call) => ({
+            content: "found",
+            data: createGenericToolCallViewData(
+                call.name,
+                call.arguments,
+                "completed"
+            ),
+            isError: false,
+            endReason: "exited"
+        })
+    };
+    const registry = new ToolManagerRegistry({
+        sessionId: "session-1",
+        permission: () => "read-only",
+        workingDirectories: () => []
+    }, [tool]);
+
+    expect(registry.getRegisteredTools("read-only").map((item) => item.name)).toEqual([
+        "tool_search",
+        "load_tool"
+    ]);
+    expect(registry.handles("external_lookup")).toBe(true);
+
+    const search = await registry.execute({
+        type: "toolCall",
+        id: "search-1",
+        name: "tool_search",
+        arguments: { query: "external", mode: "fuzzy" }
+    }, observer);
+    expect(JSON.parse(String(search.content))).toMatchObject({
+        tools: [{
+            name: "external_lookup",
+            description: "Look up an external value",
+            source: "external"
+        }]
+    });
+
+    const load = await registry.execute({
+        type: "toolCall",
+        id: "load-1",
+        name: "load_tool",
+        arguments: { name: "external/lookup" }
+    }, observer);
+    expect(load.isError).toBe(false);
+    expect(registry.getRegisteredTools("read-only").map((item) => item.name))
+        .toContain("external_lookup");
+});
+
+test("does not advertise deferred tools when none are available", () => {
+    const registry = new ToolManagerRegistry({
+        sessionId: "session-1",
+        permission: () => "read-only",
+        workingDirectories: () => []
+    });
+
+    expect(registry.getRegisteredTools("read-only")).toEqual([]);
+    expect(registry.definitions.map((item) => item.name)).toEqual([
+        "tool_search",
+        "load_tool"
+    ]);
+});
+
+test("rejects duplicate deferred tool names across owners", () => {
+    const definition = {
+        name: "shared_lookup",
+        description: "Look up a shared value",
+        parameters: { type: "object", properties: {} }
+    };
+    const owner = (): Tool => ({
+        definitions: [],
+        getDeferredTools: () => [{ definition }],
+        loadDeferredTool: () => "loaded",
+        execute: async (call) => ({
+            content: "unused",
+            data: createGenericToolCallViewData(
+                call.name,
+                call.arguments,
+                "completed"
+            ),
+            isError: false,
+            endReason: "exited"
+        })
+    });
+
+    expect(() => new ToolManagerRegistry({
+        sessionId: "session-1",
+        permission: () => "read-only",
+        workingDirectories: () => []
+    }, [owner(), owner()])).toThrow(
+        "Duplicate deferred tool definition: shared_lookup"
+    );
+});
