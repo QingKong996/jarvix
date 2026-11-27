@@ -1,9 +1,10 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { Archive, Cpu, LoaderCircle, Settings2, Sparkles } from "lucide-react";
+import { Archive, Cpu, LoaderCircle, Server, Settings2, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
     DEFAULT_THEME,
     type JarvixConfig,
+    type JarvixMcpServerConfig,
     type Language,
     type Theme
 } from "../../../../protocol/config.ts";
@@ -16,6 +17,7 @@ import { Button } from "../ui/button.tsx";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog.tsx";
 import { ArchivedSettings } from "./ArchivedSettings.tsx";
 import { GeneralSettings } from "./GeneralSettings.tsx";
+import { McpSettings } from "./McpSettings.tsx";
 import { ProviderSettings } from "./providers/ProviderSettings.tsx";
 import { SkillsSettings } from "./SkillsSettings.tsx";
 
@@ -28,7 +30,7 @@ type SettingsDialogProps = {
     onUnarchiveSession: (sessionId: string) => Promise<boolean>;
 };
 
-type SettingsSection = "model" | "skills" | "archived" | "general";
+type SettingsSection = "model" | "skills" | "mcp" | "archived" | "general";
 
 const bridge = window.jarvix;
 
@@ -63,6 +65,9 @@ export function SettingsDialog({
     const [skillSettings, setSkillSettings] = useState<JarvixSkillSettings>(
         config?.skills ?? {}
     );
+    const [mcpServers, setMcpServers] = useState<Record<string, JarvixMcpServerConfig>>(
+        config?.mcpServers ?? {}
+    );
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -79,6 +84,7 @@ export function SettingsDialog({
             config?.contextCompactionThreshold?.toString() ?? ""
         );
         setSkillSettings(config?.skills ?? {});
+        setMcpServers(config?.mcpServers ?? {});
     }, [open, config, i18n.language]);
 
     async function handleSave(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -104,7 +110,8 @@ export function SettingsDialog({
                 ...(threshold !== undefined
                     ? { contextCompactionThreshold: threshold }
                     : {}),
-                skills: skillSettings
+                skills: skillSettings,
+                mcpServers
             });
             onSaved(next);
             setLanguage(next.language ?? language);
@@ -113,6 +120,7 @@ export function SettingsDialog({
                 next.contextCompactionThreshold?.toString() ?? ""
             );
             setSkillSettings(next.skills ?? {});
+            setMcpServers(next.mcpServers ?? {});
             await i18n.changeLanguage(next.language ?? language);
             onOpenChange(false);
         } catch (cause) {
@@ -160,6 +168,13 @@ export function SettingsDialog({
                             label={t("settings.sections.skills")}
                             onClick={() => setSection("skills")}
                             testId="settings-section-skills"
+                        />
+                        <SettingsSectionButton
+                            active={section === "mcp"}
+                            icon={<Server />}
+                            label={t("settings.sections.mcp")}
+                            onClick={() => setSection("mcp")}
+                            testId="settings-section-mcp"
                         />
                         <SettingsSectionButton
                             active={section === "archived"}
@@ -210,6 +225,16 @@ export function SettingsDialog({
                                 disabled={disabled}
                                 onChange={(next) => {
                                     setSkillSettings(next);
+                                    setError(null);
+                                }}
+                            />
+                        </div>
+                        <div className={section === "mcp" ? undefined : "hidden"}>
+                            <McpSettings
+                                servers={mcpServers}
+                                disabled={disabled}
+                                onChange={(next) => {
+                                    setMcpServers(next);
                                     setError(null);
                                 }}
                             />

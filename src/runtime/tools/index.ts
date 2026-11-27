@@ -16,6 +16,10 @@ export type {
 } from "./goal/goal-tools.ts";
 export { BackgroundTaskManager } from "./shell/background-task-manager.ts";
 export { ShellSessionBudget } from "./shell/shell.ts";
+export {
+    createMcpToolManager,
+    MCP_TOOL_MANAGER_ID
+} from "./mcp/mcp-tool-manager.ts";
 export { REQUEST_PERMISSION_TOOL } from "./request-permission/request-permission.ts";
 export { ToolManagerRegistry } from "./tool-manager-registry.ts";
 export type { ToolExecutionResult, ToolExecutor } from "./types.ts";

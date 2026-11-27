@@ -17,6 +17,7 @@
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
     "test": "vitest run",
+    "test:mcp": "vitest run src/mcp/runtime.integration.test.ts",
     "report:agent": "node --disable-warning=ExperimentalWarning scripts/agent-report.mjs",
     "test:ui": "node scripts/run-bombadil.mjs",
     "test:ui:check": "tsc -p tests/bombadil/tsconfig.json --noEmit",
@@ -27,6 +28,7 @@
     "@antithesishq/bombadil": "0.7.10",
     "@dnd-kit/core": "^6.3.1",
     "@lobehub/icons-static-svg": "1.102.0",
+    "@modelcontextprotocol/server-everything": "1.0.0",
     "@tailwindcss/vite": "^4.3.4",
     "@types/node": "^22.20.0",
     "@types/react": "^19.3.0",
@@ -52,6 +54,7 @@
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "^0.0.83",
     "@earendil-works/pi-ai": "^1.5.1",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@streamdown/cjk": "^1.0.4",
     "@streamdown/code": "^2.0.0",
     "@streamdown/math": "^1.0.3",

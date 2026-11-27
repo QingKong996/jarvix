@@ -1,7 +1,9 @@
 import { Jarvix } from "../../core/index.ts";
 import { createPiAdapter } from "../../llm/pi.ts";
+import { McpRuntime } from "../../mcp/runtime.ts";
 import type { JarvixConfig } from "../../protocol/config.ts";
 import type { PermissionRequest } from "../../protocol/permission.ts";
+import { createMcpToolManager } from "../../runtime/tools/index.ts";
 import { createToolSandboxFactory } from "../../sandbox/index.ts";
 import { mainLogger } from "../logger.ts";
 import type { HeadlessOptions } from "./options.ts";
@@ -14,12 +16,25 @@ export async function runHeadless(
     config: JarvixConfig
 ): Promise<number> {
     const logger = mainLogger("headless");
-    const jarvix = new Jarvix({
-        llm: createPiAdapter({ providers: () => config.providers }),
-        config,
-        sandboxFactory: createToolSandboxFactory(),
-        logger
-    });
+    const mcpRuntime = await McpRuntime.connect(
+        config.mcpServers,
+        mainLogger("mcp")
+    );
+    let jarvix: Jarvix;
+    try {
+        jarvix = new Jarvix({
+            llm: createPiAdapter({ providers: () => config.providers }),
+            config,
+            sandboxFactory: createToolSandboxFactory(),
+            logger,
+            toolManagers: mcpRuntime.hasServers
+                ? [createMcpToolManager(mcpRuntime)]
+                : undefined
+        });
+    } catch (error) {
+        await mcpRuntime.close();
+        throw error;
+    }
     let sessionId: string | undefined;
     let interrupted = false;
     let streamError: string | undefined;
@@ -91,6 +106,11 @@ export async function runHeadless(
             await jarvix.shutdown();
         } catch (error) {
             logger.error("Failed to shut down headless runtime", error);
+        }
+        try {
+            await mcpRuntime.close();
+        } catch (error) {
+            logger.error("Failed to close MCP servers", error);
         }
         if (sessionId) {
             try {
