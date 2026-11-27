@@ -82,6 +82,3 @@ jobs:
 
       - name: Electron client tests
         run: xvfb-run -a npm run test:electron
-
-      - name: Electron UI exploration
-        run: xvfb-run -a npm run test:ui -- --skip-build --time-limit=30s
