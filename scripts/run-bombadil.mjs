@@ -1,11 +1,13 @@
 import { spawn, spawnSync, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
+import { createRequire } from "node:module";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const require = createRequire(import.meta.url);
 const argumentsList = process.argv.slice(2);
 const skipBuild = process.env.JARVIX_BOMBADIL_SKIP_BUILD === "1"
     || argumentsList.includes("--skip-build");
@@ -479,10 +481,7 @@ async function runInWsl() {
 }
 
 function electronExecutable() {
-    if (process.platform === "darwin") {
-        return path.join(repo, "node_modules", "electron", "dist", "Electron.app", "Contents", "MacOS", "Electron");
-    }
-    return path.join(repo, "node_modules", "electron", "dist", "electron");
+    return require("electron");
 }
 
 async function runNative() {
