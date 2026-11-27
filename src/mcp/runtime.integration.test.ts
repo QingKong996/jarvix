@@ -1,15 +1,21 @@
 import { createRequire } from "node:module";
 import { expect, test } from "vitest";
 import type { LlmToolCallBlock } from "../protocol/llm.ts";
-import type { ToolExecutionContext } from "../runtime/tools/tool-manager.ts";
+import {
+    LOAD_TOOL,
+    TOOL_SEARCH_TOOL
+} from "../runtime/tools/deferred-tools.ts";
 import {
     LIST_MCP_RESOURCES_TOOL,
     LIST_MCP_RESOURCE_TEMPLATES_TOOL,
-    LOAD_TOOL,
     McpTool,
-    READ_MCP_RESOURCE_TOOL,
-    TOOL_SEARCH_TOOL
+    READ_MCP_RESOURCE_TOOL
 } from "../runtime/tools/mcp/mcp-tool.ts";
+import { ToolManagerRegistry } from "../runtime/tools/tool-manager-registry.ts";
+import type {
+    ToolExecutionResult,
+    ToolExecutor
+} from "../runtime/tools/types.ts";
 import { McpRuntime } from "./runtime.ts";
 
 const require = createRequire(import.meta.url);
@@ -37,8 +43,12 @@ test("connects to server-everything and exercises tools and resources", {
             throw new Error("server-everything did not expose the echo tool");
         }
 
-        const tool = new McpTool(runtime);
-        const fuzzy = JSON.parse(text(await execute(tool, TOOL_SEARCH_TOOL, {
+        const tools = new ToolManagerRegistry({
+            sessionId: "mcp-integration-session",
+            permission: () => "read-only",
+            workingDirectories: () => []
+        }, [new McpTool(runtime)]);
+        const fuzzy = JSON.parse(text(await execute(tools, TOOL_SEARCH_TOOL, {
             query: "echo",
             mode: "fuzzy"
         })));
@@ -48,7 +58,7 @@ test("connects to server-everything and exercises tools and resources", {
             toolName: "echo"
         }));
 
-        const exact = JSON.parse(text(await execute(tool, TOOL_SEARCH_TOOL, {
+        const exact = JSON.parse(text(await execute(tools, TOOL_SEARCH_TOOL, {
             query: echo.exposedName,
             mode: "exact"
         })));
@@ -59,32 +69,32 @@ test("connects to server-everything and exercises tools and resources", {
             inputSchema: echo.spec.inputSchema
         });
 
-        const loaded = await execute(tool, LOAD_TOOL, {
+        const loaded = await execute(tools, LOAD_TOOL, {
             name: echo.exposedName
         });
         expect(loaded.isError).toBe(false);
-        expect(registeredNames(tool)).toContain(echo.exposedName);
+        expect(registeredNames(tools)).toContain(echo.exposedName);
 
-        const called = await execute(tool, echo.exposedName, {
+        const called = await execute(tools, echo.exposedName, {
             message: "hello from mcp"
         });
         expect(called.isError).toBe(false);
         expect(text(called)).toContain("Echo: hello from mcp");
 
         const resources = JSON.parse(text(
-            await execute(tool, LIST_MCP_RESOURCES_TOOL, {})
+            await execute(tools, LIST_MCP_RESOURCES_TOOL, {})
         ));
         expect(resources.resources.length).toBeGreaterThan(0);
         const resource = resources.resources[0];
         expect(resource.server).toBe("everything");
 
         const templates = JSON.parse(text(
-            await execute(tool, LIST_MCP_RESOURCE_TEMPLATES_TOOL, {})
+            await execute(tools, LIST_MCP_RESOURCE_TEMPLATES_TOOL, {})
         ));
         expect(templates.resourceTemplates.length).toBeGreaterThan(0);
 
         const read = JSON.parse(text(
-            await execute(tool, READ_MCP_RESOURCE_TOOL, {
+            await execute(tools, READ_MCP_RESOURCE_TOOL, {
                 server: resource.server,
                 uri: resource.uri
             })
@@ -96,11 +106,15 @@ test("connects to server-everything and exercises tools and resources", {
 });
 
 function execute(
-    tool: McpTool,
+    tool: ToolExecutor,
     name: string,
     arguments_: Record<string, unknown>
 ) {
-    return tool.execute(call(name, arguments_), context());
+    return tool.execute(
+        call(name, arguments_),
+        { onOutput: () => undefined },
+        new AbortController().signal
+    );
 }
 
 function call(
@@ -115,23 +129,11 @@ function call(
     };
 }
 
-function context(): ToolExecutionContext {
-    return {
-        sessionId: "mcp-integration-session",
-        permission: "read-only",
-        workingDirectories: [],
-        signal: new AbortController().signal,
-        onOutput: () => undefined
-    };
+function registeredNames(tool: ToolExecutor): string[] {
+    return tool.getRegisteredTools?.("read-only").map((definition) => definition.name) ?? [];
 }
 
-function registeredNames(tool: McpTool): string[] {
-    return tool.getRegisteredTools().map((definition) => definition.name);
-}
-
-function text(
-    result: Awaited<ReturnType<McpTool["execute"]>>
-): string {
+function text(result: ToolExecutionResult): string {
     return typeof result.content === "string"
         ? result.content
         : JSON.stringify(result.content);

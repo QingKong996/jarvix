@@ -148,11 +148,19 @@ function toPiContext(request: LlmRequest): Context {
     return {
         systemPrompt: request.systemPrompt,
         messages: request.messages.map(toPiMessage),
-        tools: request.tools?.map((tool): Tool => ({
-            name: tool.name,
-            description: tool.description,
-            parameters: tool.parameters
-        }))
+        tools: request.tools?.map(toPiTool)
+    };
+}
+
+function toPiTool(tool: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+}): Tool {
+    return {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters
     };
 }
 
@@ -179,7 +187,13 @@ function toPiMessage(message: LlmMessage): Message {
         return {
             role: "system",
             content: message.content,
-            timestamp: message.timestamp
+            timestamp: message.timestamp,
+            ...(message.toolsAdded?.length
+                ? { toolsAdded: message.toolsAdded.map(toPiTool) }
+                : {}),
+            ...(message.toolsRemoved?.length
+                ? { toolsRemoved: message.toolsRemoved }
+                : {})
         };
     }
 

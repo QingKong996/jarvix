@@ -42,6 +42,7 @@ import {
 import { AgentInstructions } from "./agent-instructions.ts";
 import { SYSTEM_PROMPT } from "./environment.ts";
 import { CONTEXT_COMPACTION_SYSTEM_PROMPT } from "./context-compaction.ts";
+import { createGenericToolCallViewData } from "../../../runtime/tools/tool-view.ts";
 
 vi.mock("../persistence/store.ts", () => ({
     appendSessionMessage: vi.fn(),
@@ -893,6 +894,86 @@ test("executes tool calls, streams tool data, and resumes with the tool result",
         "toolResult",
         "assistant"
     ]);
+});
+
+test("keeps the base tool list stable and sends loaded tools as deltas", async () => {
+    const loadDefinition = {
+        name: "load_tool",
+        description: "Load a deferred tool",
+        parameters: { type: "object", properties: {} }
+    };
+    const loadedDefinition = {
+        name: "external_lookup",
+        description: "Look up an external value",
+        parameters: { type: "object", properties: {} }
+    };
+    let loaded = false;
+    const requests: LlmRequest[] = [];
+    const llm: LlmAdapter = {
+        getModel: () => MODEL,
+        stream(request) {
+            requests.push({
+                ...request,
+                messages: [...request.messages],
+                tools: request.tools ? [...request.tools] : undefined
+            });
+            const message: LlmAssistantMessage = requests.length === 1
+                ? {
+                    ...assistantMessage(),
+                    content: [{
+                            type: "toolCall",
+                            id: "load-1",
+                            name: "load_tool",
+                            arguments: { name: "external_lookup" }
+                        }],
+                    stopReason: "toolUse" as const
+                }
+                : assistantMessage();
+            return (async function* (): AsyncIterable<LlmStreamEvent> {
+                yield { type: "done", message };
+            })();
+        }
+    };
+    const tools: ToolExecutor = {
+        definitions: [loadDefinition, loadedDefinition],
+        getRegisteredTools: () => loaded
+            ? [loadDefinition, loadedDefinition]
+            : [loadDefinition],
+        handles: (name) => name === "load_tool" || name === "external_lookup",
+        execute: async (call) => {
+            loaded = true;
+            return {
+                content: "loaded",
+                data: createGenericToolCallViewData(
+                    call.name,
+                    call.arguments,
+                    "completed"
+                ),
+                isError: false,
+                endReason: "exited"
+            };
+        },
+        stop: async () => [],
+        dispose: () => undefined
+    };
+    const session = new Session(meta, [], tools);
+
+    await session.request("load the external tool", {
+        llm,
+        config: TEST_CONFIG,
+        emit: () => undefined
+    });
+
+    expect(requests[0]?.tools).toEqual([loadDefinition]);
+    expect(requests[1]?.tools).toEqual([loadDefinition]);
+    expect(requests[1]?.messages.at(-1)).toMatchObject({
+        role: "system",
+        content: "",
+        toolsAdded: [loadedDefinition]
+    });
+    expect(session.snapshot().messages.some((message) => (
+        message.role === "system" && message.toolsAdded !== undefined
+    ))).toBe(false);
 });
 
 test("appends newly applicable AGENTS.md instructions without changing the prompt prefix", async () => {

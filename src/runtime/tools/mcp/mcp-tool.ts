@@ -9,30 +9,17 @@ import type {
     McpRuntime
 } from "../../../mcp/runtime.ts";
 import type { Tool, ToolExecutionContext } from "../tool-manager.ts";
-import type { ToolExecutionResult } from "../types.ts";
+import type {
+    DeferredToolDefinition,
+    DeferredToolLoadResult,
+    ToolExecutionResult
+} from "../types.ts";
 import { createGenericToolCallViewData } from "../tool-view.ts";
-import {
-    exactToolMatch,
-    fuzzyToolMatches,
-    TOOL_SEARCH_RESULT_LIMIT,
-    type McpToolSearchMode
-} from "./tool-search.ts";
+import { LOAD_TOOL } from "../deferred-tools.ts";
 
-export const TOOL_SEARCH_TOOL = "tool_search";
-export const LOAD_TOOL = "load_tool";
 export const LIST_MCP_RESOURCES_TOOL = "list_mcp_resources";
 export const LIST_MCP_RESOURCE_TEMPLATES_TOOL = "list_mcp_resource_templates";
 export const READ_MCP_RESOURCE_TOOL = "read_mcp_resource";
-
-const toolSearchArguments = z.object({
-    query: z.string().trim().min(1),
-    mode: z.enum(["fuzzy", "exact"]).optional(),
-    limit: z.number().int().min(1).max(TOOL_SEARCH_RESULT_LIMIT).optional()
-}).strict();
-
-const loadToolArguments = z.object({
-    name: z.string().trim().min(1)
-}).strict();
 
 const listResourcesArguments = z.object({
     server: z.string().trim().min(1).optional(),
@@ -44,57 +31,7 @@ const readResourceArguments = z.object({
     uri: z.string().trim().min(1)
 }).strict();
 
-export const MCP_TOOL_DEFINITIONS: readonly LlmToolDefinition[] = [
-    {
-        name: TOOL_SEARCH_TOOL,
-        description: [
-            "Search deferred MCP tools by tool name and description, similar to grep.",
-            "mode=fuzzy (default) returns matching names with descriptions truncated to 1024 characters.",
-            "mode=exact returns the complete tool spec for an exact tool name.",
-            "Call load_tool with a returned name to make that MCP tool available."
-        ].join(" "),
-        parameters: {
-            type: "object",
-            properties: {
-                query: {
-                    type: "string",
-                    description: "Case-insensitive text to find in MCP tool names or descriptions."
-                },
-                mode: {
-                    type: "string",
-                    enum: ["fuzzy", "exact"],
-                    description: "Use fuzzy for grep-like discovery or exact for complete specs.",
-                    default: "fuzzy"
-                },
-                limit: {
-                    type: "integer",
-                    minimum: 1,
-                    maximum: TOOL_SEARCH_RESULT_LIMIT,
-                    description: `Maximum fuzzy results to return. Defaults to ${TOOL_SEARCH_RESULT_LIMIT}.`
-                }
-            },
-            required: ["query"],
-            additionalProperties: false
-        }
-    },
-    {
-        name: LOAD_TOOL,
-        description: [
-            "Load one deferred MCP tool by its exact name.",
-            "The loaded tool becomes callable on the next model call."
-        ].join(" "),
-        parameters: {
-            type: "object",
-            properties: {
-                name: {
-                    type: "string",
-                    description: "Exact name returned by tool_search."
-                }
-            },
-            required: ["name"],
-            additionalProperties: false
-        }
-    },
+export const MCP_RESOURCE_TOOL_DEFINITIONS: readonly LlmToolDefinition[] = [
     {
         name: LIST_MCP_RESOURCES_TOOL,
         description: "Lists resources provided by MCP servers. Resources allow servers to share data that provides context to language models, such as files, database schemas, or application-specific information. Prefer resources over web search when possible.",
@@ -156,34 +93,74 @@ export type McpToolHost = Pick<
     McpRuntime,
     | "tools"
     | "findTool"
-    | "findToolsByExactName"
     | "callTool"
     | "listResources"
     | "listResourceTemplates"
     | "readResource"
 >;
 
+function exactToolMetadata(tool: McpCatalogTool): Readonly<Record<string, unknown>> {
+    const { name: _name, ...spec } = tool.spec;
+    return {
+        server: tool.server,
+        toolName: tool.toolName,
+        spec: tool.spec,
+        ...spec,
+        inputSchema: tool.parameters
+    };
+}
+
 /** Per-session MCP tool facade. Only explicitly loaded catalog tools are advertised. */
 export class McpTool implements Tool {
     readonly definitions: readonly LlmToolDefinition[];
     private readonly loaded = new Set<string>();
+    private readonly loadedOrder: string[] = [];
     private readonly host: McpToolHost;
 
     constructor(host: McpToolHost) {
         this.host = host;
         this.definitions = [
-            ...MCP_TOOL_DEFINITIONS,
+            ...MCP_RESOURCE_TOOL_DEFINITIONS,
             ...host.tools.map((tool) => tool.definition)
         ];
     }
 
     getRegisteredTools(): readonly LlmToolDefinition[] {
         return [
-            ...MCP_TOOL_DEFINITIONS,
-            ...this.host.tools
-                .filter((tool) => this.loaded.has(tool.exposedName))
-                .map((tool) => tool.definition)
+            ...MCP_RESOURCE_TOOL_DEFINITIONS,
+            ...this.loadedOrder.flatMap((name) => {
+                const tool = this.host.findTool(name);
+                return tool ? [tool.definition] : [];
+            })
         ];
+    }
+
+    getDeferredTools(): readonly DeferredToolDefinition[] {
+        return this.host.tools.map((tool) => ({
+            definition: tool.definition,
+            aliases: [
+                tool.toolName,
+                `${tool.server}/${tool.toolName}`,
+                `${tool.server}:${tool.toolName}`
+            ],
+            searchMetadata: {
+                server: tool.server,
+                toolName: tool.toolName
+            },
+            exactMetadata: exactToolMetadata(tool)
+        }));
+    }
+
+    loadDeferredTool(name: string): DeferredToolLoadResult {
+        if (!this.host.findTool(name)) {
+            return "unknown";
+        }
+        if (this.loaded.has(name)) {
+            return "already-loaded";
+        }
+        this.loaded.add(name);
+        this.loadedOrder.push(name);
+        return "loaded";
     }
 
     async execute(
@@ -191,10 +168,6 @@ export class McpTool implements Tool {
         context: ToolExecutionContext
     ): Promise<ToolExecutionResult> {
         switch (call.name) {
-            case TOOL_SEARCH_TOOL:
-                return this.search(call);
-            case LOAD_TOOL:
-                return this.load(call);
             case LIST_MCP_RESOURCES_TOOL:
                 return this.listResources(call, context);
             case LIST_MCP_RESOURCE_TEMPLATES_TOOL:
@@ -204,66 +177,6 @@ export class McpTool implements Tool {
             default:
                 return this.callLoadedTool(call, context);
         }
-    }
-
-    private search(call: LlmToolCallBlock): ToolExecutionResult {
-        const parsed = toolSearchArguments.safeParse(call.arguments);
-        if (!parsed.success) {
-            return toolResult(call, invalidArguments(call.name, parsed.error), true);
-        }
-        const mode: McpToolSearchMode = parsed.data.mode ?? "fuzzy";
-        const limit = parsed.data.limit ?? TOOL_SEARCH_RESULT_LIMIT;
-        if (mode === "fuzzy") {
-            return toolResult(call, JSON.stringify({
-                mode,
-                query: parsed.data.query,
-                tools: fuzzyToolMatches(this.host.tools, parsed.data.query, limit)
-            }, null, 2));
-        }
-        const matches = this.host.findToolsByExactName(parsed.data.query)
-            .slice(0, limit)
-            .map(exactToolMatch);
-        return toolResult(call, JSON.stringify({
-            mode,
-            query: parsed.data.query,
-            tools: matches,
-            ...(matches.length === 0 ? { message: "No MCP tool has that exact name." } : {})
-        }, null, 2));
-    }
-
-    private load(call: LlmToolCallBlock): ToolExecutionResult {
-        const parsed = loadToolArguments.safeParse(call.arguments);
-        if (!parsed.success) {
-            return toolResult(call, invalidArguments(call.name, parsed.error), true);
-        }
-        const matches = this.host.findToolsByExactName(parsed.data.name);
-        if (matches.length === 0) {
-            return toolResult(
-                call,
-                `Unknown MCP tool: ${parsed.data.name}`,
-                true
-            );
-        }
-        if (matches.length > 1) {
-            return toolResult(
-                call,
-                [
-                    `MCP tool name is ambiguous: ${parsed.data.name}`,
-                    "Use one of these exact names:",
-                    ...matches.map((tool) => `- ${tool.exposedName}`)
-                ].join("\n"),
-                true
-            );
-        }
-        const tool = matches[0]!;
-        const alreadyLoaded = this.loaded.has(tool.exposedName);
-        this.loaded.add(tool.exposedName);
-        return toolResult(
-            call,
-            alreadyLoaded
-                ? `MCP tool is already loaded: ${tool.exposedName}`
-                : `Loaded MCP tool ${tool.exposedName} from server "${tool.server}". It is available on the next model call.`
-        );
     }
 
     private async listResources(

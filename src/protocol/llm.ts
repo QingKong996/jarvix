@@ -69,6 +69,10 @@ export type LlmToolDefinition = {
     parameters: Record<string, unknown>;
 };
 
+export type LlmToolReference = {
+    name: string;
+};
+
 export type LlmToolCallBlock = {
     type: "toolCall";
     id: string;
@@ -132,6 +136,10 @@ export type LlmSystemMessage = {
     content: string;
     timestamp: number;
     notice?: LlmSystemNotice;
+    /** Tool definitions that become available after this message. */
+    toolsAdded?: LlmToolDefinition[];
+    /** Tools that stop being available after this message. */
+    toolsRemoved?: LlmToolReference[];
     /** Internal marker for injected system context. */
     context?: "environment" | "goal" | "agent-instructions" | "skills" | "skill";
     /** Fingerprint used to detect environment changes without rewriting the snapshot. */

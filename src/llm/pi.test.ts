@@ -193,6 +193,44 @@ test("passes tool definitions and tool results to the provider context", async (
     ]);
 });
 
+test("passes incremental tool declarations through system messages", async () => {
+    const { faux, adapter, model } = createFixture();
+    let context: Context | undefined;
+    faux.setResponses([
+        (next) => {
+            context = next;
+            return fauxAssistantMessage("done");
+        }
+    ]);
+
+    for await (const _event of adapter.stream({
+        model,
+        messages: [userMessage("load it"), {
+            role: "system",
+            content: "",
+            timestamp: 2,
+            toolsAdded: [{
+                name: "external_lookup",
+                description: "Look up an external value",
+                parameters: { type: "object", properties: {} }
+            }],
+            toolsRemoved: [{ name: "old_lookup" }]
+        }]
+    })) {
+        // Drain the stream; the provider context is captured above.
+    }
+
+    expect(context?.messages[1]).toMatchObject({
+        role: "system",
+        toolsAdded: [{
+            name: "external_lookup",
+            description: "Look up an external value",
+            parameters: { type: "object", properties: {} }
+        }],
+        toolsRemoved: [{ name: "old_lookup" }]
+    });
+});
+
 test("passes tool result images to pi-ai as image content", async () => {
     const { faux, adapter, model } = createFixture();
     let context: Context | undefined;
