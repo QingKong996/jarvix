@@ -437,7 +437,8 @@ export function registerIpc(dependencies: IpcDependencies): void {
         const id = requireSessionId(sessionId);
         return {
             ...jarvix.getProviderContext(id),
-            usageHistory: usage.contextHistory(id)
+            usageHistory: usage.contextHistory(id),
+            cacheHistory: usage.cacheHistory(id)
         };
     });
 

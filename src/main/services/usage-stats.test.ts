@@ -186,6 +186,88 @@ test("returns one persisted context sample per main step", () => {
     }
 });
 
+test("returns persisted cache usage for each main step", () => {
+    const { directory, databasePath } = temporaryDatabase();
+    const sessionId = "session-cache";
+    const observer = new SqliteAgentObserver({
+        databasePath,
+        appVersion: "test",
+        now: () => 10_000
+    });
+    try {
+        observer.runStarted({
+            runId: "run-cache",
+            sessionId,
+            runType: "prompt",
+            startedAtMs: 1_000
+        });
+        observer.turnStarted({
+            turnId: "turn-cache-1",
+            sessionId,
+            runId: "run-cache",
+            turnKind: "main",
+            turnIndex: 0,
+            startedAtMs: 1_000,
+            provider: "provider",
+            model: "model"
+        });
+        observer.turnFinished("turn-cache-1", {
+            endedAtMs: 2_000,
+            durationMs: 1_000,
+            outcome: "completed",
+            inputTokens: 1_000,
+            cacheReadTokens: 4_000,
+            cacheWriteTokens: 500
+        });
+        observer.turnStarted({
+            turnId: "turn-cache-2",
+            sessionId,
+            runId: "run-cache",
+            turnKind: "main",
+            turnIndex: 1,
+            startedAtMs: 3_000,
+            provider: "provider",
+            model: "model"
+        });
+        observer.turnFinished("turn-cache-2", {
+            endedAtMs: 4_000,
+            durationMs: 1_000,
+            outcome: "completed",
+            inputTokens: 2_000,
+            cacheReadTokens: 6_000,
+            cacheWriteTokens: 0
+        });
+    } finally {
+        observer.close();
+    }
+
+    try {
+        const history = new UsageStatsService({
+            databasePath,
+            getConfig: () => ({})
+        }).cacheHistory(sessionId);
+
+        expect(history).toEqual([
+            {
+                step: 1,
+                atMs: 1_000,
+                inputTokens: 1_000,
+                cacheReadTokens: 4_000,
+                cacheWriteTokens: 500
+            },
+            {
+                step: 2,
+                atMs: 3_000,
+                inputTokens: 2_000,
+                cacheReadTokens: 6_000,
+                cacheWriteTokens: 0
+            }
+        ]);
+    } finally {
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
 function addTurn(
     observer: SqliteAgentObserver,
     runId: string,

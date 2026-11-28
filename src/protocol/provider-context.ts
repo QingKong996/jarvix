@@ -7,6 +7,14 @@ export type JarvixContextUsagePoint = {
     current?: true;
 };
 
+export type JarvixCacheUsagePoint = {
+    step: number;
+    atMs: number;
+    inputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+};
+
 export type JarvixContextBreakdown = {
     systemPrompt: number;
     tools: number;
@@ -21,4 +29,5 @@ export type JarvixProviderContext = {
     messages: readonly LlmMessage[];
     breakdown?: JarvixContextBreakdown;
     usageHistory?: readonly JarvixContextUsagePoint[];
+    cacheHistory?: readonly JarvixCacheUsagePoint[];
 };

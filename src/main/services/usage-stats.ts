@@ -2,7 +2,10 @@ import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { type JarvixLogger, noopLogger } from "../../core/logger.ts";
 import type { JarvixConfig } from "../../protocol/config.ts";
-import type { JarvixContextUsagePoint } from "../../protocol/provider-context.ts";
+import type {
+    JarvixCacheUsagePoint,
+    JarvixContextUsagePoint
+} from "../../protocol/provider-context.ts";
 import type { ModelCost } from "../../protocol/providers.ts";
 import type {
     UsageAuditQuery,
@@ -52,6 +55,14 @@ type ContextUsageRow = {
     context_tokens_after: number | null;
 };
 
+type CacheUsageRow = {
+    step_index: number;
+    started_at_ms: number;
+    input_tokens: number | null;
+    cache_read_tokens: number | null;
+    cache_write_tokens: number | null;
+};
+
 type UsageWindow = {
     fromMs: number;
     toMs: number;
@@ -97,6 +108,30 @@ const CONTEXT_USAGE_ROWS_SQL = `
                 OR context_tokens_after IS NOT NULL
             )
     )
+    ORDER BY step_index DESC
+    LIMIT ?
+`;
+
+const CACHE_USAGE_ROWS_SQL = `
+    SELECT
+        step_index, started_at_ms,
+        input_tokens, cache_read_tokens, cache_write_tokens
+    FROM (
+        SELECT
+            ROW_NUMBER() OVER (
+                ORDER BY started_at_ms, turn_id
+            ) AS step_index,
+            started_at_ms,
+            input_tokens,
+            cache_read_tokens,
+            cache_write_tokens
+        FROM turns
+        WHERE session_id = ?
+            AND turn_kind = 'main'
+            AND outcome != 'running'
+    )
+    WHERE cache_read_tokens IS NOT NULL
+        OR cache_write_tokens IS NOT NULL
     ORDER BY step_index DESC
     LIMIT ?
 `;
@@ -168,6 +203,34 @@ export class UsageStatsService {
             return rows.reverse().flatMap(contextUsagePoint);
         } catch (error) {
             this.logger.warn("Context usage history query failed", {
+                sessionId,
+                reason: error instanceof Error ? error.message : String(error)
+            });
+            return [];
+        } finally {
+            database?.close();
+        }
+    }
+
+    cacheHistory(
+        sessionId: string,
+        limit = 60
+    ): JarvixCacheUsagePoint[] {
+        if (!existsSync(this.databasePath)) {
+            return [];
+        }
+
+        let database: DatabaseSync | undefined;
+        try {
+            database = new DatabaseSync(this.databasePath, { readOnly: true });
+            database.exec("PRAGMA busy_timeout = 1000");
+            const rows = database.prepare(CACHE_USAGE_ROWS_SQL).all(
+                sessionId,
+                Math.max(1, Math.min(200, Math.round(limit)))
+            ) as unknown as CacheUsageRow[];
+            return rows.reverse().flatMap(cacheUsagePoint);
+        } catch (error) {
+            this.logger.warn("Cache usage history query failed", {
                 sessionId,
                 reason: error instanceof Error ? error.message : String(error)
             });
@@ -251,6 +314,24 @@ function contextUsagePoint(row: ContextUsageRow): JarvixContextUsagePoint[] {
         step,
         atMs: numberValue(row.started_at_ms),
         estimatedTokens
+    }];
+}
+
+function cacheUsagePoint(row: CacheUsageRow): JarvixCacheUsagePoint[] {
+    const step = Number.isSafeInteger(row.step_index) && row.step_index > 0
+        ? row.step_index
+        : null;
+    const cacheReadTokens = nullableTokenCount(row.cache_read_tokens);
+    const cacheWriteTokens = nullableTokenCount(row.cache_write_tokens);
+    if (step === null || (cacheReadTokens === null && cacheWriteTokens === null)) {
+        return [];
+    }
+    return [{
+        step,
+        atMs: numberValue(row.started_at_ms),
+        inputTokens: nullableTokenCount(row.input_tokens) ?? 0,
+        cacheReadTokens: cacheReadTokens ?? 0,
+        cacheWriteTokens: cacheWriteTokens ?? 0
     }];
 }
 
