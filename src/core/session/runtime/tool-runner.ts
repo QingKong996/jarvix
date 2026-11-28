@@ -229,10 +229,20 @@ export class ToolCallRunner {
             }
         }
 
+        const endedAtMs = Date.now();
+        const durationMs = elapsedMs(startedAt);
+        const executionMs = Math.max(
+            0,
+            Math.round((durationMs - permissionWaitMs) * 10) / 10
+        );
         let completionError: unknown;
         let completionFailed = false;
         try {
-            this.complete(toolCall, result, runtime);
+            this.complete(toolCall, result, runtime, {
+                startedAt: startedAtMs,
+                endedAt: endedAtMs,
+                durationMs
+            });
         } catch (error) {
             completionFailed = true;
             completionError = error;
@@ -243,11 +253,6 @@ export class ToolCallRunner {
                 toolName: toolCall.name
             });
         }
-        const durationMs = elapsedMs(startedAt);
-        const executionMs = Math.max(
-            0,
-            Math.round((durationMs - permissionWaitMs) * 10) / 10
-        );
         const outputText = toolResultContentText(result.content);
         const imageCount = result.images?.length ?? 0;
         if (telemetry) {
@@ -257,7 +262,7 @@ export class ToolCallRunner {
                     ? "error"
                     : "success";
             this.observer.toolFinished(toolSpanId!, {
-                endedAtMs: Date.now(),
+                endedAtMs,
                 durationMs,
                 outcome,
                 permissionRequests,
@@ -329,10 +334,15 @@ export class ToolCallRunner {
             toolName: toolCall.name
         });
         const result = failedToolResult(toolCall, "Tool execution stopped.");
+        const endedAtMs = Date.now();
         let completionError: unknown;
         let completionFailed = false;
         try {
-            this.complete(toolCall, result, runtime);
+            this.complete(toolCall, result, runtime, {
+                startedAt: startedAtMs,
+                endedAt: endedAtMs,
+                durationMs: 0
+            });
         } catch (error) {
             completionFailed = true;
             completionError = error;
@@ -345,7 +355,7 @@ export class ToolCallRunner {
         }
         if (telemetry) {
             this.observer.toolFinished(toolSpanIdFor(telemetry), {
-                endedAtMs: Date.now(),
+                endedAtMs,
                 durationMs: 0,
                 outcome: "cancelled",
                 permissionRequests: 0,
@@ -401,7 +411,8 @@ export class ToolCallRunner {
     private complete(
         toolCall: LlmToolCallBlock,
         result: ToolExecutionResult,
-        runtime: SessionRuntime
+        runtime: SessionRuntime,
+        timing: LlmToolResultMessage["timing"]
     ): void {
         runtime.emit({
             type: "tool.end",
@@ -419,7 +430,8 @@ export class ToolCallRunner {
             content: toolResultContent(result.content, result.images),
             details: toToolResultDetails(result.data),
             isError: result.isError,
-            timestamp: Date.now()
+            timestamp: timing?.endedAt ?? Date.now(),
+            ...(timing ? { timing } : {})
         };
         this.append(message);
     }

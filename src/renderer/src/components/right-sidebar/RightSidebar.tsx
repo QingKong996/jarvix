@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
 import type { JarvixConfig } from "../../../../protocol/config.ts";
+import type { JarvixContextUsage } from "../../../../protocol/context-usage.ts";
 import type { JarvixSessionSummary } from "../../../../protocol/session.ts";
 import { ContextInspector } from "../context-inspector/ContextInspector.tsx";
 import { BackgroundTasksPanel } from "./BackgroundTasksPanel.tsx";
@@ -21,6 +22,7 @@ type RightSidebarProps = {
     tabs: RightSidebarTabs;
     sessionId: string | null;
     providerContextRevision: number;
+    contextUsage: JarvixContextUsage | null;
     config: JarvixConfig | null;
     sessions: JarvixSessionSummary[];
     onConfigChange: (config: JarvixConfig) => Promise<void>;
@@ -32,6 +34,7 @@ export function RightSidebar({
     tabs,
     sessionId,
     providerContextRevision,
+    contextUsage,
     config,
     sessions,
     onConfigChange,
@@ -202,6 +205,7 @@ export function RightSidebar({
                         <ContextInspector
                             sessionId={sessionId}
                             providerContextRevision={providerContextRevision}
+                            contextUsage={contextUsage}
                         />
                     ) : activeTab.panel === "background" ? (
                         <BackgroundTasksPanel sessionId={sessionId} />

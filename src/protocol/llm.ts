@@ -85,6 +85,32 @@ export type LlmToolCallBlock = {
 export type LlmContentBlock = LlmTextBlock | LlmThinkingBlock | LlmToolCallBlock;
 export type LlmToolResultContent = LlmTextBlock | LlmImageContent;
 
+export type LlmTimingSpanKind =
+    | "thinking"
+    | "output"
+    | "toolArgs"
+    | "waiting";
+
+export type LlmTimingSpan = {
+    kind: LlmTimingSpanKind;
+    startedAt: number;
+    durationMs: number;
+};
+
+export type LlmAssistantTiming = {
+    startedAt: number;
+    endedAt: number;
+    durationMs: number;
+    firstTokenAt?: number;
+    spans: LlmTimingSpan[];
+};
+
+export type LlmToolTiming = {
+    startedAt: number;
+    endedAt: number;
+    durationMs: number;
+};
+
 export type LlmUserMessage = {
     role: "user";
     content: string;
@@ -109,6 +135,7 @@ export type LlmAssistantMessage = {
     responseId?: string;
     responseModel?: string;
     errorMessage?: string;
+    timing?: LlmAssistantTiming;
 };
 
 /** A tool result is sent back to the model as its own message. */
@@ -121,6 +148,7 @@ export type LlmToolResultMessage = {
     details?: LlmJsonObject;
     isError: boolean;
     timestamp: number;
+    timing?: LlmToolTiming;
 };
 
 export type LlmSystemNotice = {

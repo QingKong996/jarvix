@@ -123,6 +123,69 @@ test("builds local period windows", () => {
     });
 });
 
+test("returns one persisted context sample per main step", () => {
+    const { directory, databasePath } = temporaryDatabase();
+    const observer = new SqliteAgentObserver({
+        databasePath,
+        appVersion: "test",
+        now: () => 10_000
+    });
+    try {
+        observer.runStarted({
+            runId: "run-context",
+            sessionId: "session-context",
+            runType: "prompt",
+            startedAtMs: 1_000
+        });
+        observer.turnStarted({
+            turnId: "turn-context-1",
+            sessionId: "session-context",
+            runId: "run-context",
+            turnKind: "main",
+            turnIndex: 0,
+            startedAtMs: 1_000,
+            contextTokensBefore: 1_200
+        });
+        observer.turnFinished("turn-context-1", {
+            endedAtMs: 2_000,
+            durationMs: 1_000,
+            outcome: "completed",
+            contextTokensAfter: 1_800
+        });
+        observer.turnStarted({
+            turnId: "turn-context-2",
+            sessionId: "session-context",
+            runId: "run-context",
+            turnKind: "main",
+            turnIndex: 1,
+            startedAtMs: 3_000,
+            contextTokensBefore: 2_400
+        });
+        observer.turnFinished("turn-context-2", {
+            endedAtMs: 4_000,
+            durationMs: 1_000,
+            outcome: "completed",
+            contextTokensAfter: 3_000
+        });
+    } finally {
+        observer.close();
+    }
+
+    try {
+        const history = new UsageStatsService({
+            databasePath,
+            getConfig: () => ({})
+        }).contextHistory("session-context");
+
+        expect(history).toEqual([
+            { step: 1, atMs: 1_000, estimatedTokens: 1_200 },
+            { step: 2, atMs: 3_000, estimatedTokens: 2_400 }
+        ]);
+    } finally {
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
 function addTurn(
     observer: SqliteAgentObserver,
     runId: string,

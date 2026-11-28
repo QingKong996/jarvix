@@ -1,18 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { JarvixContextUsage } from "../../../../protocol/context-usage.ts";
 import type { JarvixProviderContext } from "../../../../protocol/provider-context.ts";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ContextMessage } from "./ContextMessage.tsx";
 import { contextMessagesFor } from "./context-messages.ts";
+import { PerspectiveContextPanel } from "./PerspectiveContextPanel.tsx";
+import { PerspectiveTimingPanel } from "./PerspectiveTimingPanel.tsx";
+import { perspectiveTimingFor } from "./perspective-timing.ts";
 
 type ContextInspectorProps = {
     sessionId: string | null;
     providerContextRevision: number;
+    contextUsage: JarvixContextUsage | null;
 };
 
 export function ContextInspector({
     sessionId,
-    providerContextRevision
+    providerContextRevision,
+    contextUsage
 }: ContextInspectorProps) {
     const { t } = useTranslation();
     const [context, setContext] = useState<JarvixProviderContext | null>(null);
@@ -54,6 +60,10 @@ export function ContextInspector({
         () => context ? contextMessagesFor(context) : [],
         [context]
     );
+    const timing = useMemo(
+        () => context ? perspectiveTimingFor(context.messages) : null,
+        [context]
+    );
 
     if (!context) {
         const title = failed
@@ -89,6 +99,12 @@ export function ContextInspector({
             data-testid="context-inspector"
             className="flex h-full min-h-0 flex-col bg-background text-foreground"
         >
+            <PerspectiveContextPanel
+                usage={contextUsage}
+                history={context.usageHistory ?? []}
+                breakdown={context.breakdown}
+            />
+            {timing ? <PerspectiveTimingPanel timing={timing} /> : null}
             <ScrollArea
                 className="min-h-0 flex-1"
                 viewportClassName="[&>div]:!block"

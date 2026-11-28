@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import type { LlmMessage } from "../../../protocol/llm.ts";
 import {
+    estimateContextBreakdown,
     estimateContextUsage,
     estimateMessageTokens
 } from "./context-usage.ts";
@@ -286,4 +287,80 @@ test("does not estimate persisted tool details as model context", () => {
     estimateContextUsage({ contextWindow: 1_000, messages: [message] });
 
     expect(detailReads).toBe(0);
+});
+
+test("breaks down the prompt into the same total as context usage", () => {
+    const input = {
+        systemPrompt: "System instructions",
+        tools: [{
+            name: "read_file",
+            description: "Read a file",
+            parameters: {
+                type: "object",
+                properties: { path: { type: "string" } }
+            }
+        }],
+        messages: [{
+            role: "system",
+            content: "<environment_context>fixture</environment_context>",
+            context: "environment",
+            timestamp: 1
+        }, {
+            role: "system",
+            content: "Available skills",
+            context: "skills",
+            timestamp: 2
+        }, {
+            role: "user",
+            content: "Inspect the repository.",
+            timestamp: 3
+        }, {
+            role: "assistant",
+            content: [{
+                type: "text",
+                text: "I will inspect it."
+            }, {
+                type: "toolCall",
+                id: "call-1",
+                name: "read_file",
+                arguments: { path: "README.md" }
+            }],
+            provider: "test",
+            model: "test",
+            api: "test",
+            usage: {
+                inputTokens: 0,
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+                totalTokens: 0,
+                cost: 0
+            },
+            stopReason: "toolUse",
+            timestamp: 4
+        }, {
+            role: "toolResult",
+            toolCallId: "call-1",
+            toolName: "read_file",
+            content: "file contents",
+            isError: false,
+            timestamp: 5
+        }] as LlmMessage[]
+    };
+
+    const usage = estimateContextUsage({
+        contextWindow: 10_000,
+        ...input
+    });
+    const breakdown = estimateContextBreakdown(input);
+
+    expect(breakdown.systemPrompt).toBeGreaterThan(0);
+    expect(breakdown.tools).toBeGreaterThan(0);
+    expect(breakdown.injected).toBeGreaterThan(0);
+    expect(breakdown.skills).toBeGreaterThan(0);
+    expect(breakdown.user).toBeGreaterThan(0);
+    expect(breakdown.assistant).toBeGreaterThan(0);
+    expect(breakdown.tool).toBeGreaterThan(0);
+    expect(Object.values(breakdown).reduce((sum, tokens) => sum + tokens, 0))
+        .toBe(usage.estimatedTokens);
 });
