@@ -164,7 +164,7 @@ test("stops active tasks and returns their end events", async () => {
     try {
         const started = await manager.execute(call("exec_command", {
             command,
-            cwd: directory,
+            cwd: tmpdir(),
             timeoutMs: 50
         }), { onOutput: () => undefined });
         const taskId = started.task?.id;
