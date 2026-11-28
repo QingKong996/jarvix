@@ -153,6 +153,7 @@ function configSchema(defaults: ConfigDefaults) {
             reasoning: z.enum(REASONING_LEVELS).optional(),
             language: z.enum(SUPPORTED_LANGUAGES).catch(defaults.language),
             theme: z.enum(SUPPORTED_THEMES).catch(defaults.theme),
+            conciseTranscript: z.boolean().catch(false).optional(),
             contextCompactionThreshold: z.number().int().positive().optional(),
             skills: z.record(z.string().min(1), z.boolean()).optional(),
             mcpServers: z.record(
@@ -173,6 +174,7 @@ function configSchema(defaults: ConfigDefaults) {
             providers,
             selectedModel,
             reasoning,
+            conciseTranscript,
             contextCompactionThreshold,
             skills,
             mcpServers
@@ -186,6 +188,9 @@ function configSchema(defaults: ConfigDefaults) {
                 ...(providers ? { providers } : {}),
                 ...(nextSelection ? { selectedModel: nextSelection } : {}),
                 ...(nextReasoning ? { reasoning: nextReasoning } : {}),
+                ...(conciseTranscript !== undefined
+                    ? { conciseTranscript }
+                    : {}),
                 ...(contextCompactionThreshold !== undefined
                     ? { contextCompactionThreshold }
                     : {}),

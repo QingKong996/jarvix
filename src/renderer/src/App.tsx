@@ -316,7 +316,11 @@ export function App() {
                                         </motion.div>
                                     ) : null}
                                 </AnimatePresence>
-                                <Transcript key={activeSessionId ?? "new"} sessionId={activeSessionId} />
+                                <Transcript
+                                    key={activeSessionId ?? "new"}
+                                    sessionId={activeSessionId}
+                                    concise={config?.conciseTranscript === true}
+                                />
                                 <Composer
                                     ref={composerRef}
                                     disabled={!bridge || !ready || (busy && !running)}

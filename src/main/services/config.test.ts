@@ -177,6 +177,34 @@ test("round-trips the context compaction threshold and rejects invalid values", 
     });
 });
 
+test("round-trips the concise transcript preference", () => {
+    expect(parseConfig({
+        conciseTranscript: true
+    }, defaults)).toMatchObject({
+        language: "zh",
+        theme: "dark",
+        conciseTranscript: true
+    });
+    expect(parseConfig({}, defaults)).not.toHaveProperty("conciseTranscript");
+    expect(parseConfig({
+        conciseTranscript: "yes"
+    }, defaults)).toMatchObject({
+        conciseTranscript: false
+    });
+
+    const paths = configPaths(join(base, "concise-transcript"));
+    saveConfig({
+        language: "en",
+        theme: "light",
+        conciseTranscript: true
+    }, paths, defaults);
+    expect(loadConfig(paths, defaults)).toEqual({
+        language: "en",
+        theme: "light",
+        conciseTranscript: true
+    });
+});
+
 test("round-trips skill enablement overrides", () => {
     const skills = {
         "C:\\skills\\one\\SKILL.md": false,

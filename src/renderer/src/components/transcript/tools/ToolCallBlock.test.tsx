@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 function renderTool(
-    data: Extract<ToolCallViewData, { kind: "generic" }>,
+    data: ToolCallViewData,
     isError = false,
     endReason: ToolCallEndReason | null = null,
     toolName = "write_file"
@@ -95,4 +95,18 @@ test.each([
     }, false, null, toolName);
 
     expect(html).toContain(label);
+});
+
+test("keeps completed image results expanded", () => {
+    const html = renderTool({
+        kind: "image.view_image",
+        path: "shot.png",
+        mimeType: "image/png",
+        imageUrl: "data:image/png;base64,AAAA",
+        output: "",
+        status: "completed"
+    });
+
+    expect(html).toContain("shot.png");
+    expect(html).toContain("data:image/png;base64,AAAA");
 });

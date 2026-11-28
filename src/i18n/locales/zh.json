@@ -156,7 +156,12 @@
         }
     },
     "transcript": {
-        "generating": "生成中…"
+        "generating": "生成中…",
+        "process": {
+            "label": "执行详情",
+            "toolCalls_other": "{{count}} 次工具调用",
+            "thinking_other": "{{count}} 次思考"
+        }
     },
     "system": {
         "message": "系统消息"
@@ -449,6 +454,12 @@
         "general": {
             "language": "语言",
             "theme": "主题",
+            "transcriptFlow": "流程展示",
+            "transcriptFlowDescription": "简洁模式会自动折叠连续的思考、工具调用和结果，仍可手动展开查看。",
+            "transcriptFlows": {
+                "complete": "完整",
+                "concise": "简洁"
+            },
             "compactionThreshold": "上下文压缩阈值",
             "compactionThresholdDescription": "按剩余 token 数触发本地压缩。留空时使用上下文窗口的 10% 与 64K 中的较小值。",
             "compactionThresholdPlaceholder": "自动",

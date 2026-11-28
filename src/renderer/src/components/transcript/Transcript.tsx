@@ -1,36 +1,22 @@
 import {
     memo,
     useLayoutEffect,
+    useMemo,
     useRef,
-    type RefObject
+    useState
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
 import { useCommitted, useInjected, useLive } from "./state/transcript-hooks.ts";
 import type { CommittedTurn, LiveTurn } from "./state/types.ts";
 import { CHAT_COLUMN, CONTENT_GUTTER } from "../../layout.ts";
 import { Markdown } from "./Markdown.tsx";
-import { ThinkingBlock } from "./ThinkingBlock.tsx";
-import { ToolCallBlock } from "./tools/ToolCallBlock.tsx";
-import { quickTransition } from "../../motion.ts";
+import { ProcessGroup, type ProcessGroupEntry } from "./ProcessGroup.tsx";
 
-const TRANSCRIPT_GAP_PX = 24;
+const TRANSCRIPT_GAP_PX = 12;
 const VIRTUALIZATION_ENABLED = typeof window !== "undefined"
     && typeof window.ResizeObserver === "function";
-
-type TranscriptEntry =
-    | {
-        kind: "committed";
-        turn: CommittedTurn;
-    } | {
-        kind: "live";
-        turn: LiveTurn;
-    } | {
-        kind: "injected";
-        turn: CommittedTurn;
-    };
 
 type TranscriptData = {
     committed: readonly CommittedTurn[];
@@ -38,176 +24,269 @@ type TranscriptData = {
     injected: readonly CommittedTurn[];
 };
 
-const CommittedTurnView = memo(function CommittedTurnView({ turn }: { turn: CommittedTurn }) {
+type TranscriptItem =
+    | {
+        kind: "process";
+        key: string;
+        entries: ProcessGroupEntry[];
+    } | {
+        kind: "user";
+        key: string;
+        text: string;
+    } | {
+        kind: "text";
+        key: string;
+        text: string;
+        streaming: boolean;
+    } | {
+        kind: "error";
+        key: string;
+        error: string;
+    } | {
+        kind: "generating";
+        key: string;
+    };
+
+function buildTranscriptItems({
+    committed,
+    live,
+    injected
+}: TranscriptData): TranscriptItem[] {
+    const items: TranscriptItem[] = [];
+    let processEntries: ProcessGroupEntry[] = [];
+
+    const flushProcess = (): void => {
+        const first = processEntries[0];
+        if (!first) {
+            return;
+        }
+        items.push({
+            kind: "process",
+            key: `process:${first.key}`,
+            entries: processEntries
+        });
+        processEntries = [];
+    };
+
+    const pushUser = (turn: CommittedTurn): void => {
+        flushProcess();
+        items.push({
+            kind: "user",
+            key: `user:${turn.id}`,
+            text: turn.text
+        });
+    };
+
+    for (const turn of committed) {
+        if (turn.role === "user") {
+            pushUser(turn);
+            continue;
+        }
+        if (turn.role === "system") {
+            processEntries.push({
+                kind: "system",
+                key: `system:${turn.id}`,
+                text: turn.text
+            });
+            continue;
+        }
+
+        for (const [index, block] of turn.blocks.entries()) {
+            if (block.type === "thinking") {
+                processEntries.push({
+                    kind: "thinking",
+                    key: `${turn.id}:block:${index}`,
+                    text: block.thinking
+                });
+                continue;
+            }
+            if (block.type === "tool") {
+                processEntries.push({
+                    kind: "tool",
+                    key: `tool:${block.toolCallId}`,
+                    toolName: block.toolName,
+                    data: block.data,
+                    isError: block.isError,
+                    endReason: block.endReason
+                });
+                continue;
+            }
+            if (block.text.length === 0) {
+                continue;
+            }
+            flushProcess();
+            items.push({
+                kind: "text",
+                key: `text:${turn.id}:${index}`,
+                text: block.text,
+                streaming: false
+            });
+        }
+
+        if (turn.error) {
+            flushProcess();
+            items.push({
+                kind: "error",
+                key: `error:${turn.id}`,
+                error: turn.error
+            });
+        }
+    }
+
+    if (live) {
+        const lastIndex = live.blocks.at(-1)?.index;
+        const hasText = live.blocks.some((block) => (
+            block.kind === "text" && block.text.length > 0
+        ));
+
+        for (const block of live.blocks) {
+            if (block.kind === "thinking") {
+                processEntries.push({
+                    kind: "thinking",
+                    key: `${live.id}:block:${block.index}`,
+                    text: block.text,
+                    streaming: block.index === lastIndex
+                });
+                continue;
+            }
+            if (block.text.length === 0) {
+                continue;
+            }
+            flushProcess();
+            items.push({
+                kind: "text",
+                key: `text:${live.id}:${block.index}`,
+                text: block.text,
+                streaming: block.index === lastIndex
+            });
+        }
+
+        if (!hasText) {
+            flushProcess();
+            items.push({
+                kind: "generating",
+                key: `generating:${live.id}`
+            });
+        }
+    }
+
+    for (const turn of injected) {
+        pushUser(turn);
+    }
+    flushProcess();
+    return items;
+}
+
+function TranscriptItemView({
+    item,
+    concise
+}: {
+    item: TranscriptItem;
+    concise: boolean;
+}) {
     const { t } = useTranslation();
 
-    if (turn.role === "user") {
-        return (
-            <p className="max-w-[82%] self-end rounded-2xl bg-secondary px-4 py-2.5 text-sm leading-relaxed break-words whitespace-pre-wrap text-secondary-foreground">
-                {turn.text}
-            </p>
-        );
-    }
-    if (turn.role === "system") {
-        return <ThinkingBlock text={turn.text} label={t("system.message")} />;
-    }
-
-    return (
-        <div className="flex min-w-0 flex-col gap-3">
-            {turn.blocks.map((block, index) => {
-                if (block.type === "thinking") {
-                    return <ThinkingBlock key={index} text={block.thinking} />;
-                }
-                if (block.type === "tool") {
-                    return (
-                        <ToolCallBlock
-                            key={block.toolCallId}
-                            toolName={block.toolName}
-                            data={block.data}
-                            isError={block.isError}
-                            endReason={block.endReason}
-                        />
-                    );
-                }
-                return <Markdown key={index} text={block.text} />;
-            })}
-            {turn.error ? (
+    switch (item.kind) {
+        case "process":
+            return (
+                <ProcessGroup
+                    entries={item.entries}
+                    defaultOpen={!concise}
+                />
+            );
+        case "user":
+            return (
+                <div className="flex justify-end">
+                    <p className="max-w-[82%] self-end rounded-2xl bg-secondary px-4 py-2.5 text-sm leading-relaxed break-words whitespace-pre-wrap text-secondary-foreground">
+                        {item.text}
+                    </p>
+                </div>
+            );
+        case "text":
+            return (
+                <Markdown
+                    text={item.text}
+                    streaming={item.streaming}
+                />
+            );
+        case "error":
+            return (
                 <p
                     role="alert"
                     className="rounded-xl border border-destructive/25 bg-destructive/5 px-3.5 py-2.5 text-[13px] leading-relaxed text-destructive"
                 >
-                    {turn.error}
+                    {item.error}
                 </p>
-            ) : null}
-        </div>
-    );
-});
-
-function LiveTurnView({ turn }: { turn: LiveTurn }) {
-    const { t } = useTranslation();
-    const hasText = turn.blocks.some((block) => block.kind === "text" && block.text.length > 0);
-    const lastIndex = turn.blocks.at(-1)?.index;
-
-    return (
-        <div className="flex min-w-0 flex-col gap-3">
-            {turn.blocks.map((block) => block.kind === "thinking" ? (
-                <ThinkingBlock key={block.index} text={block.text} streaming={block.index === lastIndex} />
-            ) : (
-                <Markdown key={block.index} text={block.text} streaming={block.index === lastIndex} />
-            ))}
-            {hasText ? null : <p className="animate-pulse text-[13px] text-muted-foreground">{t("transcript.generating")}</p>}
-        </div>
-    );
-}
-
-const TranscriptEntryView = memo(
-    function TranscriptEntryView({ entry }: { entry: TranscriptEntry }) {
-        if (entry.kind === "live") {
-            return (
-                <motion.div
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={quickTransition}
-                >
-                    <LiveTurnView turn={entry.turn} />
-                </motion.div>
             );
-        }
-        const turn = entry.turn;
-        return (
-            <div className={turn.role === "user" ? "flex justify-end" : "min-w-0"}>
-                <CommittedTurnView turn={turn} />
-            </div>
-        );
-    },
-    (previous, next) => (
-        previous.entry.kind === next.entry.kind
-        && previous.entry.turn === next.entry.turn
-    )
-);
-
-function transcriptEntryKey(entry: TranscriptEntry): string {
-    return entry.turn.id;
+        case "generating":
+            return (
+                <p className="animate-pulse text-[13px] text-muted-foreground">
+                    {t("transcript.generating")}
+                </p>
+            );
+    }
 }
 
-function transcriptEntryCount({
-    committed,
-    live,
-    injected
-}: TranscriptData): number {
-    return committed.length + (live ? 1 : 0) + injected.length;
+function estimateTranscriptItemSize(
+    item: TranscriptItem,
+    concise: boolean
+): number {
+    switch (item.kind) {
+        case "process":
+            return concise ? 28 : 160;
+        case "user":
+            return 64;
+        case "text":
+            return 200;
+        case "error":
+            return 72;
+        case "generating":
+            return 24;
+    }
 }
 
-function transcriptEntryAt(data: TranscriptData, index: number): TranscriptEntry {
-    if (index < data.committed.length) {
-        return {
-            kind: "committed",
-            turn: data.committed[index]!
-        };
-    }
-    if (data.live && index === data.committed.length) {
-        return {
-            kind: "live",
-            turn: data.live
-        };
-    }
-    return {
-        kind: "injected",
-        turn: data.injected[index - data.committed.length - (data.live ? 1 : 0)]!
-    };
-}
-
-function estimateTranscriptEntrySize(entry: TranscriptEntry): number {
-    if (entry.kind === "live") {
-        return 240;
-    }
-    if (entry.turn.role === "user") {
-        return 64;
-    }
-    if (entry.turn.role === "system") {
-        return 112;
-    }
-    return 200;
-}
-
-function StaticTranscript({ data }: { data: TranscriptData }) {
-    const count = transcriptEntryCount(data);
+function StaticTranscript({
+    items,
+    concise
+}: {
+    items: readonly TranscriptItem[];
+    concise: boolean;
+}) {
     return (
         <div className={cn("py-8", CONTENT_GUTTER)}>
-            <div className={cn("flex flex-col gap-6", CHAT_COLUMN)}>
-                {Array.from({ length: count }, (_, index) => {
-                    const entry = transcriptEntryAt(data, index);
-                    return (
-                        <TranscriptEntryView
-                            key={transcriptEntryKey(entry)}
-                            entry={entry}
-                        />
-                    );
-                })}
+            <div className={cn("flex flex-col gap-3", CHAT_COLUMN)}>
+                {items.map((item) => (
+                    <TranscriptItemView
+                        key={item.key}
+                        item={item}
+                        concise={concise}
+                    />
+                ))}
             </div>
         </div>
     );
 }
 
 function VirtualizedTranscript({
-    data,
+    items,
     sessionId,
-    scrollRef
+    concise,
+    scrollElement
 }: {
-    data: TranscriptData;
+    items: readonly TranscriptItem[];
     sessionId: string | null;
-    scrollRef: RefObject<HTMLElement | null>;
+    concise: boolean;
+    scrollElement: HTMLElement;
 }) {
-    const count = transcriptEntryCount(data);
+    const count = items.length;
     const virtualizer = useVirtualizer<HTMLElement, HTMLDivElement>({
         count,
-        getScrollElement: () => scrollRef.current,
-        estimateSize: (index) => estimateTranscriptEntrySize(
-            transcriptEntryAt(data, index)
+        getScrollElement: () => scrollElement,
+        estimateSize: (index) => estimateTranscriptItemSize(
+            items[index]!,
+            concise
         ),
-        getItemKey: (index) => transcriptEntryKey(
-            transcriptEntryAt(data, index)
-        ),
+        getItemKey: (index) => items[index]!.key,
         paddingStart: 32,
         paddingEnd: 32,
         gap: TRANSCRIPT_GAP_PX,
@@ -235,7 +314,7 @@ function VirtualizedTranscript({
                 style={{ height: `${virtualizer.getTotalSize()}px` }}
             >
                 {virtualizer.getVirtualItems().map((virtualItem) => {
-                    const entry = transcriptEntryAt(data, virtualItem.index);
+                    const item = items[virtualItem.index]!;
                     return (
                         <div
                             key={virtualItem.key}
@@ -246,7 +325,10 @@ function VirtualizedTranscript({
                                 transform: `translate3d(0, ${virtualItem.start}px, 0)`
                             }}
                         >
-                            <TranscriptEntryView entry={entry} />
+                            <TranscriptItemView
+                                item={item}
+                                concise={concise}
+                            />
                         </div>
                     );
                 })}
@@ -255,29 +337,42 @@ function VirtualizedTranscript({
     );
 }
 
-export function Transcript({ sessionId }: { sessionId: string | null }) {
-    const containerRef = useRef<HTMLElement>(null);
+export const Transcript = memo(function Transcript({
+    sessionId,
+    concise = false
+}: {
+    sessionId: string | null;
+    concise?: boolean;
+}) {
+    const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null);
     const committed = useCommitted();
     const live = useLive();
     const injected = useInjected();
-    const data = { committed, live, injected };
+    const items = useMemo(() => buildTranscriptItems({
+        committed,
+        live,
+        injected
+    }), [committed, live, injected]);
 
     return (
         <section
-            ref={containerRef}
+            ref={setScrollElement}
             data-session-id={sessionId ?? undefined}
             className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto"
             style={{ overflowAnchor: "none" }}
         >
             {VIRTUALIZATION_ENABLED ? (
-                <VirtualizedTranscript
-                    data={data}
-                    sessionId={sessionId}
-                    scrollRef={containerRef}
-                />
+                scrollElement ? (
+                    <VirtualizedTranscript
+                        items={items}
+                        sessionId={sessionId}
+                        concise={concise}
+                        scrollElement={scrollElement}
+                    />
+                ) : null
             ) : (
-                <StaticTranscript data={data} />
+                <StaticTranscript items={items} concise={concise} />
             )}
         </section>
     );
-}
+});

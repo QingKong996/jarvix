@@ -44,6 +44,30 @@ beforeAll(async () => {
         configurable: true,
         value: vi.fn()
     });
+    Object.defineProperty(globalThis, "ResizeObserver", {
+        configurable: true,
+        value: class {
+            observe(): void {}
+            unobserve(): void {}
+            disconnect(): void {}
+        }
+    });
+    Object.defineProperty(Element.prototype, "hasPointerCapture", {
+        configurable: true,
+        value: vi.fn(() => false)
+    });
+    Object.defineProperty(Element.prototype, "setPointerCapture", {
+        configurable: true,
+        value: vi.fn()
+    });
+    Object.defineProperty(Element.prototype, "releasePointerCapture", {
+        configurable: true,
+        value: vi.fn()
+    });
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+        configurable: true,
+        value: vi.fn()
+    });
     window.jarvix = {
         setConfig,
         getModelCatalog,
@@ -154,5 +178,22 @@ test("saves general settings and closes the dialog", async () => {
         }));
         expect(onSaved).toHaveBeenCalledOnce();
         expect(onOpenChange).toHaveBeenCalledWith(false);
+    });
+});
+
+test("saves concise transcript mode from general settings", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+
+    await screen.findByText("尚未添加供应商");
+    await user.click(screen.getByTestId("settings-section-general"));
+    await user.click(screen.getByLabelText("流程展示"));
+    await user.click(await screen.findByRole("option", { name: "简洁" }));
+    submitSettingsForm();
+
+    await waitFor(() => {
+        expect(setConfig).toHaveBeenCalledWith(expect.objectContaining({
+            conciseTranscript: true
+        }));
     });
 });

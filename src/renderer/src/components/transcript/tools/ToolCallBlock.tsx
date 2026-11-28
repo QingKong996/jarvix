@@ -31,7 +31,16 @@ export function ToolCallBlock({ toolName, data, isError, endReason }: ToolCallBl
     const active = endReason === null
         && (data.status === "pending" || data.status === "running");
     const streaming = active;
-    const [open, setOpen] = useState(active || data.kind === "image.view_image");
+    // Image results stay expanded; only the surrounding process group collapses them.
+    const staysExpanded = data.kind === "image.view_image";
+    const [open, setOpen] = useState(active || staysExpanded);
+
+    useEffect(() => {
+        if (!active && !staysExpanded) {
+            setOpen(false);
+        }
+    }, [active, staysExpanded]);
+
     if (data.kind === "permission.request") {
         return <PermissionRequestToolCall data={data} isError={isError} />;
     }
@@ -42,7 +51,7 @@ export function ToolCallBlock({ toolName, data, isError, endReason }: ToolCallBl
         <Collapsible open={open} onOpenChange={setOpen} className="flex flex-col gap-1.5">
             <CollapsibleTrigger
                 type="button"
-                className="group -ml-2 flex w-fit items-center gap-1.5 rounded-lg px-2 py-1 text-[13px] text-muted-foreground transition-colors outline-none select-none hover:bg-accent/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/25"
+                className="group -ml-2 flex w-fit items-center gap-1.5 rounded-lg px-2 py-0 text-[13px] text-muted-foreground transition-colors outline-none select-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/25"
             >
                 <motion.span
                     aria-hidden="true"
