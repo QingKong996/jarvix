@@ -6,6 +6,7 @@ import type { ContextMessageEntry } from "./context-messages.ts";
 
 type KindLabelKey =
     | "rightSidebar.context.roles.system"
+    | "rightSidebar.context.roles.injected"
     | "rightSidebar.context.roles.user"
     | "rightSidebar.context.roles.assistant"
     | "rightSidebar.context.roles.toolCall"
@@ -18,6 +19,10 @@ const TYPE_STYLE: Record<ContextMessageEntry["kind"], {
     system: {
         labelKey: "rightSidebar.context.roles.system",
         badge: "border-border bg-secondary text-muted-foreground"
+    },
+    injected: {
+        labelKey: "rightSidebar.context.roles.injected",
+        badge: "border-border bg-secondary text-[var(--context-injected)]"
     },
     user: {
         labelKey: "rightSidebar.context.roles.user",

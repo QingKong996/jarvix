@@ -70,7 +70,8 @@ describe("ContextMessage", () => {
             </I18nextProvider>
         );
 
-        expect(html.match(/>系统消息</g)).toHaveLength(2);
+        expect(html.match(/>系统消息</g)).toHaveLength(1);
+        expect(html.match(/>注入内容</g)).toHaveLength(1);
         expect(html.match(/>用户</g)).toHaveLength(1);
         expect(html.match(/>助手</g)).toHaveLength(1);
         expect(html.match(/>工具调用</g)).toHaveLength(1);
@@ -87,6 +88,45 @@ describe("ContextMessage", () => {
         expect(html.match(/<details/g)).toHaveLength(6);
         expect(html).not.toContain("<details open");
         expect(html).toContain("exec_command · {&quot;command&quot;:&quot;pwd&quot;}");
+    });
+
+    test("classifies context-bearing messages as injected content", () => {
+        const entries = contextMessagesFor({
+            systemPrompt: "system prompt",
+            messages: [
+                {
+                    role: "system",
+                    content: "agent instructions",
+                    context: "agent-instructions",
+                    timestamp: 1
+                },
+                {
+                    role: "user",
+                    content: "environment reminder",
+                    context: "system-reminder",
+                    timestamp: 2
+                },
+                {
+                    role: "user",
+                    content: "compacted history",
+                    context: "compact",
+                    timestamp: 3
+                },
+                {
+                    role: "user",
+                    content: "hello",
+                    timestamp: 4
+                }
+            ]
+        });
+
+        expect(entries.map((entry) => entry.kind)).toEqual([
+            "system",
+            "injected",
+            "injected",
+            "injected",
+            "user"
+        ]);
     });
 
     test("defers the full body until the message is expanded", () => {

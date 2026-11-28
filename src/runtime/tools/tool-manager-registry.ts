@@ -86,6 +86,12 @@ export class ToolManagerRegistry implements ToolExecutor {
         ];
     }
 
+    getContextSnapshotTools(): readonly LlmToolDefinition[] {
+        return [...this.ownedTools].flatMap(
+            (tool) => tool.getContextSnapshotTools?.() ?? []
+        );
+    }
+
     private deferredTools(): readonly DeferredToolDefinition[] {
         return [...this.ownedTools].flatMap(
             (tool) => tool.getDeferredTools?.() ?? []

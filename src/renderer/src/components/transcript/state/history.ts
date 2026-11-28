@@ -27,7 +27,7 @@ export function hydrateSession(messages: LlmMessage[]): CommittedTurn[] {
     const toolCalls = new Map<string, HistoryToolCallLocation>();
     for (const [index, message] of messages.entries()) {
         const id = `history-${index}`;
-        if (message.role === "system" && message.context === "environment") {
+        if (message.role === "system" && message.context !== undefined) {
             continue;
         }
         if (message.role === "user") {

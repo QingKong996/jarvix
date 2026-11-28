@@ -12,7 +12,6 @@ export type JarvixContextBreakdown = {
     tools: number;
     user: number;
     injected: number;
-    skills: number;
     assistant: number;
     tool: number;
 };

@@ -100,6 +100,10 @@ export class ToolCallRunner {
         return this.tools.getRegisteredTools?.(permission) ?? this.tools.definitions;
     }
 
+    contextSnapshotTools() {
+        return this.tools.getContextSnapshotTools?.() ?? [];
+    }
+
     async execute(
         toolCall: LlmToolCallBlock,
         runtime: SessionRuntime,

@@ -276,8 +276,7 @@
                     "systemPrompt": "系统提示词",
                     "tools": "工具定义",
                     "user": "用户消息",
-                    "injected": "注入上下文",
-                    "skills": "技能",
+                    "injected": "注入内容",
                     "assistant": "助手",
                     "tool": "工具调用"
                 }
@@ -298,6 +297,7 @@
             },
             "roles": {
                 "system": "系统消息",
+                "injected": "注入内容",
                 "user": "用户",
                 "assistant": "助手",
                 "toolCall": "工具调用",

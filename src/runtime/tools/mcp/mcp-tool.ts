@@ -135,6 +135,10 @@ export class McpTool implements Tool {
         ];
     }
 
+    getContextSnapshotTools(): readonly LlmToolDefinition[] {
+        return this.definitions;
+    }
+
     getDeferredTools(): readonly DeferredToolDefinition[] {
         return this.host.tools.map((tool) => ({
             definition: tool.definition,

@@ -29,7 +29,6 @@ test("anchors context categories to the current occupied tokens", () => {
         tools: 30,
         user: 20,
         injected: 10,
-        skills: 0,
         assistant: 0,
         tool: 0
     }, 100);
@@ -39,7 +38,6 @@ test("anchors context categories to the current occupied tokens", () => {
         { kind: "tools", tokens: 30, share: 0.3 },
         { kind: "user", tokens: 20, share: 0.2 },
         { kind: "injected", tokens: 10, share: 0.1 },
-        { kind: "skills", tokens: 0, share: 0 },
         { kind: "assistant", tokens: 0, share: 0 },
         { kind: "tool", tokens: 0, share: 0 }
     ]);
@@ -51,7 +49,6 @@ test("rounds scaled categories without losing the anchored total", () => {
         tools: 1,
         user: 1,
         injected: 0,
-        skills: 0,
         assistant: 0,
         tool: 0
     }, 100);

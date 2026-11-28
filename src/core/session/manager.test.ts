@@ -325,7 +325,7 @@ test("uses an updated working directory for relative apply_patch paths", async (
     expect(existsSync(join(firstDirectory, "nested", "marker.txt"))).toBe(false);
 });
 
-test("notifies an active request when its permission changes", async () => {
+test("waits for the next user message before injecting permission changes", async () => {
     home.path = join(base, "permission-home");
     const manager = new SessionManager();
     const session = manager.create({}, "Permission session");
@@ -355,11 +355,22 @@ test("notifies an active request when its permission changes", async () => {
     expect(session.meta.permission).toBe("full-access");
     expect(session.snapshot().messages.map((message) => message.role)).toEqual([
         "user",
-        "assistant",
-        "user"
+        "assistant"
     ]);
-    expect(session.snapshot().messages.at(-1)).toMatchObject({
-        context: "system-reminder",
+    expect(session.providerContext().messages.at(-1)).toMatchObject({
+        role: "assistant"
+    });
+
+    await session.request("continue", {
+        llm: { getModel: () => MODEL, stream },
+        config: TEST_CONFIG,
+        emit: () => undefined
+    });
+    expect(session.providerContext().messages.findLast((message) => (
+        message.role === "system"
+        && message.content.includes("permission: full-access")
+    ))).toMatchObject({
+        context: "injected",
         content: expect.stringContaining("permission: full-access")
     });
 });

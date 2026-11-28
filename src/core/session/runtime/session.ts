@@ -50,13 +50,20 @@ import {
 } from "./context-manager.ts";
 import {
     createRunToolState,
+    mcpToolDefinitionsFingerprint,
+    mcpToolSnapshotSource,
     syncRunToolState,
     type RunToolState
 } from "./tool-state.ts";
+import { agentInstructionPathsForToolCall } from "./agent-instructions.ts";
 import {
-    agentInstructionPathsForToolCall,
-    agentInstructionsMessage
-} from "./agent-instructions.ts";
+    CONTEXT_SNAPSHOT_KEYS,
+    ContextSnapshotTracker,
+    injectContext,
+    isPersistedContextInjectionMessage,
+    type ContextInjection,
+    type ContextSnapshotSource
+} from "./context-injection.ts";
 import { skillContentMessage } from "../../skills/skill-catalog.ts";
 import type { JarvixSkill } from "../../../protocol/skill.ts";
 import {
@@ -202,6 +209,10 @@ export class Session {
     private activeRun: RunTelemetry | null = null;
     private toolState: RunToolState | null = null;
     private goalFinished = false;
+    private contextInitialized = false;
+    private readonly contextSnapshots = new ContextSnapshotTracker();
+    private goalContext: string | null = null;
+    private goalContextMessage: LlmSystemMessage | null = null;
     private readonly goalVerifier = new GoalVerifier();
 
     constructor(
@@ -218,6 +229,28 @@ export class Session {
         this.observer = observer;
         this.contextManager = contextManagerFactory(() => this.meta.permission);
         this.history = this.contextManager.initializeHistory(messages);
+        const persistedContext = this.history.filter(
+            isPersistedContextInjectionMessage
+        );
+        for (const message of persistedContext) {
+            if (message.contextKey && message.contextFingerprint) {
+                this.contextSnapshots.update(
+                    message.contextKey,
+                    message.contextFingerprint
+                );
+            }
+        }
+        const goalFingerprint = this.meta.goal
+            ? hashText(this.meta.goal.content)
+            : null;
+        const persistedGoal = [...persistedContext].reverse().find((message) => (
+            message.contextKey === "goal"
+            && message.contextFingerprint === goalFingerprint
+        ));
+        if (persistedGoal && this.meta.goal) {
+            this.goalContext = this.meta.goal.content;
+            this.goalContextMessage = persistedGoal;
+        }
         this.permissions = permissions;
         this.tools = tools;
         this.persistence = new SessionPersistenceQueue(meta.id);
@@ -359,7 +392,8 @@ export class Session {
 
         try {
             stage = "setup";
-            this.ensureEnvironmentContext(runtime);
+            this.initializeContext(runtime.workingDirectories ?? []);
+            this.refreshContext(runtime.workingDirectories ?? []);
             if (prompt.length > 0) {
                 const questionMessage: LlmUserMessage = {
                     role: "user",
@@ -368,10 +402,6 @@ export class Session {
                 };
                 stage = "persistence";
                 this.append(questionMessage);
-            }
-            const environmentReminder = this.appendEnvironmentReminderIfChanged(runtime);
-            if (environmentReminder) {
-                runtime.emit({ type: "system.message", message: environmentReminder });
             }
 
             stage = "model_resolve";
@@ -598,9 +628,18 @@ export class Session {
     }
 
     setGoal(content: string, emitUpdate = true): JarvixGoal {
+        const previous = this.meta.goal?.content ?? null;
         const goal = updateSessionGoal(this.meta.id, content);
         this.meta.goal = goal;
         this.goalFinished = false;
+        if (this.goalContext !== goal.content) {
+            this.injectGoalContext(
+                previous !== null && previous !== goal.content
+                    ? "The active goal was replaced. Only the latest goal is active."
+                    : "An active goal was set for this session.",
+                goal.content
+            );
+        }
         if (emitUpdate) {
             this.emitGoal();
         }
@@ -608,9 +647,20 @@ export class Session {
     }
 
     clearGoal(emitUpdate = true): void {
+        const hadGoal = this.meta.goal !== undefined || this.goalContext !== null;
         clearSessionGoal(this.meta.id);
         delete this.meta.goal;
         this.goalFinished = false;
+        if (hadGoal) {
+            this.appendContext({
+                declaration: "The active goal was cleared. No goal is active.",
+                content: "No goal is active.",
+                contextKey: "goal",
+                contextFingerprint: hashText("cleared")
+            });
+            this.goalContext = null;
+            this.goalContextMessage = null;
+        }
         if (emitUpdate) {
             this.emitGoal();
         }
@@ -689,12 +739,6 @@ export class Session {
             permission
         });
         this.permissions.reset();
-        if (!this.running || this.requestController?.signal.aborted) {
-            return;
-        }
-        if (!this.pendingMessages.hasEnvironmentReminder()) {
-            this.pendingMessages.addEnvironmentReminder();
-        }
     }
 
     respondPermission(requestId: string, decision: PermissionDecision): boolean {
@@ -736,11 +780,65 @@ export class Session {
         this.toolRunner.registerToolManager(manager);
     }
 
+    initializeContext(workingDirectories: readonly string[] = []): void {
+        if (this.contextInitialized) {
+            return;
+        }
+        const context = this.contextSnapshots.initialize(
+            this.contextSources(workingDirectories)
+        );
+        const persisted: LlmSystemMessage[] = [];
+        for (const injection of [...context].reverse()) {
+            persisted.unshift(injectContext(this.history, {
+                ...injection,
+                placement: { at: "start" }
+            }));
+        }
+        for (const message of persisted) {
+            this.persistence.enqueue(message);
+        }
+        if (this.meta.goal && this.goalContext !== this.meta.goal.content) {
+            this.injectGoalContext(
+                "A persisted goal is active for this session.",
+                this.meta.goal.content
+            );
+        }
+        this.contextInitialized = true;
+    }
+
+    refreshContext(
+        workingDirectories: readonly string[] = []
+    ): LlmSystemMessage[] {
+        this.initializeContext(workingDirectories);
+        const changes = this.contextSnapshots.refresh(
+            this.contextSources(workingDirectories)
+        );
+        const messages: LlmSystemMessage[] = [];
+        for (const change of changes) {
+            messages.push(this.appendContext(change));
+        }
+        return messages;
+    }
+
+    private contextSources(
+        workingDirectories: readonly string[]
+    ): readonly ContextSnapshotSource[] {
+        return [
+            ...(this.contextManager.contextSources?.(workingDirectories) ?? []),
+            mcpToolSnapshotSource(this.mcpSnapshotTools())
+        ];
+    }
+
     loadSkill(skill: JarvixSkill, body: string): void {
         if (this.running) {
             throw new Error("Stop the active request before loading a skill");
         }
-        this.append(skillContentMessage(skill, body));
+        this.appendContext({
+            declaration: `Skill "${skill.name}" was loaded for this session.`,
+            content: skillContentMessage(skill, body).content,
+            contextKey: `skill:${skill.name}`,
+            contextFingerprint: hashText(`${skill.location}\0${body}`)
+        });
     }
 
     async unregisterToolManager(managerId: string): Promise<void> {
@@ -768,15 +866,16 @@ export class Session {
         const toolState = this.toolState;
         const requestContext = this.contextManager.prepareRequest(
             this.history,
-            runtime.workingDirectories ?? [],
             {
-                goal: this.meta.goal?.content,
                 requireFinishGoal: autoContinue
             }
         );
-        const messages = toolState && toolState.changes.length > 0
-            ? [...requestContext.messages, ...toolState.changes]
-            : requestContext.messages;
+        const messages = requestContext.messages;
+        if (toolState) {
+            for (const change of toolState.changes) {
+                messages.push(change);
+            }
+        }
         const contextTokensBefore = this.contextTokens(
             turn.contextWindow,
             runtime.workingDirectories ?? []
@@ -1078,10 +1177,9 @@ export class Session {
     }
 
     providerContext(workingDirectories: readonly string[] = []): JarvixProviderContext {
+        this.initializeContext(workingDirectories);
         const request = this.contextManager.prepareRequest(
-            this.history,
-            workingDirectories,
-            { goal: this.meta.goal?.content }
+            this.history
         );
         return {
             ...request,
@@ -1096,12 +1194,11 @@ export class Session {
         contextWindow: number,
         workingDirectories: readonly string[] = []
     ): JarvixContextUsage {
+        this.initializeContext(workingDirectories);
         return this.contextManager.estimateUsage({
             contextWindow,
             history: this.history,
-            workingDirectories,
-            tools: this.registeredTools(),
-            goal: this.meta.goal?.content
+            tools: this.registeredTools()
         });
     }
 
@@ -1282,12 +1379,21 @@ export class Session {
         return this.toolRunner.registeredTools(this.meta.permission);
     }
 
+    private mcpSnapshotTools() {
+        return this.toolRunner.contextSnapshotTools();
+    }
+
     private syncToolState(): void {
         const state = this.toolState;
         if (!state) {
             return;
         }
-        if (syncRunToolState(state, this.registeredTools())) {
+        const current = this.registeredTools();
+        if (syncRunToolState(state, current)) {
+            this.contextSnapshots.update(
+                CONTEXT_SNAPSHOT_KEYS.mcp,
+                mcpToolDefinitionsFingerprint(this.mcpSnapshotTools())
+            );
             this.logger.debug("Tool declarations changed", {
                 sessionId: this.meta.id,
                 runId: this.activeRun?.runId,
@@ -1319,35 +1425,25 @@ export class Session {
             return;
         }
 
-        const message = agentInstructionsMessage(sources);
-        this.append(message);
+        const agentSource = this.contextManager.contextSource?.(
+            CONTEXT_SNAPSHOT_KEYS.agents,
+            workingDirectories
+        );
+        if (!agentSource) {
+            return;
+        }
+        const changes = this.contextSnapshots.refresh([agentSource]);
+        if (changes.length === 0) {
+            return;
+        }
+        for (const change of changes) {
+            this.appendContext(change);
+        }
         this.emitContextUsageFor(runtime, this.contextWindow);
         this.logger.info("Loaded AGENTS.md instructions", {
             sessionId: this.meta.id,
             paths: sources.map((source) => source.path)
         });
-    }
-
-    private ensureEnvironmentContext(runtime: SessionRuntime): void {
-        const message = this.contextManager.ensureEnvironmentContext(
-            runtime.workingDirectories
-        );
-        if (message) {
-            this.history.unshift(message);
-        }
-    }
-
-    private appendEnvironmentReminderIfChanged(
-        runtime: SessionRuntime
-    ): LlmSystemMessage | null {
-        const reminder = this.contextManager.environmentReminderIfChanged(
-            runtime.workingDirectories
-        );
-        if (!reminder) {
-            return null;
-        }
-        this.append(reminder.persisted);
-        return reminder.display;
     }
 
     private emitContextUsage(turn: TurnContext): void {
@@ -1402,6 +1498,8 @@ export class Session {
                 context: "compact",
                 timestamp: Date.now()
             };
+            const goalCompacted = this.goalContextMessage !== null
+                && selected.includes(this.goalContextMessage);
             this.history.splice(
                 selection.start,
                 selection.end - selection.start,
@@ -1412,6 +1510,15 @@ export class Session {
             } catch (error) {
                 turn.run.failure ??= failureFor("persistence", error);
                 throw error;
+            }
+            if (goalCompacted && this.goalContext !== null) {
+                this.injectGoalContext(
+                    [
+                        "The active goal remains in effect after earlier",
+                        "context was compacted."
+                    ].join(" "),
+                    this.goalContext
+                );
             }
             turn.run.compactions += 1;
             turn.run.compactionDurationMs += summary.durationMs;
@@ -1688,12 +1795,12 @@ export class Session {
     private flushPendingTurnMessages(runtime: SessionRuntime): boolean {
         return this.pendingMessages.flush({
             insertPrompt: (pending) => this.insertPrompt(pending, runtime),
-            insertEnvironment: () => this.insertEnvironmentReminder(runtime),
             insertSystem: (pending) => this.insertSystemMessage(pending, runtime)
         });
     }
 
     private insertPrompt(pending: PendingPrompt, runtime: SessionRuntime): void {
+        this.refreshContext(runtime.workingDirectories ?? []);
         const message: LlmUserMessage = {
             role: "user",
             content: pending.text,
@@ -1733,21 +1840,34 @@ export class Session {
         runtime.emit({ type: "system.message", message: pending.message });
     }
 
-    private insertEnvironmentReminder(runtime: SessionRuntime): void {
-        const reminder = this.appendEnvironmentReminderIfChanged(runtime);
-        if (!reminder) {
-            return;
-        }
-        this.emitContextUsageFor(runtime, this.contextWindow);
-        runtime.emit({ type: "system.message", message: reminder });
-    }
-
     private flushPendingSystemMessages(runtime: SessionRuntime): void {
         this.pendingMessages.flushSystemMessages({
             insertPrompt: (pending) => this.insertPrompt(pending, runtime),
-            insertEnvironment: () => this.insertEnvironmentReminder(runtime),
             insertSystem: (pending) => this.insertSystemMessage(pending, runtime)
         }, this.streamOpen || this.toolUseOpen);
+    }
+
+    private appendContext(
+        injection: ContextInjection
+    ): LlmSystemMessage {
+        const message = injectContext(this.history, injection);
+        this.persistence.enqueue(message);
+        return message;
+    }
+
+    private injectGoalContext(
+        declaration: string,
+        goal: string
+    ): LlmSystemMessage {
+        const message = this.appendContext({
+            declaration,
+            content: goalContextContent(goal),
+            contextKey: "goal",
+            contextFingerprint: hashText(goal)
+        });
+        this.goalContext = goal;
+        this.goalContextMessage = message;
+        return message;
     }
 
     /** Update memory first, then flush the pending write queue in order. */
@@ -1755,6 +1875,15 @@ export class Session {
         this.history.push(message);
         this.persistence.enqueue(message);
     }
+}
+
+function goalContextContent(goal: string): string {
+    return [
+        "The active goal is:",
+        "<goal>",
+        goal,
+        "</goal>"
+    ].join("\n");
 }
 
 function elapsedMs(startedAt: number): number {

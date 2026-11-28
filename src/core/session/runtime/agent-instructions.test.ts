@@ -40,8 +40,12 @@ test("loads global and project instructions once in stable order", () => {
     expect(first).toContain(`scope="project" path="${escapePath(projectPath)}"`);
     expect(first).not.toContain("nested rules");
 
+    const before = instructions.snapshot([workspace]);
     writeAgents(globalPath, "changed global rules");
     expect(instructions.staticInstructions([workspace])).toBe(first);
+    const after = instructions.snapshot([workspace]);
+    expect(after.content).toContain("changed global rules");
+    expect(after.fingerprint).not.toBe(before.fingerprint);
 });
 
 test("discovers nested and outside instructions once", () => {
@@ -81,8 +85,7 @@ test("discovers nested and outside instructions once", () => {
 
     const message = agentInstructionsMessage(nested);
     expect(message).toMatchObject({
-        role: "system",
-        context: "agent-instructions"
+        role: "system"
     });
     expect(message.content).toContain("app rules");
 });

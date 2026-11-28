@@ -11,18 +11,12 @@ export type PendingSystemMessage = {
     message: LlmSystemMessage;
 };
 
-type PendingEnvironmentReminder = {
-    type: "environment";
-};
-
 type PendingTurnMessage =
     | PendingPrompt
-    | PendingSystemMessage
-    | PendingEnvironmentReminder;
+    | PendingSystemMessage;
 
 export type PendingMessageHandlers = {
     insertPrompt(pending: PendingPrompt): void;
-    insertEnvironment(): void;
     insertSystem(pending: PendingSystemMessage): void;
 };
 
@@ -33,16 +27,8 @@ export class PendingMessageQueue {
         return this.messages.length;
     }
 
-    hasEnvironmentReminder(): boolean {
-        return this.messages.some((pending) => pending.type === "environment");
-    }
-
     addPrompt(id: string, text: string): void {
         this.messages.push({ type: "prompt", id, text });
-    }
-
-    addEnvironmentReminder(): void {
-        this.messages.push({ type: "environment" });
     }
 
     addSystemMessage(message: LlmSystemMessage): void {
@@ -64,8 +50,6 @@ export class PendingMessageQueue {
             if (pending.type === "prompt") {
                 insertedPrompt = true;
                 handlers.insertPrompt(pending);
-            } else if (pending.type === "environment") {
-                handlers.insertEnvironment();
             } else {
                 handlers.insertSystem(pending);
             }
@@ -86,11 +70,7 @@ export class PendingMessageQueue {
                 return;
             }
             this.messages.shift();
-            if (pending.type === "environment") {
-                handlers.insertEnvironment();
-            } else {
-                handlers.insertSystem(pending);
-            }
+            handlers.insertSystem(pending);
         }
     }
 }

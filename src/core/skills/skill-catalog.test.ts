@@ -123,10 +123,9 @@ test("handles name mismatches, settings overrides, and manual-only skills", () =
     const message = availableSkillsMessage(enabled);
     expect(message?.content).toContain("actual-name");
     expect(message?.content).not.toContain("manual-only");
-    expect(message?.context).toBe("skills");
+    expect(message?.context).toBeUndefined();
     expect(skillContentMessage(enabled[0]!, "# Instructions")).toMatchObject({
-        content: expect.stringContaining("# Instructions"),
-        context: "skill"
+        content: expect.stringContaining("# Instructions")
     });
     expect(catalog.read(enabled[0]!).trim()).toContain("# actual-name");
 });

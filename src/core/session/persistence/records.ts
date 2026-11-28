@@ -208,6 +208,7 @@ function isLlmMessage(value: unknown): value is LlmMessage {
     if (value.role === "system") {
         return typeof value.content === "string" && (
             value.context === undefined ||
+            value.context === "injected" ||
             value.context === "environment" ||
             value.context === "goal" ||
             value.context === "agent-instructions" ||
@@ -216,6 +217,12 @@ function isLlmMessage(value: unknown): value is LlmMessage {
         ) && (
             value.environmentKey === undefined ||
             typeof value.environmentKey === "string"
+        ) && (
+            value.contextKey === undefined ||
+            typeof value.contextKey === "string"
+        ) && (
+            value.contextFingerprint === undefined ||
+            typeof value.contextFingerprint === "string"
         ) && (
             value.notice === undefined ||
             (

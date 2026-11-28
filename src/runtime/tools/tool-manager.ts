@@ -28,6 +28,7 @@ export type ToolExecutionContext = ToolExecutionObserver & {
 export type Tool = {
     readonly definitions: readonly LlmToolDefinition[];
     getRegisteredTools?(permission: PermissionMode): readonly LlmToolDefinition[];
+    getContextSnapshotTools?(): readonly LlmToolDefinition[];
     getDeferredTools?(): readonly DeferredToolDefinition[];
     loadDeferredTool?(name: string): DeferredToolLoadResult;
     hasActiveWork?(): boolean;
@@ -50,6 +51,7 @@ export function toolFromExecutor(executor: ToolExecutor): Tool {
     return {
         definitions: executor.definitions,
         getRegisteredTools: executor.getRegisteredTools?.bind(executor),
+        getContextSnapshotTools: executor.getContextSnapshotTools?.bind(executor),
         getDeferredTools: executor.getDeferredTools?.bind(executor),
         loadDeferredTool: executor.loadDeferredTool?.bind(executor),
         hasActiveWork: executor.hasActiveWork?.bind(executor),

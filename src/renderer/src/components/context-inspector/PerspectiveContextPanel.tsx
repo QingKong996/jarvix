@@ -32,7 +32,6 @@ const CONTEXT_COLORS: Record<PerspectiveContextKind, string> = {
     tools: "var(--context-tools)",
     user: "var(--context-user)",
     injected: "var(--context-injected)",
-    skills: "var(--context-skills)",
     assistant: "var(--context-assistant)",
     tool: "var(--context-tool)"
 };

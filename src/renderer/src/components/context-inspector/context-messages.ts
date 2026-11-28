@@ -8,6 +8,7 @@ import type { JarvixProviderContext } from "../../../../protocol/provider-contex
 
 export type ContextMessageKind =
     | "system"
+    | "injected"
     | "user"
     | "assistant"
     | "toolCall"
@@ -35,14 +36,16 @@ export function contextMessagesFor(context: JarvixProviderContext): ContextMessa
 }
 
 function messageEntries(message: LlmMessage): ContextMessageEntry[] {
-    if (
-        message.role === "system" ||
-        message.role === "user"
-    ) {
+    if (message.role === "system") {
         return [{
-            kind: message.role === "user" && message.context === "compact"
-                ? "system"
-                : message.role,
+            kind: "injected",
+            text: () => message.content,
+            preview: previewText(message.content)
+        }];
+    }
+    if (message.role === "user") {
+        return [{
+            kind: message.context ? "injected" : "user",
             text: () => message.content,
             preview: previewText(message.content)
         }];

@@ -44,6 +44,13 @@ import { SYSTEM_PROMPT } from "./environment.ts";
 import { CONTEXT_COMPACTION_SYSTEM_PROMPT } from "./context-compaction.ts";
 import { createGenericToolCallViewData } from "../../../runtime/tools/tool-view.ts";
 
+const testHome = vi.hoisted(() => ({ path: "" }));
+
+vi.mock("node:os", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("node:os")>();
+    return { ...actual, homedir: () => testHome.path };
+});
+
 vi.mock("../persistence/store.ts", () => ({
     appendSessionMessage: vi.fn(),
     appendSessionCompaction: vi.fn()
@@ -128,6 +135,7 @@ const NO_TOOLS: ToolExecutor = {
 };
 
 beforeEach(() => {
+    testHome.path = join(tmpdir(), `jarvix-session-home-${process.pid}`);
     persist.mockReset();
     persistCompaction.mockReset();
 });
@@ -158,14 +166,69 @@ test("assembles the final provider context without mutating the session", () => 
 
     const context = session.providerContext(["C:\\workspace-a"]);
 
+    expect(context.systemPrompt).toContain("You are Jarvix");
+    expect(context.systemPrompt).toContain("AGENTS.md");
+    expect(context.systemPrompt).toContain("apply_patch");
     expect(context.systemPrompt).toContain(`Current operating system: ${process.platform}.`);
     expect(context.systemPrompt).not.toMatch(/respond to the user|Chinese/i);
     expect(context.messages[0]).toMatchObject({
         role: "system",
-        context: "environment",
+        context: "injected",
         content: expect.stringContaining("- C:\\workspace-a")
     });
+    expect(context.breakdown?.systemPrompt).toBeGreaterThan(0);
+    expect(context.breakdown?.injected).toBeGreaterThan(0);
     expect(session.snapshot().messages).toEqual([]);
+});
+
+test("drops persisted injection messages before restoring fresh snapshots", () => {
+    const session = new Session(meta, [
+        {
+            role: "system",
+            content: "old environment snapshot",
+            context: "environment",
+            timestamp: 1
+        },
+        {
+            role: "system",
+            content: "old injected context",
+            context: "injected",
+            timestamp: 2
+        },
+        {
+            role: "user",
+            content: "old reminder",
+            context: "system-reminder",
+            timestamp: 3
+        },
+        {
+            role: "user",
+            content: "hello",
+            timestamp: 4
+        },
+        assistantMessage()
+    ]);
+
+    const context = session.providerContext(["C:\\workspace-a"]);
+
+    expect(context.messages.some((message) => (
+        message.role === "system"
+        && (
+            message.content === "old environment snapshot"
+            || message.content === "old injected context"
+        )
+    ))).toBe(false);
+    expect(context.messages.some((message) => (
+        message.role === "user" && message.content === "old reminder"
+    ))).toBe(false);
+    expect(context.messages.filter((message) => (
+        message.role === "system"
+        && message.content.includes("<environment_context>")
+    ))).toHaveLength(1);
+    expect(session.snapshot().messages.map((message) => message.role)).toEqual([
+        "user",
+        "assistant"
+    ]);
 });
 
 test("creates one context manager per session", () => {
@@ -194,7 +257,7 @@ test("keeps working directories out of the system prompt and in the leading envi
     expect(request?.systemPrompt).not.toContain("C:\\workspace-a");
     expect(request?.messages[0]).toMatchObject({
         role: "system",
-        context: "environment",
+        context: "injected",
         content: expect.stringContaining("- C:\\workspace-a\n- C:\\workspace-b")
     });
 });
@@ -285,7 +348,7 @@ test("registers request_permission unless the session has full access", async ()
     expect(toolNames[2]).not.toContain(REQUEST_PERMISSION_TOOL);
 });
 
-test("keeps one leading environment snapshot and appends changes as persisted user reminders", async () => {
+test("keeps one leading environment injection and appends changes as injected context", async () => {
     const requests: LlmMessage[][] = [];
     const llm: LlmAdapter = {
         getModel: () => MODEL,
@@ -315,7 +378,7 @@ test("keeps one leading environment snapshot and appends changes as persisted us
     const thirdSnapshot = requests[2]?.[0];
     expect(firstSnapshot).toMatchObject({
         role: "system",
-        context: "environment",
+        context: "injected",
         content: expect.stringContaining("permission: read-only")
     });
     expect(firstSnapshot).toMatchObject({
@@ -323,33 +386,35 @@ test("keeps one leading environment snapshot and appends changes as persisted us
     });
     expect(secondSnapshot).toBe(firstSnapshot);
     expect(thirdSnapshot).toBe(firstSnapshot);
-    expect(requests[1]?.at(-1)).toMatchObject({
-        role: "user",
-        context: "system-reminder",
+    expect(requests[1]?.at(-2)).toMatchObject({
+        role: "system",
+        context: "injected",
         content: expect.stringContaining("permission: project-read-write")
     });
-    expect(requests[1]?.at(-1)).toMatchObject({
+    expect(requests[1]?.at(-2)).toMatchObject({
         content: expect.stringContaining("  - C:\\workspace-a\n  - C:\\workspace-b")
     });
-    expect(requests[1]?.at(-1)).toMatchObject({
+    expect(requests[1]?.at(-2)).toMatchObject({
         content: expect.stringContaining("reads: not restricted by Jarvix")
     });
-    expect(requests[2]?.at(-1)).toMatchObject({
-        role: "user",
-        context: "system-reminder",
+    expect(requests[2]?.at(-2)).toMatchObject({
+        role: "system",
+        context: "injected",
         content: expect.stringContaining("sandbox: off")
     });
-    expect(requests[2]?.at(-1)).toMatchObject({
+    expect(requests[2]?.at(-2)).toMatchObject({
         content: expect.stringContaining("access: OS permissions only")
     });
     expect(requests[0]?.at(-1)).toMatchObject({ role: "user", content: "first" });
     expect(session.snapshot().messages.some((message) => (
-        message.role === "system" && message.context === "environment"
+        message.role === "system" && message.context === "injected"
     )))
         .toBe(false);
     expect(persist.mock.calls.some(([, message]) => (
-        message.role === "system" && message.context === "environment"
-    ))).toBe(false);
+        message.role === "system"
+        && message.context === "injected"
+        && message.content.includes("The session environment changed.")
+    ))).toBe(true);
 });
 
 test("appends working-directory changes without rewriting the leading environment snapshot", async () => {
@@ -387,19 +452,21 @@ test("appends working-directory changes without rewriting the leading environmen
     expect(leadingSnapshot).not.toMatchObject({
         content: expect.stringContaining("- C:\\workspace-b")
     });
-    expect(requests[1]?.at(-1)).toMatchObject({
-        role: "user",
-        context: "system-reminder",
+    expect(requests[1]?.at(-2)).toMatchObject({
+        role: "system",
+        context: "injected",
         content: expect.stringContaining("- C:\\workspace-b")
     });
-    expect(requests[1]?.at(-1)).toMatchObject({
-        content: expect.stringMatching(/^<system-reminder>\n/)
+    expect(requests[1]?.at(-2)).toMatchObject({
+        content: expect.stringContaining(
+            "The session environment changed."
+        )
     });
     expect(persist).toHaveBeenCalledWith(
         meta.id,
         expect.objectContaining({
-            role: "user",
-            context: "system-reminder"
+            role: "system",
+            context: "injected"
         })
     );
 });
@@ -479,7 +546,7 @@ test("sends complete history even when it exceeds the model context window", asy
 
     expect(sent?.[0]).toMatchObject({
         role: "system",
-        context: "environment"
+        context: "injected"
     });
     expect(sent).toHaveLength(history.length + 2);
     for (let index = 0; index < 24; index += 1) {
@@ -651,9 +718,10 @@ test("retries persistence once and dequeues the message on success", async () =>
         emit: () => undefined
     });
 
-    expect(persist).toHaveBeenCalledTimes(3);
+    expect(persist).toHaveBeenCalledTimes(4);
     expect(persist.mock.calls.map(([, message]) => message.role)).toEqual([
-        "user",
+        "system",
+        "system",
         "user",
         "assistant"
     ]);
@@ -665,8 +733,10 @@ test("retries persistence once and dequeues the message on success", async () =>
 });
 
 test("keeps failed messages queued and flushes them in order", async () => {
-    persist.mockImplementation(() => {
-        throw new Error("disk full");
+    persist.mockImplementation((_id, message) => {
+        if (message.role === "user") {
+            throw new Error("disk full");
+        }
     });
     const session = new Session(meta);
     const runtime = {
@@ -676,7 +746,7 @@ test("keeps failed messages queued and flushes them in order", async () => {
     };
 
     await expect(session.request("first", runtime)).rejects.toThrow(/after 2 attempts/);
-    expect(persist).toHaveBeenCalledTimes(2);
+    expect(persist).toHaveBeenCalledTimes(3);
     expect(session.snapshot().messages).toEqual([
         expect.objectContaining({ role: "user", content: "first" })
     ]);
@@ -719,7 +789,12 @@ test("forwards done before persisting its complete assistant message", async () 
         }
     });
 
-    expect(timeline).toEqual(["persist:user", "event:done", "persist:assistant"]);
+    expect(timeline).toEqual([
+        "persist:system",
+        "persist:user",
+        "event:done",
+        "persist:assistant"
+    ]);
     expect(withoutContextUsage(events).map((event) => event.type)).toEqual(["done"]);
 });
 
@@ -765,14 +840,21 @@ test("forwards all events and persists only complete done messages in order", as
             yield toolCall;
             yield completed;
             expect(withoutContextUsage(events)).toEqual([toolCall, completed]);
-            expect(persist.mock.calls.map(([, message]) => message.role)).toEqual(["user", "assistant"]);
+            expect(persist.mock.calls.map(([, message]) => message.role)).toEqual([
+                "system",
+                "user",
+                "assistant"
+            ]);
             yield nextCompleted;
             yield failed;
             expect(withoutContextUsage(events)).toEqual([toolCall, completed, nextCompleted, failed]);
             expect(session.snapshot().messages).toEqual([
                 expect.objectContaining({ role: "user" }), completed.message, nextCompleted.message
             ]);
-            expect(persist.mock.calls.map(([, message]) => message)).toEqual(session.snapshot().messages);
+            expect(persist.mock.calls.map(([, message]) => message).filter(
+                (message) => message.role !== "system"
+                    || message.context !== "injected"
+            )).toEqual(session.snapshot().messages);
         })()),
         config: TEST_CONFIG,
         emit: (event) => { events.push(event); }
@@ -968,12 +1050,92 @@ test("keeps the base tool list stable and sends loaded tools as deltas", async (
     expect(requests[1]?.tools).toEqual([loadDefinition]);
     expect(requests[1]?.messages.at(-1)).toMatchObject({
         role: "system",
-        content: "",
+        content: expect.stringContaining(
+            "The available tools changed. Use only the current tool definitions."
+        ),
         toolsAdded: [loadedDefinition]
     });
     expect(session.snapshot().messages.some((message) => (
         message.role === "system" && message.toolsAdded !== undefined
     ))).toBe(false);
+});
+
+test("injects MCP catalog changes on the next user message", async () => {
+    let catalog = [mcpDefinition("mcp__first__lookup")];
+    const base = {
+        name: "exec_command",
+        description: "Run a command",
+        parameters: { type: "object", properties: {} }
+    };
+    const requests: LlmRequest[] = [];
+    const llm: LlmAdapter = {
+        getModel: () => MODEL,
+        stream(request) {
+            requests.push(request);
+            return (async function* (): AsyncIterable<LlmStreamEvent> {
+                yield { type: "done", message: assistantMessage() };
+            })();
+        }
+    };
+    const tools: ToolExecutor = {
+        definitions: [base],
+        getRegisteredTools: () => [base],
+        getContextSnapshotTools: () => catalog,
+        handles: () => true,
+        execute: async () => ({
+            content: "ok",
+            data: createGenericToolCallViewData("exec_command", {}, "completed"),
+            isError: false,
+            endReason: "exited"
+        }),
+        stop: async () => [],
+        dispose: () => undefined
+    };
+    const session = new Session(meta, [], tools);
+    const runtime = {
+        llm,
+        config: TEST_CONFIG,
+        workingDirectories: ["C:\\workspace"],
+        emit: () => undefined
+    };
+
+    session.providerContext(runtime.workingDirectories);
+    catalog = [mcpDefinition("mcp__second__lookup")];
+
+    const inspected = session.providerContext(runtime.workingDirectories);
+    expect(inspected.messages.some((message) => (
+        message.role === "system"
+        && message.content.includes(
+            'MCP tool "mcp__second__lookup" was added.'
+        )
+    ))).toBe(false);
+
+    await session.request("hello", runtime);
+
+    const changes = (requests[0]?.messages ?? []).flatMap((message) => (
+        message.role === "system"
+        && message.context === "injected"
+        && message.content.startsWith("MCP tool ")
+            ? [message]
+            : []
+    ));
+    expect(changes).toHaveLength(2);
+
+    const added = changes.find((message) => (
+        message.content.includes('MCP tool "mcp__second__lookup" was added.')
+    ));
+    expect(added?.content).toContain(
+        "Description: MCP tool mcp__second__lookup"
+    );
+    expect(added?.content).not.toContain("mcp__first__lookup");
+    expect(added).not.toMatchObject({
+        toolsAdded: expect.anything()
+    });
+
+    const removed = changes.find((message) => (
+        message.content.includes('MCP tool "mcp__first__lookup" was removed.')
+    ));
+    expect(removed?.content).not.toContain("mcp__second__lookup");
 });
 
 test("appends newly applicable AGENTS.md instructions without changing the prompt prefix", async () => {
@@ -1054,21 +1216,86 @@ test("appends newly applicable AGENTS.md instructions without changing the promp
             emit: () => undefined
         });
 
-        const prefix = requests[0]?.[0];
-        expect(prefix).toMatchObject({
+        const environment = requests[0]?.[0];
+        expect(environment).toMatchObject({
             role: "system",
-            context: "environment",
+            context: "injected"
+        });
+        expect(requests[0]?.[1]).toMatchObject({
+            role: "system",
+            context: "injected",
             content: expect.stringContaining("project rules")
         });
-        expect(requests[1]?.[0]).toBe(prefix);
+        expect(requests[1]?.[0]).toBe(environment);
         expect(requests[1]?.at(-1)).toMatchObject({
             role: "system",
-            context: "agent-instructions",
+            context: "injected",
             content: expect.stringContaining("app rules")
         });
         expect(session.snapshot().messages.some((message) => (
-            message.role === "system" && message.context === "agent-instructions"
+            message.role === "system" && message.context === "injected"
         ))).toBe(false);
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("injects AGENTS.md content changes on the next user message", async () => {
+    const root = mkdtempSync(join(tmpdir(), "jarvix-session-agents-change-"));
+    const workspace = join(root, "workspace");
+    const agentsPath = join(workspace, "AGENTS.md");
+    mkdirSync(workspace, { recursive: true });
+    writeFileSync(agentsPath, "original rules", "utf8");
+
+    try {
+        const requests: LlmRequest[] = [];
+        const llm: LlmAdapter = {
+            getModel: () => MODEL,
+            stream(request) {
+                requests.push(request);
+                return (async function* (): AsyncIterable<LlmStreamEvent> {
+                    yield { type: "done", message: assistantMessage() };
+                })();
+            }
+        };
+        const contextManagerFactory: ContextManagerFactory = (permission) => (
+            new DefaultContextManager(
+                permission,
+                SYSTEM_PROMPT,
+                new AgentInstructions({ homeDirectory: join(root, "home") })
+            )
+        );
+        const session = new Session(
+            meta,
+            [],
+            NO_TOOLS,
+            undefined,
+            contextManagerFactory
+        );
+        const runtime = {
+            llm,
+            config: TEST_CONFIG,
+            workingDirectories: [workspace],
+            emit: () => undefined
+        };
+
+        await session.request("first", runtime);
+        writeFileSync(agentsPath, "updated rules", "utf8");
+        await session.request("second", runtime);
+
+        expect(requests[1]?.messages.at(-2)).toMatchObject({
+            role: "system",
+            context: "injected",
+            content: expect.stringContaining(
+                "AGENTS.md instructions changed."
+            )
+        });
+        expect(requests[1]?.messages.at(-2)).toMatchObject({
+            content: expect.stringContaining("updated rules")
+        });
+        expect(requests[1]?.messages.at(-2)).not.toMatchObject({
+            content: expect.stringContaining("original rules")
+        });
     } finally {
         rmSync(root, { recursive: true, force: true });
     }
@@ -1322,12 +1549,12 @@ test("injects permission notices after tool results before the next LLM request"
         "user",
         "assistant",
         "toolResult",
-        "user",
+        "system",
         "user"
     ]);
     expect(requests[1]?.[4]).toMatchObject({
-        role: "user",
-        context: "system-reminder",
+        role: "system",
+        context: "injected",
         content: expect.stringContaining("permission: full-access")
     });
     expect(requests[1]?.[5]).toMatchObject({
@@ -1335,20 +1562,20 @@ test("injects permission notices after tool results before the next LLM request"
         content: "after permission"
     });
     const toolEnd = events.findIndex((event) => event.type === "tool.end");
-    const systemMessage = events.findIndex((event) => event.type === "system.message");
     const injected = events.findIndex((event) => event.type === "prompt.injected");
     expect(toolEnd).toBeGreaterThan(-1);
-    expect(systemMessage).toBeGreaterThan(toolEnd);
-    expect(injected).toBeGreaterThan(systemMessage);
+    expect(injected).toBeGreaterThan(toolEnd);
 });
 
-test("records a permission change during the final round without another LLM request", async () => {
+test("does not inject permission changes until the next user message", async () => {
     const events: JarvixEvent[] = [];
+    const requests: LlmRequest[] = [];
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
         release = resolve;
     });
-    const stream = vi.fn(() => (async function* (): AsyncIterable<LlmStreamEvent> {
+    const stream = vi.fn((request: LlmRequest) => (async function* (): AsyncIterable<LlmStreamEvent> {
+        requests.push(request);
         yield { type: "start" };
         await gate;
         yield { type: "done", message: assistantMessage() };
@@ -1373,18 +1600,25 @@ test("records a permission change during the final round without another LLM req
     expect(stream).toHaveBeenCalledTimes(1);
     expect(session.snapshot().messages.map((message) => message.role)).toEqual([
         "user",
-        "assistant",
-        "user"
+        "assistant"
     ]);
-    expect(events.filter((event) => event.type === "system.message")).toEqual([
-        {
-            type: "system.message",
-            message: expect.objectContaining({
-                role: "system",
-                content: expect.stringContaining("permission: full-access")
-            })
-        }
-    ]);
+    expect(events.some((event) => event.type === "system.message")).toBe(false);
+    expect(session.providerContext().messages.some((message) => (
+        message.role === "system"
+        && message.content.includes("permission: full-access")
+    ))).toBe(false);
+
+    await session.request("next", {
+        llm: { getModel: () => MODEL, stream },
+        config: TEST_CONFIG,
+        emit: () => undefined
+    });
+
+    expect(requests[1]?.messages.at(-2)).toMatchObject({
+        role: "system",
+        context: "injected",
+        content: expect.stringContaining("permission: full-access")
+    });
 });
 
 test("resets the round limit after injecting a prompt", async () => {
@@ -2035,6 +2269,17 @@ function streamLlm(events: AsyncIterable<LlmStreamEvent>): LlmAdapter {
         getModel: () => MODEL,
         stream(): AsyncIterable<LlmStreamEvent> {
             return events;
+        }
+    };
+}
+
+function mcpDefinition(name: string) {
+    return {
+        name,
+        description: `MCP tool ${name}`,
+        parameters: {
+            type: "object",
+            properties: {}
         }
     };
 }
