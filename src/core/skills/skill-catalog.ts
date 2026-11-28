@@ -106,29 +106,53 @@ export function skillRootDirectories(
 export function availableSkillsMessage(
     skills: readonly JarvixSkill[]
 ): LlmSystemMessage | null {
-    const available = skills.filter((skill) => skill.modelInvocable);
-    if (available.length === 0) {
+    const context = availableSkillsContext(skills);
+    if (!context.hasSkills) {
         return null;
     }
     return {
         role: "system",
+        content: context.content,
+        timestamp: Date.now()
+    };
+}
+
+export type AvailableSkillsContext = {
+    content: string;
+    fingerprint: string;
+    hasSkills: boolean;
+    skills: readonly JarvixSkill[];
+};
+
+export function availableSkillsContext(
+    skills: readonly JarvixSkill[]
+): AvailableSkillsContext {
+    const available = skills.filter((skill) => skill.modelInvocable);
+    return {
         content: [
             "<available_skills>",
             "The following skills provide specialized instructions for specific tasks.",
             "When a task matches a skill's description, use exec_command to read the SKILL.md at its location before proceeding.",
             "Resolve relative paths against the skill's directory, which is the parent of SKILL.md.",
-            ...available.flatMap((skill) => [
-                "",
-                "<skill>",
-                `<name>${escapeXml(skill.name)}</name>`,
-                `<description>${escapeXml(skill.description)}</description>`,
-                `<location>${escapeXml(skill.location)}</location>`,
-                "</skill>"
-            ]),
+            ...(available.length === 0
+                ? ["", "No skills are currently available."]
+                : available.flatMap((skill) => [
+                    "",
+                    "<skill>",
+                    `<name>${escapeXml(skill.name)}</name>`,
+                    `<description>${escapeXml(skill.description)}</description>`,
+                    `<location>${escapeXml(skill.location)}</location>`,
+                    "</skill>"
+                ])),
             "</available_skills>"
         ].join("\n"),
-        context: "skills",
-        timestamp: Date.now()
+        fingerprint: JSON.stringify(available.map((skill) => [
+            skill.name,
+            skill.description,
+            skill.location
+        ])),
+        hasSkills: available.length > 0,
+        skills: available
     };
 }
 
@@ -146,7 +170,6 @@ export function skillContentMessage(
             "Relative paths in this skill are relative to the skill directory.",
             "</skill_content>"
         ].join("\n"),
-        context: "skill",
         timestamp: Date.now()
     };
 }

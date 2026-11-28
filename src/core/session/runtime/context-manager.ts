@@ -1,8 +1,6 @@
 import type {
     LlmMessage,
-    LlmSystemMessage,
-    LlmToolDefinition,
-    LlmUserMessage
+    LlmToolDefinition
 } from "../../../protocol/llm.ts";
 import type { JarvixContextUsage } from "../../../protocol/context-usage.ts";
 import type { PermissionMode } from "../../../protocol/permission.ts";
@@ -11,22 +9,20 @@ import {
     type AgentInstructionSource
 } from "./agent-instructions.ts";
 import {
-    availableSkillsMessage,
+    availableSkillsContext,
     type SkillCatalog
 } from "../../skills/skill-catalog.ts";
 import { estimateContextUsage } from "./context-usage.ts";
 import {
     SYSTEM_PROMPT,
-    environmentContextFor,
-    environmentKeyFor,
-    environmentReminderFor,
-    isEnvironmentContextMessage
+    environmentContextFor
 } from "./environment.ts";
-
-export type EnvironmentReminder = {
-    persisted: LlmUserMessage;
-    display: LlmSystemMessage;
-};
+import {
+    CONTEXT_SNAPSHOT_KEYS,
+    type ContextSnapshotSource,
+    isContextInjectionMessage,
+    isPersistedContextInjectionMessage
+} from "./context-injection.ts";
 
 export type ContextRequest = {
     systemPrompt: string;
@@ -34,34 +30,31 @@ export type ContextRequest = {
 };
 
 export type ContextRequestOptions = {
-    goal?: string;
     requireFinishGoal?: boolean;
 };
 
 export type ContextManagerUsageInput = {
     contextWindow: number;
     history: readonly LlmMessage[];
-    workingDirectories?: readonly string[];
     tools?: readonly LlmToolDefinition[];
-    goal?: string;
 };
 
 export interface ContextManager {
     readonly systemPrompt: string;
+    contextSources?(
+        workingDirectories?: readonly string[]
+    ): readonly ContextSnapshotSource[];
+    contextSource?(
+        key: string,
+        workingDirectories?: readonly string[]
+    ): ContextSnapshotSource | null;
     initializeHistory(messages: readonly LlmMessage[]): LlmMessage[];
-    ensureEnvironmentContext(
-        workingDirectories?: readonly string[]
-    ): LlmSystemMessage | null;
-    environmentReminderIfChanged(
-        workingDirectories?: readonly string[]
-    ): EnvironmentReminder | null;
     discoverAgentInstructions?(
         paths: readonly string[],
         workingDirectories?: readonly string[]
     ): readonly AgentInstructionSource[];
     prepareRequest(
         history: readonly LlmMessage[],
-        workingDirectories?: readonly string[],
         options?: ContextRequestOptions
     ): ContextRequest;
     visibleHistory(messages: readonly LlmMessage[]): LlmMessage[];
@@ -84,20 +77,6 @@ function systemPromptFor(
         : base;
 }
 
-function goalContextMessage(goal: string): LlmSystemMessage {
-    return {
-        role: "system",
-        content: [
-            "The active goal is:",
-            "<goal>",
-            goal,
-            "</goal>"
-        ].join("\n"),
-        context: "goal",
-        timestamp: Date.now()
-    };
-}
-
 export type ContextManagerFactory = (permission: () => PermissionMode) => ContextManager;
 
 export class DefaultContextManager implements ContextManager {
@@ -105,8 +84,6 @@ export class DefaultContextManager implements ContextManager {
     private readonly permission: () => PermissionMode;
     private readonly agentInstructions: AgentInstructions;
     private readonly skills: SkillCatalog | null;
-    private contextMessage: LlmSystemMessage | null = null;
-    private environmentKey: string | null = null;
 
     constructor(
         permission: () => PermissionMode,
@@ -121,49 +98,36 @@ export class DefaultContextManager implements ContextManager {
     }
 
     initializeHistory(messages: readonly LlmMessage[]): LlmMessage[] {
-        const history = [...messages];
-        const context = history.find(isEnvironmentContextMessage);
-        if (!context) {
-            return history;
-        }
-        this.contextMessage = context;
-        this.environmentKey = context.environmentKey ?? null;
+        return messages.filter((message) => (
+            !isContextInjectionMessage(message)
+            || isPersistedContextInjectionMessage(message)
+        ));
+    }
+
+    contextSources(
+        workingDirectories: readonly string[] = []
+    ): readonly ContextSnapshotSource[] {
         return [
-            context,
-            ...history.filter((message) => message !== context)
+            this.contextSource(CONTEXT_SNAPSHOT_KEYS.skills, workingDirectories)!,
+            this.contextSource(CONTEXT_SNAPSHOT_KEYS.environment, workingDirectories)!,
+            this.contextSource(CONTEXT_SNAPSHOT_KEYS.agents, workingDirectories)!
         ];
     }
 
-    ensureEnvironmentContext(
+    contextSource(
+        key: string,
         workingDirectories: readonly string[] = []
-    ): LlmSystemMessage | null {
-        if (this.contextMessage) {
-            return null;
+    ): ContextSnapshotSource | null {
+        if (key === CONTEXT_SNAPSHOT_KEYS.skills) {
+            return this.skillsSource(workingDirectories);
         }
-        const key = environmentKeyFor(this.permission(), workingDirectories);
-        const message: LlmSystemMessage = {
-            ...environmentContextFor(
-                this.permission(),
-                workingDirectories,
-                this.agentInstructions.staticInstructions(workingDirectories)
-            ),
-            context: "environment",
-            environmentKey: key
-        };
-        this.contextMessage = message;
-        this.environmentKey = key;
-        return message;
-    }
-
-    environmentReminderIfChanged(
-        workingDirectories: readonly string[] = []
-    ): EnvironmentReminder | null {
-        const key = environmentKeyFor(this.permission(), workingDirectories);
-        if (key === this.environmentKey) {
-            return null;
+        if (key === CONTEXT_SNAPSHOT_KEYS.environment) {
+            return this.environmentSource(workingDirectories);
         }
-        this.environmentKey = key;
-        return environmentReminderFor(this.permission(), workingDirectories);
+        if (key === CONTEXT_SNAPSHOT_KEYS.agents) {
+            return this.agentsSource(workingDirectories);
+        }
+        return null;
     }
 
     discoverAgentInstructions(
@@ -175,76 +139,142 @@ export class DefaultContextManager implements ContextManager {
 
     prepareRequest(
         history: readonly LlmMessage[],
-        workingDirectories: readonly string[] = [],
         options: ContextRequestOptions = {}
     ): ContextRequest {
-        const key = environmentKeyFor(this.permission(), workingDirectories);
-        let messages: LlmMessage[];
-        if (!this.contextMessage) {
-            messages = [
-                {
-                    ...environmentContextFor(
-                        this.permission(),
-                        workingDirectories,
-                        this.agentInstructions.staticInstructions(workingDirectories)
-                    ),
-                    context: "environment",
-                    environmentKey: key
-                },
-                ...history
-            ];
-        } else {
-            messages = [...history];
-            if (this.environmentKey !== key) {
-                messages.push(
-                    environmentReminderFor(this.permission(), workingDirectories).persisted
-                );
-            }
-        }
-        const skills = this.skills
-            ? availableSkillsMessage(this.skills.discover(workingDirectories))
-            : null;
-        if (skills) {
-            const environmentIndex = messages[0]?.role === "system"
-                && messages[0].context === "environment"
-                ? 1
-                : 0;
-            messages.splice(environmentIndex, 0, skills);
-        }
-        if (options.goal) {
-            messages.push(goalContextMessage(options.goal));
-        }
         return {
             systemPrompt: systemPromptFor(this.systemPrompt, options),
-            messages
+            messages: [...history]
         };
     }
 
     visibleHistory(messages: readonly LlmMessage[]): LlmMessage[] {
-        return messages.filter((message) => !(
-            message.role === "system" &&
-            (
-                message.context === "environment"
-                || message.context === "goal"
-                || message.context === "agent-instructions"
-                || message.context === "skills"
-                || message.context === "skill"
-            )
-        ));
+        return messages.filter((message) => !isContextInjectionMessage(message));
     }
 
     estimateUsage(input: ContextManagerUsageInput): JarvixContextUsage {
-        const request = this.prepareRequest(
-            input.history,
-            input.workingDirectories,
-            { goal: input.goal }
-        );
+        const request = this.prepareRequest(input.history);
         return estimateContextUsage({
             contextWindow: input.contextWindow,
             systemPrompt: request.systemPrompt,
             messages: request.messages,
             tools: input.tools
         });
+    }
+
+    private skillsSource(
+        workingDirectories: readonly string[]
+    ): ContextSnapshotSource {
+        const context = availableSkillsContext(
+            this.skills?.discover(workingDirectories) ?? []
+        );
+        return {
+            key: CONTEXT_SNAPSHOT_KEYS.skills,
+            fingerprint: context.fingerprint,
+            initial: context.hasSkills
+                ? {
+                    declaration: [
+                        "Available skills were discovered when the",
+                        "session was created."
+                    ].join(" "),
+                    content: context.content
+                }
+                : null,
+            change: (previousFingerprint) => {
+                const previousNames = skillNamesFromFingerprint(
+                    previousFingerprint
+                );
+                if (!previousNames) {
+                    return [];
+                }
+                const previous = new Set(previousNames);
+                const current = new Set(
+                    context.skills.map((skill) => skill.name)
+                );
+                return [
+                    ...context.skills
+                        .filter((skill) => !previous.has(skill.name))
+                        .map((skill) => ({
+                            declaration: `Skill "${skill.name}" was added.`,
+                            content: availableSkillsContext([skill]).content
+                        })),
+                    ...previousNames
+                        .filter((name) => !current.has(name))
+                        .map((name) => ({
+                            declaration: `Skill "${name}" was removed.`,
+                            content: `Removed skill: "${name}".`
+                        }))
+                ];
+            }
+        };
+    }
+
+    private environmentSource(
+        workingDirectories: readonly string[]
+    ): ContextSnapshotSource {
+        const content = environmentContextFor(
+            this.permission(),
+            workingDirectories
+        ).content;
+        return {
+            key: CONTEXT_SNAPSHOT_KEYS.environment,
+            fingerprint: content,
+            initial: {
+                declaration: [
+                    "The session environment was initialized for the",
+                    "current permission and working directories."
+                ].join(" "),
+                content
+            },
+            change: () => ({
+                declaration: [
+                    "The session environment changed. Apply the current",
+                    "permission and working directories."
+                ].join(" "),
+                content
+            })
+        };
+    }
+
+    private agentsSource(
+        workingDirectories: readonly string[]
+    ): ContextSnapshotSource {
+        const snapshot = this.agentInstructions.snapshot(workingDirectories);
+        return {
+            key: CONTEXT_SNAPSHOT_KEYS.agents,
+            fingerprint: snapshot.fingerprint,
+            initial: snapshot.sources.length > 0
+                ? {
+                    declaration: [
+                        "AGENTS.md instructions were loaded when the",
+                        "session was created."
+                    ].join(" "),
+                    content: snapshot.content
+                }
+                : null,
+            change: () => ({
+                declaration: [
+                    "AGENTS.md instructions changed. Use only the current",
+                    "instructions below."
+                ].join(" "),
+                content: snapshot.content
+            })
+        };
+    }
+}
+
+function skillNamesFromFingerprint(value: string): string[] | null {
+    try {
+        const parsed = JSON.parse(value) as unknown;
+        if (!Array.isArray(parsed)) {
+            return null;
+        }
+        return parsed.flatMap((item) => (
+            Array.isArray(item) && typeof item[0] === "string"
+                ? [item[0]]
+                : []
+        ));
+    } catch {
+        return null;
     }
 }
 

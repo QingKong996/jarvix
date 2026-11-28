@@ -168,10 +168,20 @@ export type LlmSystemMessage = {
     toolsAdded?: LlmToolDefinition[];
     /** Tools that stop being available after this message. */
     toolsRemoved?: LlmToolReference[];
-    /** Internal marker for injected system context. */
-    context?: "environment" | "goal" | "agent-instructions" | "skills" | "skill";
-    /** Fingerprint used to detect environment changes without rewriting the snapshot. */
+    /** Internal marker for injected system context. Legacy kinds remain readable. */
+    context?:
+        | "injected"
+        | "environment"
+        | "goal"
+        | "agent-instructions"
+        | "skills"
+        | "skill";
+    /** Legacy fingerprint retained for sessions written by older versions. */
     environmentKey?: string;
+    /** Snapshot source used to restore injected context after a reload. */
+    contextKey?: string;
+    /** Fingerprint of the injected snapshot, retained for change detection. */
+    contextFingerprint?: string;
 };
 
 export type LlmMessage = LlmUserMessage | LlmAssistantMessage | LlmToolResultMessage | LlmSystemMessage;

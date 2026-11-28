@@ -384,6 +384,7 @@ export class SessionManager {
                 },
                 finishGoal: (signal) => instance.finishGoal(signal)
             }));
+            instance.initializeContext(workingDirectoriesFor(session.meta));
         } catch (error) {
             tools.dispose();
             if (!existingPermissions) {

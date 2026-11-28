@@ -105,6 +105,7 @@ export type ToolExecutionObserver = {
 export type ToolExecutor = {
     readonly definitions: readonly LlmToolDefinition[];
     getRegisteredTools?(permission: PermissionMode): readonly LlmToolDefinition[];
+    getContextSnapshotTools?(): readonly LlmToolDefinition[];
     getDeferredTools?(): readonly DeferredToolDefinition[];
     loadDeferredTool?(name: string): DeferredToolLoadResult;
     hasActiveWork?(): boolean;

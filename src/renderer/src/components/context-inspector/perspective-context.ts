@@ -11,7 +11,6 @@ export const PERSPECTIVE_CONTEXT_KINDS = [
     "tools",
     "user",
     "injected",
-    "skills",
     "assistant",
     "tool"
 ] as const;

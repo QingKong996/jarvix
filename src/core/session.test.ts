@@ -24,7 +24,11 @@ import {
     type AgentTurnStarted
 } from "./observability/index.ts";
 import { SESSION_NAME_MAX_LENGTH } from "../protocol/session.ts";
-import { SkillCatalog } from "./skills/skill-catalog.ts";
+import {
+    availableSkillsContext,
+    SkillCatalog
+} from "./skills/skill-catalog.ts";
+import type { JarvixSkillSettings } from "../protocol/skill.ts";
 
 const home = vi.hoisted(() => ({ path: "" }));
 
@@ -167,18 +171,46 @@ test("persists each turn and resumes the stored history for the next request", a
     if (!stored) {
         throw new Error("Expected the first session to be persisted");
     }
-    expect(stored?.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
-    expect(stored?.messages[0]).toMatchObject({ role: "user", content: "first question" });
+    expect(stored?.messages.map((message) => message.role)).toEqual([
+        "system",
+        "user",
+        "assistant"
+    ]);
+    expect(stored?.messages[0]).toMatchObject({
+        role: "system",
+        context: "injected",
+        contextKey: "environment"
+    });
+    expect(stored?.messages[1]).toMatchObject({
+        role: "user",
+        content: "first question"
+    });
 
     const second = new Jarvix({ llm: fakeLlm("second reply", requests), config: TEST_CONFIG });
     expect(second.loadSession(stored.meta.id)?.messages).toHaveLength(2);
+    const restored = second.getProviderContext(stored.meta.id);
+    expect(restored.messages[0]).toMatchObject({
+        role: "system",
+        context: "injected",
+        contextKey: "environment"
+    });
+    expect(restored.messages.filter((message) => (
+        message.role === "system"
+        && message.contextKey === "environment"
+    ))).toHaveLength(1);
     await second.request("second question", stored.meta.id);
 
     expect(requests[1]?.map((message) => message.role))
         .toEqual(["system", "user", "assistant", "user"]);
 
     const reloaded = loadSession(stored.meta.id, directory);
-    expect(reloaded?.messages.map((message) => message.role)).toEqual(["user", "assistant", "user", "assistant"]);
+    expect(reloaded?.messages.map((message) => message.role)).toEqual([
+        "system",
+        "user",
+        "assistant",
+        "user",
+        "assistant"
+    ]);
 });
 
 test("loads model-disabled skills manually as hidden tail context", async () => {
@@ -224,12 +256,222 @@ test("loads model-disabled skills manually as hidden tail context", async () => 
         message.role === "system" && message.context === "skills"
     ))).toBe(false);
     expect(requests[0]?.find((message) => (
-        message.role === "system" && message.context === "skill"
+        message.role === "system" && message.context === "injected"
+        && message.content.includes("# PDF processing")
     ))).toMatchObject({
         content: expect.stringContaining("# PDF processing")
     });
     expect(jarvix.loadSession(session.meta.id)?.messages.map((message) => message.role))
         .toEqual(["user", "assistant"]);
+});
+
+test("injects available skills at session creation as leading context", async () => {
+    home.path = join(base, "session-skill-home");
+    const workspace = join(home.path, "workspace");
+    const skillDirectory = join(
+        home.path,
+        ".agents",
+        "skills",
+        "tdd"
+    );
+    mkdirSync(skillDirectory, { recursive: true });
+    writeFileSync(join(skillDirectory, "SKILL.md"), [
+        "---",
+        "name: tdd",
+        "description: Test-driven development",
+        "---",
+        "",
+        "# TDD"
+    ].join("\n"), "utf8");
+    const catalog = new SkillCatalog({ homeDirectory: home.path });
+    const discover = vi.spyOn(catalog, "discover");
+    const jarvix = new Jarvix({
+        llm: fakeLlm("ok", []),
+        config: TEST_CONFIG,
+        skillCatalog: catalog
+    });
+    const project = jarvix.createProject("Skill project", [workspace]);
+    const session = jarvix.createSession({ projectId: project.id }, SESSION_NAME);
+
+    expect(discover).toHaveBeenCalledTimes(1);
+
+    const context = jarvix.getProviderContext(session.meta.id);
+    expect(context.messages[0]).toMatchObject({
+        role: "system",
+        context: "injected",
+        content: expect.stringContaining(
+            "Available skills were discovered when the session was created."
+        )
+    });
+    expect(context.messages[1]).toMatchObject({
+        role: "system",
+        context: "injected",
+        content: expect.stringContaining("<environment_context>")
+    });
+    expect(context.messages[0]).toMatchObject({
+        content: expect.stringContaining("<name>tdd</name>")
+    });
+    expect(discover).toHaveBeenCalledTimes(1);
+    await jarvix.request("hello", session.meta.id);
+    expect(discover).toHaveBeenCalledTimes(2);
+    expect(jarvix.loadSession(session.meta.id)?.messages.map((message) => (
+        message.role
+    ))).toEqual(["user", "assistant"]);
+});
+
+test("injects atomic skill additions and removals after settings change", async () => {
+    home.path = join(base, "session-skill-change-home");
+    const workspace = join(home.path, "workspace");
+    const tddDirectory = join(
+        home.path,
+        ".agents",
+        "skills",
+        "tdd"
+    );
+    const pdfDirectory = join(
+        home.path,
+        ".agents",
+        "skills",
+        "pdf"
+    );
+    const imageDirectory = join(
+        home.path,
+        ".agents",
+        "skills",
+        "image"
+    );
+    mkdirSync(tddDirectory, { recursive: true });
+    mkdirSync(pdfDirectory, { recursive: true });
+    mkdirSync(imageDirectory, { recursive: true });
+    writeFileSync(join(tddDirectory, "SKILL.md"), [
+        "---",
+        "name: tdd",
+        "description: Test-driven development",
+        "---",
+        "",
+        "# TDD"
+    ].join("\n"), "utf8");
+    writeFileSync(join(pdfDirectory, "SKILL.md"), [
+        "---",
+        "name: pdf",
+        "description: PDF processing",
+        "---",
+        "",
+        "# PDF"
+    ].join("\n"), "utf8");
+    writeFileSync(join(imageDirectory, "SKILL.md"), [
+        "---",
+        "name: image",
+        "description: Image processing",
+        "---",
+        "",
+        "# Image"
+    ].join("\n"), "utf8");
+    const tddLocation = join(tddDirectory, "SKILL.md");
+    const pdfLocation = join(pdfDirectory, "SKILL.md");
+    const imageLocation = join(imageDirectory, "SKILL.md");
+    let settings: JarvixSkillSettings = {
+        [pdfLocation]: false,
+        [imageLocation]: false
+    };
+    const catalog = new SkillCatalog({
+        homeDirectory: home.path,
+        settings: () => settings
+    });
+    const requests: LlmMessage[][] = [];
+    const jarvix = new Jarvix({
+        llm: fakeLlm("ok", requests),
+        config: TEST_CONFIG,
+        skillCatalog: catalog
+    });
+    const project = jarvix.createProject("Skill project", [workspace]);
+    const session = jarvix.createSession({ projectId: project.id }, SESSION_NAME);
+    const skills = catalog.discover([workspace]);
+    const tdd = skills.find((skill) => skill.name === "tdd")!;
+    const pdf = skills.find((skill) => skill.name === "pdf")!;
+    const image = skills.find((skill) => skill.name === "image")!;
+
+    expect(tdd).toMatchObject({ name: "tdd", modelInvocable: true });
+    expect(pdf).toMatchObject({ name: "pdf", modelInvocable: false });
+    expect(image).toMatchObject({ name: "image", modelInvocable: false });
+
+    settings = {
+        [tddLocation]: false,
+        [pdfLocation]: true,
+        [imageLocation]: true
+    };
+    const enabledSkills = catalog.discover([workspace]);
+    jarvix.setConfig({ ...TEST_CONFIG, skills: settings });
+
+    const beforeRequest = jarvix.getProviderContext(session.meta.id);
+    expect(beforeRequest.messages.some((message) => (
+        message.role === "system"
+        && (
+            message.content.includes('Skill "tdd" was removed.')
+            || message.content.includes('Skill "pdf" was added.')
+            || message.content.includes('Skill "image" was added.')
+        )
+    ))).toBe(false);
+
+    await jarvix.request("hello", session.meta.id);
+
+    const skillChanges = (requests[0] ?? []).flatMap((message) => (
+        message.role === "system"
+        && message.context === "injected"
+        && (
+            message.content.includes('Skill "pdf" was added.')
+            || message.content.includes('Skill "image" was added.')
+            || message.content.includes('Skill "tdd" was removed.')
+        )
+            ? [message]
+            : []
+    ));
+    expect(skillChanges).toHaveLength(3);
+
+    const addedPdf = skillChanges.find((message) => (
+        message.content.includes('Skill "pdf" was added.')
+    ));
+    expect(addedPdf?.content).toContain(availableSkillsContext([
+        enabledSkills.find((skill) => skill.name === "pdf")!
+    ]).content);
+    expect(addedPdf?.content).not.toContain("tdd");
+    expect(addedPdf?.content).not.toContain("image");
+
+    const addedImage = skillChanges.find((message) => (
+        message.content.includes('Skill "image" was added.')
+    ));
+    expect(addedImage?.content).toContain(availableSkillsContext([
+        enabledSkills.find((skill) => skill.name === "image")!
+    ]).content);
+    expect(addedImage?.content).not.toContain("tdd");
+    expect(addedImage?.content).not.toContain("pdf");
+
+    const removed = skillChanges.find((message) => (
+        message.content.includes('Skill "tdd" was removed.')
+    ));
+    expect(removed?.content).toContain('Removed skill: "tdd".');
+    expect(removed?.content).not.toContain("pdf");
+    expect(removed?.content).not.toContain("Test-driven development");
+    expect(removed?.content).not.toContain("<available_skills>");
+
+    const directory = join(home.path, ".jarvix", "sessions");
+    const persisted = loadSession(session.meta.id, directory)?.messages.filter(
+        (message) => message.role === "system"
+            && message.contextKey === "skills"
+    ) ?? [];
+    expect(persisted).toHaveLength(4);
+
+    const reloadedRequests: LlmMessage[][] = [];
+    const restarted = new Jarvix({
+        llm: fakeLlm("ok", reloadedRequests),
+        config: TEST_CONFIG,
+        skillCatalog: catalog
+    });
+    await restarted.request("next", session.meta.id);
+    expect((reloadedRequests[0] ?? []).filter((message) => (
+        message.role === "system"
+        && message.contextKey === "skills"
+    ))).toHaveLength(4);
 });
 
 test.each<{ language: Language; name: string }>([
@@ -250,7 +492,8 @@ test.each<{ language: Language; name: string }>([
     const session = jarvix.loadSession(created.meta.id);
     expect(loadSession(created.meta.id, directory)?.meta.name).toBe(name);
     expect(session?.messages).toHaveLength(2);
-    expect(loadSession(session?.meta.id ?? "", directory)?.messages).toHaveLength(2);
+    expect(loadSession(session?.meta.id ?? "", directory)?.messages)
+        .toHaveLength(3);
 });
 
 test("uses the current configured language when creating a session with a blank name", () => {
@@ -306,16 +549,14 @@ test("returns the assembled final provider context for static inspection", async
     ]);
     expect(context.messages[0]).toMatchObject({
         role: "system",
-        context: "environment",
+        context: "injected",
         content: expect.stringContaining(join(home.path, "workspace"))
     });
 
     jarvix.setPermission(session.meta.id, "full-access");
     const updated = jarvix.getProviderContext(session.meta.id);
     expect(updated.messages.at(-1)).toMatchObject({
-        role: "user",
-        context: "system-reminder",
-        content: expect.stringContaining("permission: full-access")
+        role: "assistant"
     });
     expect(jarvix.loadSession(session.meta.id)?.messages.map((message) => message.role))
         .toEqual(["user", "assistant"]);
@@ -359,8 +600,8 @@ test("runs separate sessions in parallel with isolated histories", async () => {
     expect(firstSession?.messages[0]).toMatchObject({ role: "user", content: "first" });
     expect(secondSession?.messages[0]).toMatchObject({ role: "user", content: "second" });
     expect([...eventSessions].sort()).toEqual([first.meta.id, second.meta.id].sort());
-    expect(loadSession(first.meta.id, directory)?.messages).toHaveLength(2);
-    expect(loadSession(second.meta.id, directory)?.messages).toHaveLength(2);
+    expect(loadSession(first.meta.id, directory)?.messages).toHaveLength(3);
+    expect(loadSession(second.meta.id, directory)?.messages).toHaveLength(3);
     const summaries = jarvix.listSessions();
     expect(summaries.map((session) => session.name).sort()).toEqual(["First session", "Second session"]);
 });
@@ -698,8 +939,29 @@ test("emits each goal change and context refresh exactly once", async () => {
     });
 
     const first = jarvix.setGoal(session.meta.id, "First goal");
+    expect(jarvix.getProviderContext(session.meta.id).messages.at(-1)).toMatchObject({
+        role: "system",
+        context: "injected",
+        content: expect.stringContaining(
+            "An active goal was set for this session."
+        )
+    });
     const second = jarvix.setGoal(session.meta.id, "Second goal");
+    expect(jarvix.getProviderContext(session.meta.id).messages.at(-1)).toMatchObject({
+        role: "system",
+        context: "injected",
+        content: expect.stringContaining(
+            "The active goal was replaced."
+        )
+    });
     jarvix.clearGoal(session.meta.id);
+    expect(jarvix.getProviderContext(session.meta.id).messages.at(-1)).toMatchObject({
+        role: "system",
+        context: "injected",
+        content: expect.stringContaining(
+            "The active goal was cleared. No goal is active."
+        )
+    });
 
     expect(goalEvents).toEqual([first, second, null]);
     expect(contextUsageEvents).toBe(3);
@@ -742,7 +1004,7 @@ test("restores a goal without running it and uses a fresh verifier for finish_go
     expect(requests).toHaveLength(2);
     expect(requests[0]?.messages.at(-1)).toMatchObject({
         role: "system",
-        context: "goal",
+        context: "injected",
         content: expect.stringContaining("<goal>\nShip feature A\n</goal>")
     });
     expect(requests[0]?.tools?.map((tool) => tool.name)).toContain("finish_goal");

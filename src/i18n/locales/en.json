@@ -278,8 +278,7 @@
                     "systemPrompt": "System prompt",
                     "tools": "Tool schemas",
                     "user": "User messages",
-                    "injected": "Injected context",
-                    "skills": "Skills",
+                    "injected": "Injected content",
                     "assistant": "Assistant",
                     "tool": "Tool calls"
                 }
@@ -300,6 +299,7 @@
             },
             "roles": {
                 "system": "System",
+                "injected": "Injected content",
                 "user": "User",
                 "assistant": "Assistant",
                 "toolCall": "Tool call",

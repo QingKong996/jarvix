@@ -60,7 +60,6 @@ export function estimateContextBreakdown(
             : 0,
         user: 0,
         injected: 0,
-        skills: 0,
         assistant: 0,
         tool: 0
     };
@@ -73,11 +72,7 @@ export function estimateContextBreakdown(
                 ] += estimateMessageTokens(message);
                 break;
             case "system":
-                breakdown[
-                    message.context === "skills" || message.context === "skill"
-                        ? "skills"
-                        : "injected"
-                ] += estimateMessageTokens(message);
+                breakdown.injected += estimateMessageTokens(message);
                 break;
             case "toolResult":
                 breakdown.tool += estimateMessageTokens(message);

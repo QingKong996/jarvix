@@ -37,11 +37,17 @@ export type AgentInstructionsOptions = {
     homeDirectory?: string;
 };
 
+export type AgentInstructionsSnapshot = {
+    sources: readonly AgentInstructionSource[];
+    content: string;
+    fingerprint: string;
+};
+
 /** Loads stable AGENTS.md context once and appends newly relevant files on demand. */
 export class AgentInstructions {
     private readonly homeDirectory: string;
     private readonly staticPaths = new Set<string>();
-    private readonly loadedPaths = new Set<string>();
+    private readonly loadedPaths = new Map<string, string>();
     private staticKey: string | null = null;
     private staticPrompt: string | null = null;
 
@@ -55,40 +61,31 @@ export class AgentInstructions {
             return this.staticPrompt;
         }
 
+        if (this.staticKey !== key) {
+            this.loadedPaths.clear();
+        }
         this.staticPaths.clear();
-        const sources: AgentInstructionSource[] = [];
-        const globalPath = join(
-            this.homeDirectory,
-            GLOBAL_CONFIG_DIRECTORY,
-            AGENTS_FILE_NAME
-        );
-        this.staticPaths.add(pathKey(globalPath));
-        const global = readInstruction(globalPath, "global");
-        if (global) {
-            sources.push(global);
-        }
-
-        for (const directory of workingDirectories) {
-            const projectPath = join(resolve(directory), AGENTS_FILE_NAME);
-            const key = pathKey(projectPath);
-            if (this.staticPaths.has(key)) {
-                continue;
-            }
-            this.staticPaths.add(key);
-            const project = readInstruction(projectPath, "project");
-            if (project) {
-                sources.push(project);
-            }
-        }
-
-        this.staticPrompt = [
-            "<agent_instructions>",
-            AGENT_INSTRUCTIONS_GUIDANCE,
-            ...sources.flatMap((source) => ["", renderInstruction(source)]),
-            "</agent_instructions>"
-        ].join("\n");
+        const sources = this.staticSources(workingDirectories);
+        this.staticPrompt = renderAgentInstructions(sources);
         this.staticKey = key;
         return this.staticPrompt;
+    }
+
+    snapshot(
+        workingDirectories: readonly string[] = []
+    ): AgentInstructionsSnapshot {
+        this.staticInstructions(workingDirectories);
+        const sources = [
+            ...this.staticSources(workingDirectories),
+            ...this.loadedSources()
+        ];
+        return {
+            sources,
+            content: renderAgentInstructions(sources),
+            fingerprint: JSON.stringify(sources.map(
+                (source) => [source.path, source.content]
+            ))
+        };
     }
 
     discover(
@@ -119,10 +116,56 @@ export class AgentInstructions {
             if (!source) {
                 continue;
             }
-            this.loadedPaths.add(key);
+            this.loadedPaths.set(key, source.path);
             discovered.push(source);
         }
         return discovered;
+    }
+
+    private staticSources(
+        workingDirectories: readonly string[]
+    ): AgentInstructionSource[] {
+        const sources: AgentInstructionSource[] = [];
+        const paths = new Set<string>();
+        const globalPath = join(
+            this.homeDirectory,
+            GLOBAL_CONFIG_DIRECTORY,
+            AGENTS_FILE_NAME
+        );
+        this.staticPaths.add(pathKey(globalPath));
+        paths.add(pathKey(globalPath));
+        const global = readInstruction(globalPath, "global");
+        if (global) {
+            sources.push(global);
+        }
+
+        for (const directory of workingDirectories) {
+            const projectPath = join(resolve(directory), AGENTS_FILE_NAME);
+            const key = pathKey(projectPath);
+            if (paths.has(key)) {
+                continue;
+            }
+            paths.add(key);
+            this.staticPaths.add(key);
+            const project = readInstruction(projectPath, "project");
+            if (project) {
+                sources.push(project);
+            }
+        }
+        return sources;
+    }
+
+    private loadedSources(): AgentInstructionSource[] {
+        const sources: AgentInstructionSource[] = [];
+        for (const [key, path] of this.loadedPaths) {
+            const source = readInstruction(path, "directory");
+            if (source) {
+                sources.push(source);
+            } else {
+                this.loadedPaths.delete(key);
+            }
+        }
+        return sources;
     }
 }
 
@@ -137,9 +180,21 @@ export function agentInstructionsMessage(
             ...sources.flatMap((source) => ["", renderInstruction(source)]),
             "</agent_instructions_update>"
         ].join("\n"),
-        context: "agent-instructions",
         timestamp: Date.now()
     };
+}
+
+export function renderAgentInstructions(
+    sources: readonly AgentInstructionSource[]
+): string {
+    return [
+        "<agent_instructions>",
+        AGENT_INSTRUCTIONS_GUIDANCE,
+        ...(sources.length === 0
+            ? ["", "No AGENTS.md instructions are currently applicable."]
+            : sources.flatMap((source) => ["", renderInstruction(source)])),
+        "</agent_instructions>"
+    ].join("\n");
 }
 
 /** Resolve the filesystem paths a tool call may operate on. */

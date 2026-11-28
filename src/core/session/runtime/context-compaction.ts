@@ -5,7 +5,7 @@ import type {
 } from "../../../protocol/llm.ts";
 import { toolResultContentText } from "../../../protocol/llm.ts";
 import { estimateMessageTokens } from "./context-usage.ts";
-import { isEnvironmentContextMessage } from "./environment.ts";
+import { isInjectedContextMessage } from "./context-injection.ts";
 
 export const CONTEXT_COMPACTION_RETAINED_TOKENS = 20_000;
 export const CONTEXT_COMPACTION_BLOCK_TOKENS = 2_048;
@@ -152,7 +152,14 @@ function retainedHistoryStart(
 }
 
 function compactableMinimumStart(history: readonly LlmMessage[]): number {
-    return history[0] && isEnvironmentContextMessage(history[0]) ? 1 : 0;
+    let start = 0;
+    while (
+        start < history.length
+        && isInjectedContextMessage(history[start]!)
+    ) {
+        start += 1;
+    }
+    return start;
 }
 
 function messageTokens(history: readonly LlmMessage[], start: number, end: number): number {

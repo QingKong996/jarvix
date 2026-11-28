@@ -308,7 +308,7 @@ test("breaks down the prompt into the same total as context usage", () => {
         }, {
             role: "system",
             content: "Available skills",
-            context: "skills",
+            context: "injected",
             timestamp: 2
         }, {
             role: "user",
@@ -357,7 +357,6 @@ test("breaks down the prompt into the same total as context usage", () => {
     expect(breakdown.systemPrompt).toBeGreaterThan(0);
     expect(breakdown.tools).toBeGreaterThan(0);
     expect(breakdown.injected).toBeGreaterThan(0);
-    expect(breakdown.skills).toBeGreaterThan(0);
     expect(breakdown.user).toBeGreaterThan(0);
     expect(breakdown.assistant).toBeGreaterThan(0);
     expect(breakdown.tool).toBeGreaterThan(0);
