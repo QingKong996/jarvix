@@ -175,7 +175,79 @@
         "noMatches": "没有匹配的功能",
         "tabs": {
             "context": "上下文透视",
-            "background": "后台任务"
+            "background": "后台任务",
+            "usage": "用量统计"
+        },
+        "usage": {
+            "breadcrumb": {
+                "observe": "观测",
+                "usage": "用量",
+                "requests": "请求"
+            },
+            "update": "更新",
+            "activePrice": "生效价格",
+            "autoRefresh": "自动刷新",
+            "autoRefreshOff": "关闭",
+            "autoRefreshSeconds": "{{count}} 秒",
+            "periods": {
+                "today": "今天",
+                "24h": "24 小时",
+                "7d": "7 天",
+                "30d": "30 天",
+                "all": "全部",
+                "custom": "自定义"
+            },
+            "customStart": "开始日期",
+            "customEnd": "结束日期",
+            "invalidCustomRange": "结束日期必须晚于开始日期。",
+            "summary": {
+                "tokens": "Token",
+                "cost": "费用",
+                "outputSpeed": "输出速度",
+                "requests": "请求",
+                "cacheHitRate": "缓存命中率",
+                "tokenBreakdown": "输入 {{input}} · 输出 {{output}} · 缓存 {{cache}}",
+                "tokensPerSecond": "token/秒",
+                "timedSamples": "{{count}} 次计时",
+                "noTiming": "暂无计时",
+                "ttft": "首字平均 {{value}} · {{count}} 次计时",
+                "failed": "{{count}} 次失败",
+                "successRate": "成功 {{rate}}",
+                "retried": "{{count}} 次重试后成功",
+                "cancelled": "{{count}} 次已取消",
+                "responseChars": "文本 {{text}} · 思考 {{thinking}}",
+                "charRate": "{{value}} 字符/秒",
+                "speed": "{{value}} token/秒",
+                "firstToken": "首字 {{value}}"
+            },
+            "chartMetrics": {
+                "tokens": "Token",
+                "cost": "费用",
+                "requests": "请求",
+                "speed": "速度",
+                "traffic": "流量"
+            },
+            "emptyChart": "暂无图表数据",
+            "requests": "请求明细",
+            "editPrice": "编辑价格",
+            "unknownModel": "未知模型",
+            "unknownProvider": "未知供应商",
+            "unknownAgent": "未知 Agent",
+            "loadMore": "再显示 {{count}} 条",
+            "emptyRequests": "暂无请求记录",
+            "retryCount": "重试 {{count}} 次",
+            "requestTokens": "输入 {{input}} · 输出 {{output}} · 缓存 {{cache}}",
+            "attemptCount": "{{count}} 次请求",
+            "kinds": {
+                "main": "对话",
+                "compaction": "压缩",
+                "naming": "命名"
+            },
+            "outcomes": {
+                "completed": "完成",
+                "error": "错误",
+                "aborted": "中断"
+            }
         },
         "context": {
             "emptyTitle": "暂无会话",
@@ -314,6 +386,16 @@
             "modelSettings": "模型设置",
             "contextWindow": "上下文长度",
             "maxTokens": "最大输出长度",
+            "pricing": "价格",
+            "priceUnit": "USD / 1M tokens（models.dev）",
+            "priceInput": "输入",
+            "priceOutput": "输出",
+            "priceCacheRead": "缓存命中",
+            "priceCacheWrite": "缓存写入",
+            "priceTier": "阶梯 {{index}}",
+            "priceTierThreshold": "超过输入 tokens",
+            "addPriceTier": "添加阶梯",
+            "removePriceTier": "删除阶梯 {{index}}",
             "reasoning": "支持推理",
             "addModel": "添加模型",
             "syncModels": "同步模型",

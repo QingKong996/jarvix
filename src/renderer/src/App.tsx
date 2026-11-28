@@ -359,6 +359,9 @@ export function App() {
                                         tabs={rightSidebarTabs}
                                         sessionId={activeSessionId}
                                         providerContextRevision={providerContextRevision}
+                                        config={config}
+                                        sessions={sessions}
+                                        onConfigChange={handleConfigChange}
                                         onClose={closeRightSidebar}
                                     />
                                 </ResizablePanel>
@@ -374,6 +377,9 @@ export function App() {
                             tabs={rightSidebarTabs}
                             sessionId={activeSessionId}
                             providerContextRevision={providerContextRevision}
+                            config={config}
+                            sessions={sessions}
+                            onConfigChange={handleConfigChange}
                             onClose={closeRightSidebar}
                         />
                     ) : null}

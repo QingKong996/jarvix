@@ -2,12 +2,27 @@ import { z } from "zod";
 import {
     REASONING_LEVELS,
     providerCatalogEntrySchema,
+    type ModelCost,
+    type ModelCostRate,
+    type ModelCostTier,
     type ProviderCatalogEntry,
     type ProviderProtocol,
     type ReasoningLevel
 } from "../../protocol/providers.ts";
 
 const record = z.record(z.string(), z.unknown());
+const upstreamCostRate = z.object({
+    input: z.number().nonnegative().optional(),
+    output: z.number().nonnegative().optional(),
+    cache_read: z.number().nonnegative().optional(),
+    cache_write: z.number().nonnegative().optional()
+});
+const upstreamCostTier = upstreamCostRate.extend({
+    tier: z.object({
+        type: z.string(),
+        size: z.number().positive()
+    })
+});
 const upstreamProvider = z.object({
     id: z.string(), name: z.string(), npm: z.string(), api: z.string().optional(),
     env: z.array(z.string()).default([]), models: record
@@ -18,8 +33,10 @@ const upstreamModel = z.object({
     tool_call: z.boolean().default(false),
     modalities: z.object({ input: z.array(z.string()), output: z.array(z.string()) }).optional(),
     limit: z.object({ context: z.number().positive(), output: z.number().positive() }),
-    cost: z.object({ input: z.number().nonnegative().default(0), output: z.number().nonnegative().default(0),
-        cache_read: z.number().nonnegative().default(0), cache_write: z.number().nonnegative().default(0) }).optional(),
+    cost: upstreamCostRate.extend({
+        tiers: z.array(upstreamCostTier).optional(),
+        context_over_200k: upstreamCostRate.optional()
+    }).optional(),
     status: z.string().optional()
 });
 const upstreamReasoningOption = z.object({
@@ -90,8 +107,7 @@ export function parseModelsDevCatalog(value: unknown): ProviderCatalogEntry[] {
                 reasoningLevels: normalizeReasoningLevels(model.reasoning_options), toolCall: model.tool_call,
                 contextWindow: model.limit.context, maxTokens: model.limit.output,
                 input: (model.modalities?.input ?? ["text"]).filter((input) => input === "text" || input === "image"),
-                cost: { input: model.cost?.input ?? 0, output: model.cost?.output ?? 0,
-                    cacheRead: model.cost?.cache_read ?? 0, cacheWrite: model.cost?.cache_write ?? 0 }
+                cost: normalizeCost(model.cost)
             }];
         });
         const normalized = providerCatalogEntrySchema.safeParse({ ...provider, protocol, baseUrl, models });
@@ -99,6 +115,49 @@ export function parseModelsDevCatalog(value: unknown): ProviderCatalogEntry[] {
     }
     if (providers.length === 0) throw new Error("models.dev returned no providers");
     return providers.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function normalizeCost(value: z.infer<typeof upstreamCostRate> & {
+    tiers?: z.infer<typeof upstreamCostTier>[];
+    context_over_200k?: z.infer<typeof upstreamCostRate>;
+} | undefined): ModelCost {
+    const base: ModelCostRate = {
+        input: value?.input ?? 0,
+        output: value?.output ?? 0,
+        cacheRead: value?.cache_read ?? 0,
+        cacheWrite: value?.cache_write ?? 0
+    };
+    const tiers = new Map<number, ModelCostTier>();
+    for (const tier of value?.tiers ?? []) {
+        if (tier.tier.type !== "context") continue;
+        tiers.set(tier.tier.size, {
+            input: tier.input ?? base.input,
+            output: tier.output ?? base.output,
+            cacheRead: tier.cache_read ?? base.cacheRead,
+            cacheWrite: tier.cache_write ?? base.cacheWrite,
+            inputTokensAbove: tier.tier.size
+        });
+    }
+    if (value?.context_over_200k && !tiers.has(200_000)) {
+        const tier = value.context_over_200k;
+        tiers.set(200_000, {
+            input: tier.input ?? base.input,
+            output: tier.output ?? base.output,
+            cacheRead: tier.cache_read ?? base.cacheRead,
+            cacheWrite: tier.cache_write ?? base.cacheWrite,
+            inputTokensAbove: 200_000
+        });
+    }
+    return {
+        ...base,
+        ...(tiers.size > 0
+            ? {
+                tiers: [...tiers.values()].sort(
+                    (left, right) => left.inputTokensAbove - right.inputTokensAbove
+                )
+            }
+            : {})
+    };
 }
 
 function normalizeReasoningLevels(value: unknown): ReasoningLevel[] {

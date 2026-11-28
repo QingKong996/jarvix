@@ -3,6 +3,8 @@ import { Globe, PanelRightClose, Plus, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { cn } from "cn";
+import type { JarvixConfig } from "../../../../protocol/config.ts";
+import type { JarvixSessionSummary } from "../../../../protocol/session.ts";
 import { ContextInspector } from "../context-inspector/ContextInspector.tsx";
 import { BackgroundTasksPanel } from "./BackgroundTasksPanel.tsx";
 import { rightSidebarPanel } from "./panel-registry.ts";
@@ -10,6 +12,7 @@ import { RightSidebarNewTab } from "./RightSidebarNewTab.tsx";
 import { shouldDismissRightSidebar } from "./right-sidebar-escape.ts";
 import { activeSidebarTab } from "./sidebar-tabs.ts";
 import type { RightSidebarTabs } from "./use-right-sidebar-tabs.ts";
+import { UsagePanel } from "./UsagePanel.tsx";
 import { Button } from "@/components/ui/button";
 import { layoutSpring, panelTransition, quickTransition } from "../../motion.ts";
 
@@ -18,6 +21,9 @@ type RightSidebarProps = {
     tabs: RightSidebarTabs;
     sessionId: string | null;
     providerContextRevision: number;
+    config: JarvixConfig | null;
+    sessions: JarvixSessionSummary[];
+    onConfigChange: (config: JarvixConfig) => Promise<void>;
     onClose(): void;
 };
 
@@ -26,6 +32,9 @@ export function RightSidebar({
     tabs,
     sessionId,
     providerContextRevision,
+    config,
+    sessions,
+    onConfigChange,
     onClose
 }: RightSidebarProps) {
     const { t } = useTranslation();
@@ -194,8 +203,14 @@ export function RightSidebar({
                             sessionId={sessionId}
                             providerContextRevision={providerContextRevision}
                         />
-                    ) : (
+                    ) : activeTab.panel === "background" ? (
                         <BackgroundTasksPanel sessionId={sessionId} />
+                    ) : (
+                        <UsagePanel
+                            config={config}
+                            sessions={sessions}
+                            onConfigChange={onConfigChange}
+                        />
                     )}
                 </motion.div>
             </motion.aside>

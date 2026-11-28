@@ -33,6 +33,18 @@ export const modelCompatSchema = z.object({
     supportsDeveloperRole: z.boolean().optional(),
     supportsMidConvoSystemMessages: z.boolean().optional()
 });
+const modelCostRateSchema = z.object({
+    input: z.number().nonnegative().default(0),
+    output: z.number().nonnegative().default(0),
+    cacheRead: z.number().nonnegative().default(0),
+    cacheWrite: z.number().nonnegative().default(0)
+});
+const modelCostTierSchema = modelCostRateSchema.extend({
+    inputTokensAbove: z.number().int().nonnegative()
+});
+const modelCostSchema = modelCostRateSchema.extend({
+    tiers: z.array(modelCostTierSchema).optional()
+});
 export const modelDefinitionSchema = z.object({
     id: identifier,
     name: identifier,
@@ -43,12 +55,12 @@ export const modelDefinitionSchema = z.object({
     input: z.array(z.enum(["text", "image"])).default(["text"]),
     toolCall: z.boolean().default(false),
     compat: modelCompatSchema.optional(),
-    cost: z.object({
-        input: z.number().nonnegative().default(0),
-        output: z.number().nonnegative().default(0),
-        cacheRead: z.number().nonnegative().default(0),
-        cacheWrite: z.number().nonnegative().default(0)
-    }).default({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
+    cost: modelCostSchema.default({
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0
+    })
 }).superRefine((model, context) => {
     if (model.maxTokens < model.contextWindow) {
         return;
@@ -97,6 +109,9 @@ export const providerConfigSchema = providerDefinitionSchema.extend({ apiKey: z.
 export const modelSelectionSchema = z.object({ provider: identifier, id: identifier });
 
 export type ReasoningCapabilities = Pick<ModelDefinition, "reasoning" | "reasoningLevels">;
+export type ModelCost = z.infer<typeof modelCostSchema>;
+export type ModelCostRate = z.infer<typeof modelCostRateSchema>;
+export type ModelCostTier = z.infer<typeof modelCostTierSchema>;
 export type ModelDefinition = z.infer<typeof modelDefinitionSchema>;
 export type ProviderCatalogEntry = z.infer<typeof providerCatalogEntrySchema>;
 export type ProviderConfig = z.infer<typeof providerConfigSchema>;

@@ -15,6 +15,7 @@ import type {
     JarvixSkill,
     JarvixSkillListScope
 } from "./skill.ts";
+import type { UsageAuditQuery, UsageStats } from "./usage.ts";
 
 export const IPC_CHANNELS = {
     request: "jarvix:request",
@@ -29,6 +30,7 @@ export const IPC_CHANNELS = {
     skillLoad: "jarvix:skill:load",
     catalogGet: "jarvix:catalog:get",
     providerModelsSync: "jarvix:provider-models:sync",
+    usageStats: "jarvix:usage:stats",
     projectCreate: "jarvix:project:create",
     projectsList: "jarvix:projects:list",
     pickWorkingDirectories: "jarvix:working-directories:pick",
@@ -92,6 +94,7 @@ export type JarvixBridge = {
     getConfig(): Promise<JarvixConfig>;
     getModelCatalog(force?: boolean): Promise<ModelCatalog>;
     syncProviderModels(provider: ProviderModelSyncRequest): Promise<ModelDefinition[]>;
+    getUsageStats(query: UsageAuditQuery): Promise<UsageStats>;
     setConfig(config: JarvixConfig): Promise<JarvixConfig>;
     listSkills(
         workingDirectories: readonly string[],

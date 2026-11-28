@@ -7,7 +7,7 @@ import { providerCatalogEntrySchema, type ModelCatalog } from "../../protocol/pr
 import { readJsonResponse } from "./response-body.ts";
 
 const TTL = 24 * 60 * 60 * 1000;
-const CACHE_VERSION = 4;
+const CACHE_VERSION = 5;
 const MAX_CATALOG_RESPONSE_BYTES = 8 * 1024 * 1024;
 const cacheSchema = z.object({
     version: z.literal(CACHE_VERSION),

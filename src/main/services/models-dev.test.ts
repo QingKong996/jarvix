@@ -59,3 +59,57 @@ test("rejects an unusable catalog instead of replacing a successful cache", () =
     expect(() => parseModelsDevCatalog({ example: { ...catalogFixture.example, api: "file:///tmp" } })).toThrow();
     expect(() => parseModelsDevCatalog([])).toThrow();
 });
+
+test("normalizes long-context pricing tiers", () => {
+    const providers = parseModelsDevCatalog({
+        example: {
+            ...catalogFixture.example,
+            models: {
+                chat: {
+                    ...model,
+                    cost: {
+                        input: 1,
+                        output: 2,
+                        cache_read: 0.1,
+                        cache_write: 1.25,
+                        tiers: [{
+                            input: 2,
+                            output: 4,
+                            cache_read: 0.2,
+                            cache_write: 2.5,
+                            tier: { type: "context", size: 400_000 }
+                        }],
+                        context_over_200k: {
+                            input: 1.5,
+                            output: 3,
+                            cache_read: 0.15
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    expect(providers[0]?.models[0]?.cost).toEqual({
+        input: 1,
+        output: 2,
+        cacheRead: 0.1,
+        cacheWrite: 1.25,
+        tiers: [
+            {
+                input: 1.5,
+                output: 3,
+                cacheRead: 0.15,
+                cacheWrite: 1.25,
+                inputTokensAbove: 200_000
+            },
+            {
+                input: 2,
+                output: 4,
+                cacheRead: 0.2,
+                cacheWrite: 2.5,
+                inputTokensAbove: 400_000
+            }
+        ]
+    });
+});

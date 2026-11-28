@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { ModelDefinition } from "../../../../../protocol/providers.ts";
 import { DialogFooter } from "../../common/DialogFooter.tsx";
 import { FormField } from "../../common/FormField.tsx";
+import { ModelPricingFields } from "../../common/ModelPricingFields.tsx";
 import { Button } from "../../ui/button.tsx";
 import { Input } from "../../ui/input.tsx";
 
@@ -101,6 +102,16 @@ export function ModelConfigPanel({
                             />
                         </FormField>
                     </div>
+                    <fieldset className="flex flex-col gap-3 border-t border-border pt-4">
+                        <legend className="pr-2 font-medium text-foreground">
+                            {t("settings.providers.pricing")}
+                        </legend>
+                        <ModelPricingFields
+                            cost={model.cost}
+                            disabled={disabled}
+                            onChange={(cost) => onChange({ cost })}
+                        />
+                    </fieldset>
                     <label className="flex cursor-pointer items-center gap-2 text-sm select-none">
                         <input
                             type="checkbox"
