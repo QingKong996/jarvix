@@ -59,7 +59,7 @@ export type CommandSandbox = {
         cwd: string;
         commandId: string;
         binShell?: SandboxShell;
-    }): Promise<SandboxedCommand | null>;
+    }, signal?: AbortSignal): Promise<SandboxedCommand | null>;
     dispose(): void;
 };
 

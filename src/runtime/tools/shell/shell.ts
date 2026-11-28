@@ -28,6 +28,7 @@ import {
     terminateProcessTreeSync
 } from "./process-tree.ts";
 import {
+    abortedExecResult,
     finishedResult,
     invalidArgumentsResult,
     sandboxPreflightResult,
@@ -251,6 +252,9 @@ export class ShellTool implements ToolExecutor {
         }
 
         const { command, timeoutMs } = parsed.data;
+        if (signal?.aborted) {
+            return abortedExecResult(command);
+        }
         if (this.sessionCount() >= this.maxSessions) {
             return sessionLimitResult(command, this.maxSessions);
         }
@@ -259,6 +263,9 @@ export class ShellTool implements ToolExecutor {
             if (!preflight.ready) {
                 return sandboxPreflightResult(command, preflight);
             }
+        }
+        if (signal?.aborted) {
+            return abortedExecResult(command);
         }
         if (this.sessionCount() >= this.maxSessions) {
             return sessionLimitResult(command, this.maxSessions);
@@ -272,9 +279,12 @@ export class ShellTool implements ToolExecutor {
             session = await this.start(command, this.resolveCwd(parsed.data.cwd), (chunk) => {
                 session.broadcastOffset = session.output.length;
                 observer.onOutput({ kind: "shell.exec_command", output: chunk });
-            }, call.id, this.sharedBudget !== undefined);
+            }, call.id, this.sharedBudget !== undefined, signal);
         } catch (error) {
             this.sharedBudget?.release();
+            if (signal?.aborted) {
+                return abortedExecResult(command);
+            }
             const message = errorMessage(error);
             return {
                 content: `Failed to start command: ${message}`,
@@ -284,17 +294,16 @@ export class ShellTool implements ToolExecutor {
             };
         }
 
+        if (signal?.aborted) {
+            await interruptSession(session);
+            return abortedExecResult(command);
+        }
         const outcome = await waitForSession(session, timeoutMs, signal);
         if (outcome === "aborted") {
             await interruptSession(session);
             const violations = takeViolations(session);
             const output = appendSandboxViolations(sessionDisplayOutput(session), violations);
-            return {
-                content: appendViolationContent("Command aborted.", violations),
-                data: { kind: "shell.exec_command", command, output, status: "failed" },
-                isError: true,
-                endReason: "exited"
-            };
+            return abortedExecResult(command, output, violations);
         }
 
         if (outcome === "timeout" && !session.ended) {
@@ -426,11 +435,12 @@ export class ShellTool implements ToolExecutor {
         cwd: string,
         listener: (chunk: string) => void,
         toolCallId: string,
-        sharedSlotHeld: boolean
+        sharedSlotHeld: boolean,
+        signal?: AbortSignal
     ): Promise<ShellSession> {
         let sandboxed: SandboxedCommand | null;
         try {
-            sandboxed = await this.sandboxLaunch(command, cwd, toolCallId);
+            sandboxed = await this.sandboxLaunch(command, cwd, toolCallId, signal);
         } finally {
             this.startingSessions -= 1;
         }
@@ -471,14 +481,15 @@ export class ShellTool implements ToolExecutor {
     private async sandboxLaunch(
         command: string,
         cwd: string,
-        toolCallId: string
+        toolCallId: string,
+        signal?: AbortSignal
     ): Promise<SandboxedCommand | null> {
         return this.sandbox?.prepareCommand({
             command,
             cwd,
             commandId: toolCallId,
             binShell: sandboxBinShell()
-        }) ?? null;
+        }, signal) ?? null;
     }
 
     private releaseSharedSlot(session: ShellSession): void {

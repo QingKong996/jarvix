@@ -43,6 +43,7 @@ import { AgentInstructions } from "./agent-instructions.ts";
 import { SYSTEM_PROMPT } from "./environment.ts";
 import { CONTEXT_COMPACTION_SYSTEM_PROMPT } from "./context-compaction.ts";
 import { createGenericToolCallViewData } from "../../../runtime/tools/tool-view.ts";
+import { noopAgentObserver } from "../../observability/index.ts";
 
 const testHome = vi.hoisted(() => ({ path: "" }));
 
@@ -1820,6 +1821,40 @@ test("accepts an in-flight tool result but does not start another round after ab
         toolCallId: "call-abort",
         content: "Command aborted."
     });
+});
+
+test("resets request state when run finalization throws", async () => {
+    let failFinalization = true;
+    const observer = {
+        ...noopAgentObserver,
+        runFinished: () => {
+            if (failFinalization) {
+                failFinalization = false;
+                throw new Error("observer finalization failed");
+            }
+        }
+    };
+    const session = new Session(
+        meta,
+        [],
+        NO_TOOLS,
+        undefined,
+        undefined,
+        undefined,
+        observer
+    );
+
+    await expect(session.request("first", {
+        llm: fakeLlm(assistantMessage()),
+        config: TEST_CONFIG,
+        emit: () => undefined
+    })).rejects.toThrow("observer finalization failed");
+
+    await expect(session.request("second", {
+        llm: fakeLlm(assistantMessage()),
+        config: TEST_CONFIG,
+        emit: () => undefined
+    })).resolves.toBeUndefined();
 });
 
 test("shutdown waits for the request and emits events returned by tool stop", async () => {

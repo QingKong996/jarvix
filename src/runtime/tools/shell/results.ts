@@ -84,6 +84,24 @@ export function sandboxPreflightResult(
     return failedExecResult(command, message);
 }
 
+export function abortedExecResult(
+    command: string,
+    output = "",
+    violations: readonly string[] = []
+): ToolExecutionResult {
+    return {
+        content: appendViolationContent("Command aborted.", violations),
+        data: {
+            kind: "shell.exec_command",
+            command,
+            output: appendSandboxViolations(output, violations),
+            status: "failed"
+        },
+        isError: true,
+        endReason: "exited"
+    };
+}
+
 export function timedOutContent(
     sessionId: string,
     timeoutMs: number,

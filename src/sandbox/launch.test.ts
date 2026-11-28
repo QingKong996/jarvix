@@ -1,8 +1,12 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test, vi } from "vitest";
 import {
     createSandboxPreflight,
     createSandboxProfileReadiness,
-    installSandbox
+    installSandbox,
+    SandboxRunnerHost
 } from "./launch.ts";
 
 const srtWin = {
@@ -165,6 +169,60 @@ test("runs the self-elevating Windows installer", async () => {
         status: "installed"
     });
     expect(install).toHaveBeenCalledWith(srtWin);
+});
+
+test("aborts a pending sandbox preparation", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-sandbox-abort-"));
+    const runner = join(directory, "runner.mjs");
+    writeFileSync(
+        runner,
+        [
+            "process.on('message', (message) => {",
+            "  if (message.type === 'shutdown') process.exit(0);",
+            "});",
+            "setInterval(() => undefined, 1_000);"
+        ].join("\n"),
+        "utf8"
+    );
+    const host = new SandboxRunnerHost({ runnerPath: runner });
+    const controller = new AbortController();
+
+    try {
+        const preparation = host.prepare({
+            command: "echo never",
+            cwd: directory,
+            commandId: "abort-preparation",
+            policy: {
+                filesystem: {
+                    allowRead: [],
+                    denyRead: [],
+                    allowWrite: [],
+                    denyWrite: []
+                },
+                network: {
+                    allowedDomains: [],
+                    deniedDomains: []
+                }
+            }
+        }, controller.signal);
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+
+        const startedAt = Date.now();
+        controller.abort();
+
+        await expect(preparation).rejects.toThrow(/abort/i);
+        expect(Date.now() - startedAt).toBeLessThan(1_000);
+    } finally {
+        host.dispose();
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+            try {
+                rmSync(directory, { recursive: true, force: true });
+                break;
+            } catch {
+                await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+            }
+        }
+    }
 });
 
 test("reports a cancelled UAC prompt", async () => {
