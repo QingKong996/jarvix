@@ -181,7 +181,7 @@
         "searchPlaceholder": "Search features",
         "noMatches": "No matching features",
         "tabs": {
-            "context": "Context inspector",
+            "context": "Perspective",
             "background": "Background tasks",
             "usage": "Usage"
         },
@@ -264,6 +264,40 @@
             "failedTitle": "Could not read context",
             "failedDescription": "Check that a model is configured, then try again.",
             "emptyMessage": "Empty message",
+            "usage": {
+                "title": "Context usage",
+                "tokens": "Tokens",
+                "trend": "Context trend",
+                "emptyTrend": "No trend data",
+                "step": "Step {{step}}",
+                "current": "Current",
+                "occupancyAria": "Context usage {{percent}}, {{used}} of {{limit}} tokens"
+            },
+            "breakdown": {
+                "kinds": {
+                    "systemPrompt": "System prompt",
+                    "tools": "Tool schemas",
+                    "user": "User messages",
+                    "injected": "Injected context",
+                    "skills": "Skills",
+                    "assistant": "Assistant",
+                    "tool": "Tool calls"
+                }
+            },
+            "timing": {
+                "title": "Time observation",
+                "total": "Active",
+                "timeline": "Activity timeline",
+                "timelineAria": "Activity timeline, {{duration}} total",
+                "empty": "No timing data yet",
+                "kinds": {
+                    "waiting": "Waiting",
+                    "thinking": "Thinking",
+                    "output": "Reply",
+                    "toolArgs": "Tool args",
+                    "tool": "Tool execution"
+                }
+            },
             "roles": {
                 "system": "System",
                 "user": "User",

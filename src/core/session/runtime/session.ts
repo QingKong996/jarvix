@@ -41,6 +41,8 @@ import {
     type ToolManager
 } from "../../../runtime/tools/index.ts";
 import { SessionPermissions } from "../../permissions/session-permissions.ts";
+import { AssistantTimingCollector } from "./assistant-timing.ts";
+import { estimateContextBreakdown } from "./context-usage.ts";
 import {
     createDefaultContextManager,
     type ContextManager,
@@ -761,6 +763,7 @@ export class Session {
         const turnId = `${run.runId}:t${turnIndex}`;
         const streamStartedAt = performance.now();
         const streamStartedAtMs = Date.now();
+        const assistantTiming = new AssistantTimingCollector(streamStartedAtMs);
         this.syncToolState();
         const toolState = this.toolState;
         const requestContext = this.contextManager.prepareRequest(
@@ -831,6 +834,10 @@ export class Session {
                     receivedTextChars += event.delta.length;
                 } else if (event.type === "thinking.delta") {
                     receivedThinkingChars += event.delta.length;
+                }
+                assistantTiming.observe(event);
+                if (event.type === "done") {
+                    event.message.timing = assistantTiming.finish();
                 }
                 runtime.emit(event);
                 if (event.type === "done") {
@@ -1071,11 +1078,18 @@ export class Session {
     }
 
     providerContext(workingDirectories: readonly string[] = []): JarvixProviderContext {
-        return this.contextManager.prepareRequest(
+        const request = this.contextManager.prepareRequest(
             this.history,
             workingDirectories,
             { goal: this.meta.goal?.content }
         );
+        return {
+            ...request,
+            breakdown: estimateContextBreakdown({
+                ...request,
+                tools: this.toolState?.base ?? this.registeredTools()
+            })
+        };
     }
 
     contextUsage(

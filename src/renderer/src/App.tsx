@@ -363,6 +363,7 @@ export function App() {
                                         tabs={rightSidebarTabs}
                                         sessionId={activeSessionId}
                                         providerContextRevision={providerContextRevision}
+                                        contextUsage={contextUsage}
                                         config={config}
                                         sessions={sessions}
                                         onConfigChange={handleConfigChange}
@@ -381,6 +382,7 @@ export function App() {
                             tabs={rightSidebarTabs}
                             sessionId={activeSessionId}
                             providerContextRevision={providerContextRevision}
+                            contextUsage={contextUsage}
                             config={config}
                             sessions={sessions}
                             onConfigChange={handleConfigChange}

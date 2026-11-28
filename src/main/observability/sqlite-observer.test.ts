@@ -319,6 +319,7 @@ test("migrates a version 1 database without losing existing records", () => {
     });
     try {
         legacy.exec(AGENT_SCHEMA_V1);
+        legacy.exec("DROP INDEX idx_turns_session_started");
         legacy.exec("PRAGMA user_version = 1");
         legacy.prepare(`
             INSERT INTO runs (
@@ -382,6 +383,11 @@ test("migrates a version 1 database without losing existing records", () => {
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'llm_attempts'"
             ).get()?.name
         ).toBe("llm_attempts");
+        const turnIndexes = database.prepare(
+            "PRAGMA index_list(turns)"
+        ).all() as unknown as Array<{ name: string }>;
+        expect(turnIndexes.map((index) => index.name))
+            .toContain("idx_turns_session_started");
 
         const run = database.prepare(
             "SELECT * FROM runs WHERE run_id = 'run-v1'"

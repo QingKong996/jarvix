@@ -179,7 +179,7 @@
         "searchPlaceholder": "搜索功能",
         "noMatches": "没有匹配的功能",
         "tabs": {
-            "context": "上下文透视",
+            "context": "透视",
             "background": "后台任务",
             "usage": "用量统计"
         },
@@ -262,6 +262,40 @@
             "failedTitle": "无法读取上下文",
             "failedDescription": "请确认已配置可用模型，或稍后重试。",
             "emptyMessage": "空消息",
+            "usage": {
+                "title": "上下文占用",
+                "tokens": "Token",
+                "trend": "上下文趋势",
+                "emptyTrend": "暂无趋势数据",
+                "step": "第 {{step}} 步",
+                "current": "当前",
+                "occupancyAria": "上下文占用 {{percent}}，已用 {{used}} / {{limit}} Token"
+            },
+            "breakdown": {
+                "kinds": {
+                    "systemPrompt": "系统提示词",
+                    "tools": "工具定义",
+                    "user": "用户消息",
+                    "injected": "注入上下文",
+                    "skills": "技能",
+                    "assistant": "助手",
+                    "tool": "工具调用"
+                }
+            },
+            "timing": {
+                "title": "时间观测",
+                "total": "活跃",
+                "timeline": "活动时间线",
+                "timelineAria": "活动时间线，共 {{duration}}",
+                "empty": "暂无计时数据",
+                "kinds": {
+                    "waiting": "等待",
+                    "thinking": "思考",
+                    "output": "回复",
+                    "toolArgs": "工具参数",
+                    "tool": "工具执行"
+                }
+            },
             "roles": {
                 "system": "系统消息",
                 "user": "用户",

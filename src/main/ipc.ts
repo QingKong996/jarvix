@@ -434,7 +434,11 @@ export function registerIpc(dependencies: IpcDependencies): void {
 
     handle(IPC_CHANNELS.sessionProviderContext, (event, sessionId: unknown) => {
         assertSender(event);
-        return jarvix.getProviderContext(requireSessionId(sessionId));
+        const id = requireSessionId(sessionId);
+        return {
+            ...jarvix.getProviderContext(id),
+            usageHistory: usage.contextHistory(id)
+        };
     });
 
     handle(IPC_CHANNELS.sessionsList, (event) => {

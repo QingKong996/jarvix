@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { type JarvixLogger, noopLogger } from "../../core/logger.ts";
 import type { JarvixConfig } from "../../protocol/config.ts";
+import type { JarvixContextUsagePoint } from "../../protocol/provider-context.ts";
 import type { ModelCost } from "../../protocol/providers.ts";
 import type {
     UsageAuditQuery,
@@ -44,6 +45,13 @@ type UsageRow = {
     error_code: string | null;
 };
 
+type ContextUsageRow = {
+    step_index: number;
+    started_at_ms: number;
+    context_tokens_before: number | null;
+    context_tokens_after: number | null;
+};
+
 type UsageWindow = {
     fromMs: number;
     toMs: number;
@@ -67,6 +75,30 @@ const USAGE_ROWS_SQL = `
     FROM turns
     WHERE outcome != 'running' AND started_at_ms >= ? AND started_at_ms < ?
     ORDER BY started_at_ms DESC
+`;
+
+const CONTEXT_USAGE_ROWS_SQL = `
+    SELECT
+        step_index, started_at_ms,
+        context_tokens_before, context_tokens_after
+    FROM (
+        SELECT
+            ROW_NUMBER() OVER (
+                ORDER BY started_at_ms, turn_id
+            ) AS step_index,
+            started_at_ms,
+            context_tokens_before,
+            context_tokens_after
+        FROM turns
+        WHERE session_id = ?
+            AND turn_kind = 'main'
+            AND (
+                context_tokens_before IS NOT NULL
+                OR context_tokens_after IS NOT NULL
+            )
+    )
+    ORDER BY step_index DESC
+    LIMIT ?
 `;
 
 export class UsageStatsService {
@@ -112,6 +144,34 @@ export class UsageStatsService {
                 reason: error instanceof Error ? error.message : String(error)
             });
             return emptyStats(query.period, requestedWindow);
+        } finally {
+            database?.close();
+        }
+    }
+
+    contextHistory(
+        sessionId: string,
+        limit = 60
+    ): JarvixContextUsagePoint[] {
+        if (!existsSync(this.databasePath)) {
+            return [];
+        }
+
+        let database: DatabaseSync | undefined;
+        try {
+            database = new DatabaseSync(this.databasePath, { readOnly: true });
+            database.exec("PRAGMA busy_timeout = 1000");
+            const rows = database.prepare(CONTEXT_USAGE_ROWS_SQL).all(
+                sessionId,
+                Math.max(1, Math.min(200, Math.round(limit)))
+            ) as unknown as ContextUsageRow[];
+            return rows.reverse().flatMap(contextUsagePoint);
+        } catch (error) {
+            this.logger.warn("Context usage history query failed", {
+                sessionId,
+                reason: error instanceof Error ? error.message : String(error)
+            });
+            return [];
         } finally {
             database?.close();
         }
@@ -176,6 +236,28 @@ function totalTokens(usage: UsageTokenValues): number {
 
 function numberValue(value: number | null): number {
     return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function contextUsagePoint(row: ContextUsageRow): JarvixContextUsagePoint[] {
+    const step = Number.isSafeInteger(row.step_index) && row.step_index > 0
+        ? row.step_index
+        : null;
+    const estimatedTokens = nullableTokenCount(row.context_tokens_before)
+        ?? nullableTokenCount(row.context_tokens_after);
+    if (step === null || estimatedTokens === null) {
+        return [];
+    }
+    return [{
+        step,
+        atMs: numberValue(row.started_at_ms),
+        estimatedTokens
+    }];
+}
+
+function nullableTokenCount(value: number | null): number | null {
+    return typeof value === "number" && Number.isFinite(value) && value >= 0
+        ? Math.round(value)
+        : null;
 }
 
 function emptyStats(period: UsagePeriod, window: UsageWindow): UsageStats {

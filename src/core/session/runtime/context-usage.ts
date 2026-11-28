@@ -6,6 +6,7 @@ import type {
     LlmUsage
 } from "../../../protocol/llm.ts";
 import type { JarvixContextUsage } from "../../../protocol/context-usage.ts";
+import type { JarvixContextBreakdown } from "../../../protocol/provider-context.ts";
 
 const CHARS_PER_TOKEN = 3.5;
 const ESTIMATED_IMAGE_CHARS = 4800;
@@ -18,6 +19,11 @@ export type ContextUsageInput = {
     systemPrompt?: string;
     tools?: readonly LlmToolDefinition[];
 };
+
+type ContextBreakdownInput = Pick<
+    ContextUsageInput,
+    "messages" | "systemPrompt" | "tools"
+>;
 
 type UsageInfo = {
     index: number;
@@ -40,6 +46,67 @@ export function estimateContextUsage(input: ContextUsageInput): JarvixContextUsa
         estimatedTokens,
         contextWindow: Math.max(1, Math.floor(input.contextWindow))
     };
+}
+
+export function estimateContextBreakdown(
+    input: ContextBreakdownInput
+): JarvixContextBreakdown {
+    const breakdown: JarvixContextBreakdown = {
+        systemPrompt: input.systemPrompt
+            ? estimateTextTokens(input.systemPrompt)
+            : 0,
+        tools: input.tools && input.tools.length > 0
+            ? estimateTextTokens(safeJsonStringify(input.tools))
+            : 0,
+        user: 0,
+        injected: 0,
+        skills: 0,
+        assistant: 0,
+        tool: 0
+    };
+
+    for (const message of input.messages) {
+        switch (message.role) {
+            case "user":
+                breakdown[
+                    message.context ? "injected" : "user"
+                ] += estimateMessageTokens(message);
+                break;
+            case "system":
+                breakdown[
+                    message.context === "skills" || message.context === "skill"
+                        ? "skills"
+                        : "injected"
+                ] += estimateMessageTokens(message);
+                break;
+            case "toolResult":
+                breakdown.tool += estimateMessageTokens(message);
+                break;
+            case "assistant": {
+                const total = estimateMessageTokens(message);
+                const toolCharacters = message.content.reduce(
+                    (sum, block) => sum + (
+                        block.type === "toolCall"
+                            ? estimateBlockCharacters(block)
+                            : 0
+                    ),
+                    0
+                );
+                const allCharacters = message.content.reduce(
+                    (sum, block) => sum + estimateBlockCharacters(block),
+                    0
+                );
+                const toolTokens = allCharacters > 0
+                    ? Math.round(total * toolCharacters / allCharacters)
+                    : 0;
+                breakdown.assistant += total - toolTokens;
+                breakdown.tool += toolTokens;
+                break;
+            }
+        }
+    }
+
+    return breakdown;
 }
 
 function estimateFixedTokens(input: Pick<ContextUsageInput, "systemPrompt" | "tools">): number {
