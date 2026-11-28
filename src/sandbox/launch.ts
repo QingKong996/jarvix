@@ -124,7 +124,10 @@ export class SandboxRunnerHost {
         this.runnerPath = options.runnerPath ?? defaultSandboxRunnerPath();
     }
 
-    async prepare(options: SandboxLaunchOptions): Promise<SandboxLaunch> {
+    async prepare(
+        options: SandboxLaunchOptions,
+        signal?: AbortSignal
+    ): Promise<SandboxLaunch> {
         if (this.disposed) {
             throw new Error("The sandbox runner has been disposed.");
         }
@@ -159,10 +162,14 @@ export class SandboxRunnerHost {
                 commandId: options.commandId,
                 cwd: options.cwd,
                 binShell: options.binShell
-            });
+            }, signal);
         } catch (error) {
             connection.commands.delete(options.commandId);
-            this.closeInactiveConnections(this.currentKey);
+            if (signal?.aborted && connection.commands.size === 0) {
+                this.closeConnection(connection);
+            } else {
+                this.closeInactiveConnections(this.currentKey);
+            }
             throw error;
         }
 
@@ -294,7 +301,8 @@ export class SandboxRunnerHost {
 
     private request(
         connection: RunnerConnection,
-        message: SandboxRunnerRequest
+        message: SandboxRunnerRequest,
+        signal?: AbortSignal
     ): Promise<SandboxRunnerMessage> {
         if (connection.failure) {
             return Promise.reject(connection.failure);
@@ -302,22 +310,45 @@ export class SandboxRunnerHost {
         if (connection.closing || !connection.child.connected) {
             return Promise.reject(new Error("The sandbox runner is not connected."));
         }
+        if (signal?.aborted) {
+            return Promise.reject(abortError(signal));
+        }
 
         return new Promise((resolve, reject) => {
-            const timer = setTimeout(() => {
+            let settled = false;
+            let timer: NodeJS.Timeout;
+            const finish = (settle: () => void): void => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                clearTimeout(timer);
+                signal?.removeEventListener("abort", abort);
+                settle();
+            };
+            const abort = (): void => {
+                connection.pending.delete(message.requestId);
+                finish(() => reject(abortError(signal)));
+            };
+            timer = setTimeout(() => {
                 connection.pending.delete(message.requestId);
                 const error = new Error("The sandbox runner request timed out.");
                 this.stopConnection(
                     connection,
                     error
                 );
-                reject(error);
+                finish(() => reject(error));
             }, RUNNER_REQUEST_TIMEOUT_MS);
             connection.pending.set(message.requestId, {
-                resolve,
-                reject,
+                resolve: (value) => finish(() => resolve(value)),
+                reject: (error) => finish(() => reject(error)),
                 timer
             });
+            signal?.addEventListener("abort", abort, { once: true });
+            if (signal?.aborted) {
+                abort();
+                return;
+            }
             try {
                 connection.child.send(message, (error) => {
                     if (!error) {
@@ -328,13 +359,13 @@ export class SandboxRunnerHost {
                         return;
                     }
                     connection.pending.delete(message.requestId);
-                    clearTimeout(pending.timer);
                     pending.reject(error);
                 });
             } catch (error) {
                 connection.pending.delete(message.requestId);
-                clearTimeout(timer);
-                reject(error instanceof Error ? error : new Error(String(error)));
+                finish(() => reject(
+                    error instanceof Error ? error : new Error(String(error))
+                ));
             }
         });
     }
@@ -494,9 +525,10 @@ export class SandboxRunnerHost {
 
 export async function createSandboxLaunch(
     host: SandboxRunnerHost,
-    options: SandboxLaunchOptions
+    options: SandboxLaunchOptions,
+    signal?: AbortSignal
 ): Promise<SandboxLaunch> {
-    return host.prepare(options);
+    return host.prepare(options, signal);
 }
 
 /** Build the cached preflight check for the platform sandbox dependencies. */
@@ -592,6 +624,18 @@ export function sandboxRuntimeConfig(policy: SandboxPolicy): SandboxRuntimeConfi
 
 function defaultSandboxRunnerPath(): string {
     return fileURLToPath(new URL("./sandbox-runner.js", import.meta.url));
+}
+
+function abortError(signal: AbortSignal | undefined): Error {
+    const reason = signal?.reason;
+    if (reason instanceof Error) {
+        return reason;
+    }
+    return new Error(
+        typeof reason === "string" && reason.length > 0
+            ? reason
+            : "The sandbox request was aborted."
+    );
 }
 
 function sandboxWindowsExecutable(): string {

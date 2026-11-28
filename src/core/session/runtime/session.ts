@@ -522,89 +522,92 @@ export class Session {
             runtime.emit({ type: "request.error", error: reason });
             throw error;
         } finally {
-            if (run.heartbeat) {
-                clearInterval(run.heartbeat);
-                run.heartbeat = null;
+            try {
+                if (run.heartbeat) {
+                    clearInterval(run.heartbeat);
+                    run.heartbeat = null;
+                }
+                this.toolUseOpen = false;
+                this.streamOpen = false;
+                this.pendingMessages.discardPrompts();
+                this.flushPendingSystemMessages(runtime);
+                this.toolState = null;
+                observeStart();
+                const endedAtMs = Date.now();
+                const durationMs = Math.round(performance.now() - startedAt);
+                const contextTokensEnd = run.contextWindow === undefined
+                    ? undefined
+                    : this.contextTokens(run.contextWindow, runtime.workingDirectories ?? []);
+                this.observer.runFinished(run.runId, {
+                    endedAtMs,
+                    durationMs,
+                    outcome,
+                    provider: run.provider,
+                    model: run.model,
+                    activeDurationMs: Math.max(0, durationMs - run.permissionWaitMs),
+                    errorStage: run.failure?.stage,
+                    errorCode: run.failure?.code,
+                    errorMessage: run.failure?.message,
+                    contextTokensEnd,
+                    contextUtilizationEnd: ratio(contextTokensEnd, run.contextWindow),
+                    llmTurns: run.llmTurns,
+                    toolCalls: run.toolCalls,
+                    agentSteps: run.agentSteps,
+                    maxRoundsHit: run.maxRoundsHit,
+                    injectedPrompts: run.injectedPrompts,
+                    toolErrors: run.toolErrors,
+                    repeatToolCalls: run.repeatToolCalls,
+                    permissionRequests: run.permissionRequests,
+                    permissionWaitMs: run.permissionWaitMs,
+                    compactions: run.compactions,
+                    compactionDurationMs: run.compactionDurationMs,
+                    compactionInputTokens: run.compactionInputTokens ?? undefined,
+                    compactionOutputTokens: run.compactionOutputTokens ?? undefined,
+                    llmDurationMs: run.llmDurationMs,
+                    toolDurationMs: run.toolDurationMs,
+                    toolExecutionMs: run.toolExecutionMs,
+                    unaccountedMs: Math.max(
+                        0,
+                        durationMs - run.llmDurationMs - run.toolDurationMs
+                    ),
+                    ttftMs: run.ttftMs ?? undefined,
+                    inputTokens: run.usageSeen ? run.inputTokens : undefined,
+                    outputTokens: run.usageSeen ? run.outputTokens : undefined,
+                    cacheReadTokens: run.usageSeen ? run.cacheReadTokens : undefined,
+                    cacheWriteTokens: run.usageSeen ? run.cacheWriteTokens : undefined,
+                    reasoningTokens: run.reasoningSeen ? run.reasoningTokens : undefined,
+                    costUsd: run.usageSeen ? run.costUsd : undefined,
+                    tokensPerSecond: run.usageSeen
+                        ? rate(run.outputTokens, run.generationMs)
+                        : undefined,
+                    wallTokensPerSecond: run.usageSeen
+                        ? rate(run.outputTokens, durationMs)
+                        : undefined,
+                    finalStopReason: run.finalStopReason ?? undefined,
+                    toolSequenceJson: JSON.stringify(run.toolNames),
+                    submitToFirstTokenMs: run.submitToFirstTokenMs ?? undefined,
+                    llmHttpAttempts: run.llmHttpAttempts,
+                    llmRetries: run.llmRetries,
+                    rateLimitResponses: run.rateLimitResponses,
+                    retryAfterMs: run.retryAfterMs,
+                    providerHttpStatus: run.providerHttpStatus
+                });
+            } finally {
+                if (this.activeRun === run) {
+                    this.activeRun = null;
+                }
+                this.running = false;
+                if (this.requestController === controller) {
+                    this.requestController = null;
+                }
+                this.notifyIdle();
+                this.logger.info("Session request finished", {
+                    sessionId: this.meta.id,
+                    runId: run.runId,
+                    durationMs: elapsedMs(startedAt),
+                    outcome
+                });
             }
-            this.toolUseOpen = false;
-            this.streamOpen = false;
-            this.pendingMessages.discardPrompts();
-            this.flushPendingSystemMessages(runtime);
-            this.toolState = null;
-            observeStart();
-            const endedAtMs = Date.now();
-            const durationMs = Math.round(performance.now() - startedAt);
-            const contextTokensEnd = run.contextWindow === undefined
-                ? undefined
-                : this.contextTokens(run.contextWindow, runtime.workingDirectories ?? []);
-            this.observer.runFinished(run.runId, {
-                endedAtMs,
-                durationMs,
-                outcome,
-                provider: run.provider,
-                model: run.model,
-                activeDurationMs: Math.max(0, durationMs - run.permissionWaitMs),
-                errorStage: run.failure?.stage,
-                errorCode: run.failure?.code,
-                errorMessage: run.failure?.message,
-                contextTokensEnd,
-                contextUtilizationEnd: ratio(contextTokensEnd, run.contextWindow),
-                llmTurns: run.llmTurns,
-                toolCalls: run.toolCalls,
-                agentSteps: run.agentSteps,
-                maxRoundsHit: run.maxRoundsHit,
-                injectedPrompts: run.injectedPrompts,
-                toolErrors: run.toolErrors,
-                repeatToolCalls: run.repeatToolCalls,
-                permissionRequests: run.permissionRequests,
-                permissionWaitMs: run.permissionWaitMs,
-                compactions: run.compactions,
-                compactionDurationMs: run.compactionDurationMs,
-                compactionInputTokens: run.compactionInputTokens ?? undefined,
-                compactionOutputTokens: run.compactionOutputTokens ?? undefined,
-                llmDurationMs: run.llmDurationMs,
-                toolDurationMs: run.toolDurationMs,
-                toolExecutionMs: run.toolExecutionMs,
-                unaccountedMs: Math.max(
-                    0,
-                    durationMs - run.llmDurationMs - run.toolDurationMs
-                ),
-                ttftMs: run.ttftMs ?? undefined,
-                inputTokens: run.usageSeen ? run.inputTokens : undefined,
-                outputTokens: run.usageSeen ? run.outputTokens : undefined,
-                cacheReadTokens: run.usageSeen ? run.cacheReadTokens : undefined,
-                cacheWriteTokens: run.usageSeen ? run.cacheWriteTokens : undefined,
-                reasoningTokens: run.reasoningSeen ? run.reasoningTokens : undefined,
-                costUsd: run.usageSeen ? run.costUsd : undefined,
-                tokensPerSecond: run.usageSeen
-                    ? rate(run.outputTokens, run.generationMs)
-                    : undefined,
-                wallTokensPerSecond: run.usageSeen
-                    ? rate(run.outputTokens, durationMs)
-                    : undefined,
-                finalStopReason: run.finalStopReason ?? undefined,
-                toolSequenceJson: JSON.stringify(run.toolNames),
-                submitToFirstTokenMs: run.submitToFirstTokenMs ?? undefined,
-                llmHttpAttempts: run.llmHttpAttempts,
-                llmRetries: run.llmRetries,
-                rateLimitResponses: run.rateLimitResponses,
-                retryAfterMs: run.retryAfterMs,
-                providerHttpStatus: run.providerHttpStatus
-            });
-            if (this.activeRun === run) {
-                this.activeRun = null;
-            }
-            this.running = false;
-            if (this.requestController === controller) {
-                this.requestController = null;
-            }
-            this.notifyIdle();
-            this.logger.info("Session request finished", {
-                sessionId: this.meta.id,
-                runId: run.runId,
-                durationMs: elapsedMs(startedAt),
-                outcome
-            });
         }
     }
 

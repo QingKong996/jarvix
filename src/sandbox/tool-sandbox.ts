@@ -45,7 +45,7 @@ export function createToolSandbox(
             return policy() !== null;
         },
         preflight,
-        async prepareCommand(input) {
+        async prepareCommand(input, signal) {
             const current = policy();
             if (current === null) {
                 return null;
@@ -59,7 +59,7 @@ export function createToolSandbox(
                 commandId: input.commandId,
                 policy: current,
                 binShell: toSandboxBinShell(input.binShell)
-            });
+            }, signal);
             return toSandboxedCommand(launch);
         },
         dispose() {

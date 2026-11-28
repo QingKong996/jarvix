@@ -8,7 +8,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
-import type { SandboxReadiness } from "../../../core/execution/sandbox.ts";
+import type {
+    CommandSandbox,
+    SandboxReadiness
+} from "../../../core/execution/sandbox.ts";
 import { createPermissionRules } from "../../../core/permissions/rules.ts";
 import { createToolSandbox } from "../../../sandbox/tool-sandbox.ts";
 import { MAX_TOOL_OUTPUT_CHARS } from "../output.ts";
@@ -765,3 +768,86 @@ test("returns a setup error before starting a sandboxed command", async () => {
     expect(result.content).toContain("not a permission-mode denial");
     expect(result.content).toContain("Install or repair the Windows sandbox from Jarvix");
 });
+
+test("aborts while a sandboxed command is being prepared", async () => {
+    const controller = new AbortController();
+    let prepareStarted = false;
+    let prepareSignal: AbortSignal | undefined;
+    const sandbox: CommandSandbox = {
+        active: true,
+        preflight: readySandboxPreflight,
+        prepareCommand: (_input, signal) => {
+            prepareStarted = true;
+            prepareSignal = signal;
+            return new Promise((_resolve, reject) => {
+                signal?.addEventListener(
+                    "abort",
+                    () => reject(new Error("Sandbox preparation aborted.")),
+                    { once: true }
+                );
+            });
+        },
+        dispose: () => undefined
+    };
+    const tool = new ShellTool({ sandbox });
+    tools.push(tool);
+
+    const execution = tool.execute(call("exec_command", {
+        command: "echo should-not-run",
+        cwd: process.cwd(),
+        timeoutMs: 5_000
+    }), { onOutput: () => undefined }, controller.signal);
+    await vi.waitFor(() => {
+        expect(prepareStarted).toBe(true);
+    });
+    expect(prepareSignal).toBe(controller.signal);
+
+    controller.abort();
+
+    await expect(execution).resolves.toMatchObject({
+        content: "Command aborted.",
+        isError: true
+    });
+});
+
+test("aborts a running sandboxed command", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvix-shell-sandbox-abort-"));
+    const runner = writeFakeSandboxRunner(directory, {
+        launch: {
+            command: process.execPath,
+            args: [
+                "-e",
+                "process.stdout.write('ready\\n'); setInterval(() => undefined, 1_000);"
+            ]
+        }
+    });
+    const tool = new ShellTool({
+        sandbox: sandboxCommand(directory, runner)
+    });
+    tools.push(tool);
+    const controller = new AbortController();
+    const outputs: string[] = [];
+
+    try {
+        const execution = tool.execute(call("exec_command", {
+            command: "ignored",
+            cwd: directory,
+            timeoutMs: 10_000
+        }), {
+            onOutput: ({ output }) => outputs.push(output)
+        }, controller.signal);
+        await vi.waitFor(() => {
+            expect(outputs.join("")).toContain("ready");
+        }, { timeout: 5_000 });
+
+        const startedAt = Date.now();
+        controller.abort();
+        const result = await execution;
+
+        expect(Date.now() - startedAt).toBeLessThan(5_000);
+        expect(result.content).toContain("Command aborted.");
+    } finally {
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+        rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+}, 10_000);
