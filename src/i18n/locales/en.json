@@ -175,7 +175,79 @@
         "noMatches": "No matching features",
         "tabs": {
             "context": "Context inspector",
-            "background": "Background tasks"
+            "background": "Background tasks",
+            "usage": "Usage"
+        },
+        "usage": {
+            "breadcrumb": {
+                "observe": "Observe",
+                "usage": "Usage",
+                "requests": "Requests"
+            },
+            "update": "Update",
+            "activePrice": "Effective pricing",
+            "autoRefresh": "Auto refresh",
+            "autoRefreshOff": "Off",
+            "autoRefreshSeconds": "{{count}}s",
+            "periods": {
+                "today": "Today",
+                "24h": "24 hours",
+                "7d": "7 days",
+                "30d": "30 days",
+                "all": "All",
+                "custom": "Custom"
+            },
+            "customStart": "Start date",
+            "customEnd": "End date",
+            "invalidCustomRange": "The end date must be after the start date.",
+            "summary": {
+                "tokens": "Tokens",
+                "cost": "Cost",
+                "outputSpeed": "Output speed",
+                "requests": "Requests",
+                "cacheHitRate": "Cache hit rate",
+                "tokenBreakdown": "Input {{input}} · Output {{output}} · Cache {{cache}}",
+                "tokensPerSecond": "token/s",
+                "timedSamples": "{{count}} timed",
+                "noTiming": "No timing data",
+                "ttft": "First token avg {{value}} · {{count}} timed",
+                "failed": "{{count}} failed",
+                "successRate": "Success {{rate}}",
+                "retried": "{{count}} recovered after retry",
+                "cancelled": "{{count}} cancelled",
+                "responseChars": "Text {{text}} · Thinking {{thinking}}",
+                "charRate": "{{value}} chars/s",
+                "speed": "{{value}} token/s",
+                "firstToken": "First token {{value}}"
+            },
+            "chartMetrics": {
+                "tokens": "Tokens",
+                "cost": "Cost",
+                "requests": "Requests",
+                "speed": "Speed",
+                "traffic": "Traffic"
+            },
+            "emptyChart": "No chart data",
+            "requests": "Request details",
+            "editPrice": "Edit pricing",
+            "unknownModel": "Unknown model",
+            "unknownProvider": "Unknown provider",
+            "unknownAgent": "Unknown agent",
+            "loadMore": "Show {{count}} more",
+            "emptyRequests": "No requests yet",
+            "retryCount": "Retried {{count}}x",
+            "requestTokens": "In {{input}} · Out {{output}} · Cache {{cache}}",
+            "attemptCount": "{{count}} attempts",
+            "kinds": {
+                "main": "Chat",
+                "compaction": "Compaction",
+                "naming": "Naming"
+            },
+            "outcomes": {
+                "completed": "Completed",
+                "error": "Error",
+                "aborted": "Aborted"
+            }
         },
         "context": {
             "emptyTitle": "No session selected",
@@ -315,6 +387,16 @@
             "modelSettings": "Model settings",
             "contextWindow": "Context tokens",
             "maxTokens": "Output tokens",
+            "pricing": "Pricing",
+            "priceUnit": "USD / 1M tokens (models.dev)",
+            "priceInput": "Input",
+            "priceOutput": "Output",
+            "priceCacheRead": "Cache read",
+            "priceCacheWrite": "Cache write",
+            "priceTier": "Tier {{index}}",
+            "priceTierThreshold": "Input tokens above",
+            "addPriceTier": "Add tier",
+            "removePriceTier": "Remove tier {{index}}",
             "reasoning": "Supports reasoning",
             "addModel": "Add model",
             "syncModels": "Sync models",

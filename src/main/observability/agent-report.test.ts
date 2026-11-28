@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { expect, test } from "vitest";
 import { SqliteAgentObserver } from "./sqlite-observer.ts";
 
-test("renders JSON and Markdown reports from a version 3 database", () => {
+test("renders JSON and Markdown reports from the current database", () => {
     const directory = mkdtempSync(join(tmpdir(), "jarvix-report-"));
     const databasePath = join(directory, "agent.sqlite3");
     const now = Date.now();

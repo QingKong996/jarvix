@@ -27,6 +27,7 @@ import {
 import { configPaths, loadConfig, parseConfig, saveConfig, systemDefaults } from "./services/config.ts";
 import { ModelCatalogService } from "./services/model-catalog.ts";
 import { SandboxSetupService } from "./services/sandbox-setup.ts";
+import { UsageStatsService } from "./services/usage-stats.ts";
 import { MainWindowController } from "./window.ts";
 import { SkillCatalog } from "../core/skills/skill-catalog.ts";
 
@@ -138,8 +139,9 @@ function startDesktop(): void {
         const sandboxFactory = createToolSandboxFactory({
             preflight: () => sandboxSetup.preflight()
         });
+        const databasePath = observabilityDatabasePath();
         const observer = createSqliteAgentObserver({
-            databasePath: observabilityDatabasePath(),
+            databasePath,
             appVersion: app.getVersion(),
             buildId: process.env.JARVIX_BUILD_ID
                 ?? (app.isPackaged ? app.getVersion() : "dev"),
@@ -170,6 +172,11 @@ function startDesktop(): void {
             fetch,
             mainLogger("catalog")
         );
+        const usage = new UsageStatsService({
+            databasePath,
+            getConfig: () => config,
+            logger: mainLogger("usage")
+        });
 
         const updateConfig = async (payload: unknown): Promise<typeof config> => {
             const next = parseConfig(payload, defaults);
@@ -212,6 +219,7 @@ function startDesktop(): void {
             jarvix,
             windows,
             catalog,
+            usage,
             sandboxSetup,
             getConfig: () => config,
             updateConfig

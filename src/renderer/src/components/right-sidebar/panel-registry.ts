@@ -1,10 +1,11 @@
-import { ScanEye, Terminal } from "lucide-react";
+import { ChartColumn, ScanEye, Terminal } from "lucide-react";
 
-export type RightSidebarPanel = "context" | "background";
+export type RightSidebarPanel = "context" | "background" | "usage";
 
 type RightSidebarLabelKey =
     | "rightSidebar.tabs.context"
-    | "rightSidebar.tabs.background";
+    | "rightSidebar.tabs.background"
+    | "rightSidebar.tabs.usage";
 
 type RightSidebarPanelDefinition = {
     panel: RightSidebarPanel;
@@ -20,6 +21,10 @@ const PANEL_DEFINITIONS = {
     background: {
         labelKey: "rightSidebar.tabs.background",
         icon: Terminal
+    },
+    usage: {
+        labelKey: "rightSidebar.tabs.usage",
+        icon: ChartColumn
     }
 } as const satisfies Record<RightSidebarPanel, Omit<RightSidebarPanelDefinition, "panel">>;
 

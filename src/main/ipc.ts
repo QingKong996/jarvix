@@ -20,11 +20,13 @@ import {
     type JarvixSessionContext
 } from "../protocol/session.ts";
 import type { JarvixSkillListScope } from "../protocol/skill.ts";
+import { usageAuditQuerySchema } from "../protocol/usage.ts";
 import { mainLogger } from "./logger.ts";
 import type { ModelCatalogService } from "./services/model-catalog.ts";
 import { syncProviderModels } from "./services/provider-model-sync.ts";
 import { completePaths, describePaths } from "./services/path-completion.ts";
 import type { SandboxSetupService } from "./services/sandbox-setup.ts";
+import type { UsageStatsService } from "./services/usage-stats.ts";
 import type { MainWindowController } from "./window.ts";
 
 const SLOW_IPC_MS = 1_000;
@@ -35,6 +37,7 @@ export type IpcDependencies = {
     jarvix: Jarvix;
     windows: MainWindowController;
     catalog: ModelCatalogService;
+    usage: UsageStatsService;
     sandboxSetup: SandboxSetupService;
     getConfig(): JarvixConfig;
     updateConfig(payload: unknown): JarvixConfig | Promise<JarvixConfig>;
@@ -157,7 +160,15 @@ function parseSkillListScope(value: unknown): JarvixSkillListScope {
 }
 
 export function registerIpc(dependencies: IpcDependencies): void {
-    const { jarvix, windows, catalog, sandboxSetup, getConfig, updateConfig } = dependencies;
+    const {
+        jarvix,
+        windows,
+        catalog,
+        usage,
+        sandboxSetup,
+        getConfig,
+        updateConfig
+    } = dependencies;
     const assertSender = (event: IpcMainInvokeEvent): void => windows.assertSender(event);
 
     handle(IPC_CHANNELS.request, async (event, payload: unknown) => {
@@ -232,6 +243,17 @@ export function registerIpc(dependencies: IpcDependencies): void {
     handle(IPC_CHANNELS.providerModelsSync, (event, provider: unknown) => {
         assertSender(event);
         return syncProviderModels(provider, fetch, providerLog);
+    });
+
+    handle(IPC_CHANNELS.usageStats, (event, payload: unknown) => {
+        assertSender(event);
+        const parsed = usageAuditQuerySchema.safeParse(
+            requirePayload(payload, "Invalid usage query")
+        );
+        if (!parsed.success) {
+            throw new Error("Invalid usage query");
+        }
+        return usage.stats(parsed.data);
     });
 
     handle(IPC_CHANNELS.configSet, (event, payload: unknown) => {

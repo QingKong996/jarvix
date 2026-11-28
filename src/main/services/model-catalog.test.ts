@@ -43,7 +43,7 @@ test("shares refresh requests and persists only validated catalog data", async (
 
 test("serves stale persisted data offline and reports an initial fetch failure", async () => {
     const file = join(directory, "stale.json");
-    await writeFile(file, JSON.stringify({ version: 4, providers: parseModelsDevCatalog(fixture), fetchedAt: 1 }));
+    await writeFile(file, JSON.stringify({ version: 5, providers: parseModelsDevCatalog(fixture), fetchedAt: 1 }));
     const request = vi.fn<typeof fetch>().mockRejectedValue(new Error("Offline"));
     expect(await new ModelCatalogService(file, request).get()).toMatchObject({ fetchedAt: 1, stale: true });
     await expect(new ModelCatalogService(join(directory, "missing.json"), request).get()).rejects.toThrow("Offline");

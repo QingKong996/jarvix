@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const AGENT_DATABASE_VERSION = 3;
+export const AGENT_DATABASE_VERSION = 4;
 
 export const AGENT_SCHEMA_V1 = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -168,6 +168,8 @@ CREATE INDEX IF NOT EXISTS idx_turns_run
   ON turns(run_id, turn_kind, turn_index);
 CREATE INDEX IF NOT EXISTS idx_turns_model
   ON turns(provider, model, turn_kind, started_at_ms);
+CREATE INDEX IF NOT EXISTS idx_turns_started
+  ON turns(started_at_ms);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_turns_main_index
   ON turns(run_id, turn_index)
   WHERE turn_kind = 'main';
@@ -237,11 +239,16 @@ CREATE INDEX IF NOT EXISTS idx_llm_attempts_outcome
   ON llm_attempts(outcome, http_status, started_at_ms);
 `;
 
+const MIGRATION_V3_TO_V4 = `
+CREATE INDEX IF NOT EXISTS idx_turns_started
+  ON turns(started_at_ms);
+`;
+
 export function migrateAgentDatabase(database: DatabaseSync): void {
   const row = database.prepare("PRAGMA user_version").get();
   const version = Number(row?.user_version ?? 0);
 
-  if (version >= 0 && version <= 2) {
+  if (version >= 0 && version <= 3) {
     database.exec("BEGIN IMMEDIATE");
     try {
       if (version === 0) {
@@ -252,6 +259,9 @@ export function migrateAgentDatabase(database: DatabaseSync): void {
       }
       if (version <= 2) {
         database.exec(MIGRATION_V2_TO_V3);
+      }
+      if (version <= 3) {
+        database.exec(MIGRATION_V3_TO_V4);
       }
       database.exec(`PRAGMA user_version = ${AGENT_DATABASE_VERSION}`);
       database.exec("COMMIT");
