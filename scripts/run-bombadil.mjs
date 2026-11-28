@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
+const WebSocketClient = require("ws");
 const argumentsList = process.argv.slice(2);
 const skipBuild = process.env.JARVIX_BOMBADIL_SKIP_BUILD === "1"
     || argumentsList.includes("--skip-build");
@@ -145,6 +146,91 @@ function getJson(url) {
 
 function delay(milliseconds) {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function cdpCommand(socketUrl, method, params, timeout) {
+    return new Promise((resolve, reject) => {
+        const socket = new WebSocketClient(socketUrl);
+        let settled = false;
+        const finish = (error, result) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            socket.close();
+            if (error) {
+                reject(error);
+                return;
+            }
+            resolve(result);
+        };
+        const timer = setTimeout(
+            () => finish(new Error(`Timed out waiting for ${method}`)),
+            timeout
+        );
+        socket.addEventListener("open", () => {
+            socket.send(JSON.stringify({ id: 1, method, params }));
+        });
+        socket.addEventListener("message", (event) => {
+            let message;
+            try {
+                message = JSON.parse(String(event.data));
+            } catch {
+                return;
+            }
+            if (message.id !== 1) return;
+            if (message.error) {
+                finish(new Error(`${method}: ${message.error.message}`));
+                return;
+            }
+            finish(null, message.result);
+        });
+        socket.addEventListener("error", () => {
+            finish(new Error(`WebSocket error while waiting for ${method}`));
+        });
+        socket.addEventListener("close", () => {
+            finish(new Error(`WebSocket closed while waiting for ${method}`));
+        });
+    });
+}
+
+async function waitForRendererReady(target, deadline) {
+    const socketUrl = target.webSocketDebuggerUrl;
+    if (!socketUrl) {
+        throw new Error("Electron did not expose a debugger WebSocket for the renderer target.");
+    }
+
+    let lastError = null;
+    while (Date.now() < deadline) {
+        try {
+            const evaluation = await cdpCommand(socketUrl, "Runtime.evaluate", {
+                expression: `(async () => {
+                    if (document.readyState !== "complete") return false;
+                    if (!document.querySelector("[data-testid='app-shell']")) return false;
+                    await new Promise((resolve) => requestAnimationFrame(
+                        () => requestAnimationFrame(resolve)
+                    ));
+                    return true;
+                })()`,
+                awaitPromise: true,
+                returnByValue: true
+            }, Math.min(deadline - Date.now(), 5_000));
+            if (evaluation?.result?.value === true) {
+                await cdpCommand(socketUrl, "Page.captureScreenshot", {
+                    format: "jpeg",
+                    quality: 40
+                }, Math.min(deadline - Date.now(), 15_000));
+                process.stdout.write("bombadil renderer ready\n");
+                return;
+            }
+            lastError = new Error("The application shell has not rendered yet.");
+        } catch (error) {
+            lastError = error;
+        }
+        await delay(250);
+    }
+    throw new Error(
+        `Timed out waiting for the Electron renderer to become ready: ${lastError?.message ?? "no response"}`
+    );
 }
 
 async function waitForJson(url, deadline) {
@@ -459,9 +545,11 @@ async function runInWsl() {
             `http://${gateway}:${status.proxyPort}/json/list`,
             Date.now() + 10_000
         );
-        if (!targets.some((target) => target.url === status.targetUrl)) {
+        const target = targets.find((item) => item.url === status.targetUrl);
+        if (!target) {
             throw new Error("The Electron renderer target disappeared before the test started.");
         }
+        await waitForRendererReady(target, Date.now() + 30_000);
         process.stdout.write(`bombadil target: ${status.targetUrl}\n`);
         exitCode = await runBombadil(
             `http://${gateway}:${status.proxyPort}`,
@@ -500,7 +588,11 @@ async function runNative() {
         ".",
         `--remote-debugging-port=${debugPort}`,
         `--user-data-dir=${profile}`,
-        ...(process.env.CI ? ["--no-sandbox"] : [])
+        ...(process.env.CI ? [
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu"
+        ] : [])
     ], {
         cwd: repo,
         env: {
@@ -523,6 +615,7 @@ async function runNative() {
         if (!target) {
             throw new Error("Electron did not expose the Jarvix renderer target.");
         }
+        await waitForRendererReady(target, Date.now() + 30_000);
         process.stdout.write(`bombadil target: ${target.url}\n`);
         exitCode = await runBombadil(
             `http://127.0.0.1:${debugPort}`,

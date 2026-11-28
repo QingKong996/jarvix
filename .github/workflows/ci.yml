@@ -107,4 +107,4 @@ jobs:
           sudo apt-get install --no-install-recommends -y xvfb
 
       - name: Electron UI exploration
-        run: xvfb-run -a npm run test:ui -- --time-limit=30s
+        run: xvfb-run -a --server-args="-screen 0 1440x900x24" npm run test:ui -- --time-limit=30s
