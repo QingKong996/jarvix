@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
-const SUPPORTED_SCHEMA_VERSION = 4;
+const SUPPORTED_SCHEMA_VERSION = 5;
 const MIN_P95_SAMPLES = 20;
 const MAX_SLOW_RUNS = 10;
 const MAX_DAILY_ROWS = 366;
