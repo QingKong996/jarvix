@@ -5,6 +5,7 @@ import type { JarvixProviderContext } from "../../../../protocol/provider-contex
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ContextMessage } from "./ContextMessage.tsx";
 import { contextMessagesFor } from "./context-messages.ts";
+import { PerspectiveCachePanel } from "./PerspectiveCachePanel.tsx";
 import { PerspectiveContextPanel } from "./PerspectiveContextPanel.tsx";
 import { PerspectiveTimingPanel } from "./PerspectiveTimingPanel.tsx";
 import { perspectiveTimingFor } from "./perspective-timing.ts";
@@ -104,6 +105,7 @@ export function ContextInspector({
                 history={context.usageHistory ?? []}
                 breakdown={context.breakdown}
             />
+            <PerspectiveCachePanel history={context.cacheHistory ?? []} />
             {timing ? <PerspectiveTimingPanel timing={timing} /> : null}
             <ScrollArea
                 className="min-h-0 flex-1"

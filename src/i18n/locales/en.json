@@ -273,6 +273,16 @@
                 "current": "Current",
                 "occupancyAria": "Context usage {{percent}}, {{used}} of {{limit}} tokens"
             },
+            "cache": {
+                "title": "Cache hit rate",
+                "average": "Average {{rate}}",
+                "anomalyCount_one": "{{count}} anomaly",
+                "anomalyCount_other": "{{count}} anomalies",
+                "anomalyLow": "Unusually low",
+                "anomalyHigh": "Unusually high",
+                "hitRate": "Hit rate",
+                "cacheTokens": "Cache read {{read}} · write {{write}}"
+            },
             "breakdown": {
                 "kinds": {
                     "systemPrompt": "System prompt",

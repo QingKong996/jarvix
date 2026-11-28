@@ -271,6 +271,15 @@
                 "current": "当前",
                 "occupancyAria": "上下文占用 {{percent}}，已用 {{used}} / {{limit}} Token"
             },
+            "cache": {
+                "title": "缓存命中率",
+                "average": "均值 {{rate}}",
+                "anomalyCount_other": "{{count}} 个异常",
+                "anomalyLow": "异常低点",
+                "anomalyHigh": "异常高点",
+                "hitRate": "命中率",
+                "cacheTokens": "缓存读取 {{read}} · 写入 {{write}}"
+            },
             "breakdown": {
                 "kinds": {
                     "systemPrompt": "系统提示词",
