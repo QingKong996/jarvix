@@ -35,6 +35,8 @@ export type JarvixConfig = {
     reasoning?: ReasoningLevel;
     language?: Language;
     theme?: Theme;
+    /** Collapse consecutive reasoning and tool activity in the transcript. */
+    conciseTranscript?: boolean;
     /** Remaining context headroom in tokens that triggers local compaction. */
     contextCompactionThreshold?: number;
     /** Per-skill overrides keyed by the absolute SKILL.md path. */

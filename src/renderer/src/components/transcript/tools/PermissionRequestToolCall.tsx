@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronRight, ShieldAlert } from "lucide-react";
 import { motion } from "motion/react";
 import type { TFunction } from "i18next";
@@ -24,6 +24,12 @@ export function PermissionRequestToolCall({
     const pending = data.decision === "pending";
     const [open, setOpen] = useState(pending);
 
+    useEffect(() => {
+        if (!pending) {
+            setOpen(false);
+        }
+    }, [pending]);
+
     return (
         <Collapsible
             open={open}
@@ -34,7 +40,7 @@ export function PermissionRequestToolCall({
         >
             <CollapsibleTrigger
                 type="button"
-                className="group -ml-2 flex w-fit items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors outline-none select-none hover:bg-accent/65 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30"
+                className="group -ml-2 flex w-fit items-center gap-1.5 rounded-lg px-2 py-0 text-xs text-muted-foreground transition-colors outline-none select-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30"
             >
                 <motion.span
                     aria-hidden="true"

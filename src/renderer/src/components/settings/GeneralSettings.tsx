@@ -11,10 +11,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 type GeneralSettingsProps = {
     language: Language;
     theme: Theme;
+    conciseTranscript: boolean;
     compactionThreshold: string;
     disabled: boolean;
     onLanguageChange: (language: Language) => void;
     onThemeChange: (theme: Theme) => void;
+    onConciseTranscriptChange: (concise: boolean) => void;
     onCompactionThresholdChange: (value: string) => void;
 };
 
@@ -34,10 +36,12 @@ function isTheme(value: string): value is Theme {
 export function GeneralSettings({
     language,
     theme,
+    conciseTranscript,
     compactionThreshold,
     disabled,
     onLanguageChange,
     onThemeChange,
+    onConciseTranscriptChange,
     onCompactionThresholdChange
 }: GeneralSettingsProps) {
     const { t } = useTranslation();
@@ -92,6 +96,36 @@ export function GeneralSettings({
                                 {t(`settings.general.themes.${item}`)}
                             </SelectItem>
                         ))}
+                    </SelectContent>
+                </Select>
+            </div>
+
+            <div className="flex items-start justify-between gap-4 py-4">
+                <div className="flex flex-col gap-1">
+                    <label htmlFor="settings-transcript-flow" className="font-medium text-foreground">
+                        {t("settings.general.transcriptFlow")}
+                    </label>
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                        {t("settings.general.transcriptFlowDescription")}
+                    </p>
+                </div>
+                <Select
+                    value={conciseTranscript ? "concise" : "complete"}
+                    disabled={disabled}
+                    onValueChange={(value) => onConciseTranscriptChange(
+                        value === "concise"
+                    )}
+                >
+                    <SelectTrigger id="settings-transcript-flow" className="w-44 shrink-0">
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="complete">
+                            {t("settings.general.transcriptFlows.complete")}
+                        </SelectItem>
+                        <SelectItem value="concise">
+                            {t("settings.general.transcriptFlows.concise")}
+                        </SelectItem>
                     </SelectContent>
                 </Select>
             </div>

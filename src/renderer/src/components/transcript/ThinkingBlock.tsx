@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { motion } from "motion/react";
 import { useTranslation } from "react-i18next";
@@ -18,12 +18,18 @@ export function ThinkingBlock({ text, streaming = false, label }: ThinkingBlockP
     const defaultLabel = streaming ? t("thinking.streaming") : t("thinking.label");
     const displayLabel = label === undefined ? defaultLabel : label;
 
+    useEffect(() => {
+        if (!streaming) {
+            setOpen(false);
+        }
+    }, [streaming]);
+
     return (
         <Collapsible open={open} onOpenChange={setOpen} className="flex flex-col gap-1.5">
             <CollapsibleTrigger
                 type="button"
                 aria-label={displayLabel ?? t("system.message")}
-                className="group -ml-2 flex w-fit items-center gap-1.5 rounded-lg px-2 py-1 text-[13px] text-muted-foreground transition-colors outline-none select-none hover:bg-accent/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/25"
+                className="group -ml-2 flex w-fit items-center gap-1.5 rounded-lg px-2 py-0 text-[13px] text-muted-foreground transition-colors outline-none select-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/25"
             >
                 <motion.span
                     aria-hidden="true"

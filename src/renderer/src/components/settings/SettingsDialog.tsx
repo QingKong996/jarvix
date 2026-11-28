@@ -61,6 +61,9 @@ export function SettingsDialog({
     const [selectedModel, setSelectedModel] = useState<ModelSelection | undefined>(config?.selectedModel);
     const [language, setLanguage] = useState<Language>(activeLanguage(i18n.language));
     const [theme, setTheme] = useState<Theme>(config?.theme ?? DEFAULT_THEME);
+    const [conciseTranscript, setConciseTranscript] = useState(
+        config?.conciseTranscript ?? false
+    );
     const [compactionThreshold, setCompactionThreshold] = useState("");
     const [skillSettings, setSkillSettings] = useState<JarvixSkillSettings>(
         config?.skills ?? {}
@@ -80,6 +83,7 @@ export function SettingsDialog({
         setSelectedModel(config?.selectedModel);
         setLanguage(config?.language ?? activeLanguage(i18n.language));
         setTheme(config?.theme ?? DEFAULT_THEME);
+        setConciseTranscript(config?.conciseTranscript ?? false);
         setCompactionThreshold(
             config?.contextCompactionThreshold?.toString() ?? ""
         );
@@ -105,6 +109,7 @@ export function SettingsDialog({
                 ...baseConfig,
                 language,
                 theme,
+                conciseTranscript,
                 providers,
                 selectedModel,
                 ...(threshold !== undefined
@@ -116,6 +121,7 @@ export function SettingsDialog({
             onSaved(next);
             setLanguage(next.language ?? language);
             setTheme(next.theme ?? DEFAULT_THEME);
+            setConciseTranscript(next.conciseTranscript ?? false);
             setCompactionThreshold(
                 next.contextCompactionThreshold?.toString() ?? ""
             );
@@ -202,6 +208,7 @@ export function SettingsDialog({
                             <GeneralSettings
                                 language={language}
                                 theme={theme}
+                                conciseTranscript={conciseTranscript}
                                 compactionThreshold={compactionThreshold}
                                 disabled={disabled}
                                 onLanguageChange={(next) => {
@@ -210,6 +217,10 @@ export function SettingsDialog({
                                 }}
                                 onThemeChange={(next) => {
                                     setTheme(next);
+                                    setError(null);
+                                }}
+                                onConciseTranscriptChange={(next) => {
+                                    setConciseTranscript(next);
                                     setError(null);
                                 }}
                                 onCompactionThresholdChange={(next) => {

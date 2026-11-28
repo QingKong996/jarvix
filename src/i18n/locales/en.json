@@ -156,7 +156,14 @@
         }
     },
     "transcript": {
-        "generating": "Generating…"
+        "generating": "Generating…",
+        "process": {
+            "label": "Execution details",
+            "toolCalls_one": "{{count}} tool call",
+            "toolCalls_other": "{{count}} tool calls",
+            "thinking_one": "{{count}} thought",
+            "thinking_other": "{{count}} thoughts"
+        }
     },
     "system": {
         "message": "System message"
@@ -450,6 +457,12 @@
         "general": {
             "language": "Language",
             "theme": "Theme",
+            "transcriptFlow": "Flow display",
+            "transcriptFlowDescription": "Concise mode automatically collapses consecutive reasoning, tool calls, and results, while keeping them available to expand.",
+            "transcriptFlows": {
+                "complete": "Complete",
+                "concise": "Concise"
+            },
             "compactionThreshold": "Context compaction threshold",
             "compactionThresholdDescription": "Trigger local compaction by remaining tokens. Leave blank to use the smaller of 10% of the context window or 64K.",
             "compactionThresholdPlaceholder": "Auto",
