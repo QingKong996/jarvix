@@ -377,11 +377,7 @@
         },
         "generic": "Tool call",
         "status": {
-            "running": "Running…",
-            "completed": "Completed",
-            "background": "Running in background",
-            "terminated": "Ended",
-            "failed": "Failed"
+            "running": "Running…"
         }
     },
     "settings": {

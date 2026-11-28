@@ -14,11 +14,9 @@ import { PermissionResourceList } from "../../permissions/PermissionResourceList
 import { quickTransition } from "../../../motion.ts";
 
 export function PermissionRequestToolCall({
-    data,
-    isError
+    data
 }: {
     data: PermissionRequestView;
-    isError: boolean;
 }) {
     const { t } = useTranslation();
     const pending = data.decision === "pending";
@@ -57,14 +55,12 @@ export function PermissionRequestToolCall({
                 <span aria-hidden="true" className="opacity-50">·</span>
                 <span
                     className={cn(
-                        isError
-                            ? "text-destructive"
-                            : pending
-                                ? "text-warning"
-                                : "text-muted-foreground"
+                        pending
+                            ? "text-warning"
+                            : "text-muted-foreground"
                     )}
                 >
-                    {statusLabel(data.decision, isError, t)}
+                    {statusLabel(data.decision, t)}
                 </span>
             </CollapsibleTrigger>
 
@@ -85,12 +81,8 @@ export function PermissionRequestToolCall({
 
 function statusLabel(
     decision: PermissionRequestView["decision"],
-    isError: boolean,
     t: TFunction<"translation">
 ): string {
-    if (isError) {
-        return t("tools.status.failed");
-    }
     switch (decision) {
         case "pending":
             return t("permissionRequest.status.pending");

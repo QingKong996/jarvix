@@ -15,7 +15,6 @@ test("renders exec_command as a terminal", () => {
                     status: "completed"
                 }}
                 streaming={false}
-                isError={false}
             />
         </I18nextProvider>
     );
@@ -38,7 +37,6 @@ test("renders write_stdin as a terminal session", () => {
                     status: "running"
                 }}
                 streaming
-                isError={false}
             />
         </I18nextProvider>
     );

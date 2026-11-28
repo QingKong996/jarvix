@@ -106,7 +106,6 @@ function buildTranscriptItems({
                     key: `tool:${block.toolCallId}`,
                     toolName: block.toolName,
                     data: block.data,
-                    isError: block.isError,
                     endReason: block.endReason
                 });
                 continue;

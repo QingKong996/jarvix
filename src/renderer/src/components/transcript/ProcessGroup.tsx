@@ -24,7 +24,6 @@ export type ProcessGroupEntry =
         key: string;
         toolName: string;
         data: ToolCallViewData;
-        isError: boolean;
         endReason: ToolCallEndReason | null;
     };
 
@@ -41,11 +40,7 @@ export function ProcessGroup({
     const thinkingCount = entries.filter(
         (entry) => entry.kind === "thinking"
     ).length;
-    const failed = entries.some((entry) => (
-        entry.kind === "tool"
-        && (entry.isError || entry.data.status === "failed")
-    ));
-    const running = !failed && entries.some((entry) => (
+    const running = entries.some((entry) => (
         entry.kind === "tool"
         && entry.endReason === null
         && (entry.data.status === "pending" || entry.data.status === "running")
@@ -95,12 +90,7 @@ export function ProcessGroup({
                         </span>
                     </>
                 ) : null}
-                {failed ? (
-                    <>
-                        <span aria-hidden="true" className="opacity-50">·</span>
-                        <span className="text-destructive">{t("tools.status.failed")}</span>
-                    </>
-                ) : running ? (
+                {running ? (
                     <>
                         <span aria-hidden="true" className="opacity-50">·</span>
                         <span className="animate-pulse text-foreground">
@@ -136,7 +126,6 @@ export function ProcessGroup({
                                 key={entry.key}
                                 toolName={entry.toolName}
                                 data={entry.data}
-                                isError={entry.isError}
                                 endReason={entry.endReason}
                             />
                         );

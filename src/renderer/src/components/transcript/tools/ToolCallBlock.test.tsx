@@ -12,7 +12,6 @@ afterEach(() => {
 
 function renderTool(
     data: ToolCallViewData,
-    isError = false,
     endReason: ToolCallEndReason | null = null,
     toolName = "write_file"
 ): string {
@@ -21,7 +20,6 @@ function renderTool(
             <ToolCallBlock
                 toolName={toolName}
                 data={data}
-                isError={isError}
                 endReason={endReason}
             />
         </I18nextProvider>
@@ -62,23 +60,28 @@ test("renders active generic tool arguments while the call is expanded", () => {
 });
 
 test.each([
-    ["failed status", false, "failed", null, "失败"],
-    ["error flag", true, "running", "terminated", "失败"],
-    ["termination", false, "completed", "terminated", "已结束"],
-    ["background completion", false, "completed", "background", "后台运行中"],
-    ["timed out", false, "timed_out", null, "后台运行中"]
+    ["failed", "failed", null],
+    ["completed", "completed", null],
+    ["running", "running", null],
+    ["terminated", "completed", "terminated"],
+    ["background", "completed", "background"],
+    ["timed out", "timed_out", null]
 ] as const)(
-    "shows the highest-priority status for %s",
-    (_label, isError, status, endReason, expected) => {
+    "does not render tool outcome status for %s",
+    (_label, status, endReason) => {
         const html = renderTool({
             kind: "generic",
             name: "write_file",
             arguments: {},
             output: "",
             status
-        }, isError, endReason);
+        }, endReason);
 
-        expect(html).toContain(expected);
+        expect(html).not.toContain("失败");
+        expect(html).not.toContain("已完成");
+        expect(html).not.toContain("运行中");
+        expect(html).not.toContain("已结束");
+        expect(html).not.toContain("后台运行中");
     }
 );
 
@@ -92,7 +95,7 @@ test.each([
         arguments: {},
         output: "",
         status: "completed"
-    }, false, null, toolName);
+    }, null, toolName);
 
     expect(html).toContain(label);
 });
