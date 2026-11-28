@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { cn } from "cn";
 import type {
     ShellExecCommandView,
     ShellWriteStdinView
@@ -9,10 +8,9 @@ import type {
 type ShellToolCallProps = {
     data: ShellExecCommandView | ShellWriteStdinView;
     streaming: boolean;
-    isError: boolean;
 };
 
-export function ShellToolCall({ data, streaming, isError }: ShellToolCallProps) {
+export function ShellToolCall({ data, streaming }: ShellToolCallProps) {
     const { t } = useTranslation();
     const viewportRef = useRef<HTMLDivElement>(null);
     const writing = data.kind === "shell.write_stdin";
@@ -49,12 +47,7 @@ export function ShellToolCall({ data, streaming, isError }: ShellToolCallProps) 
                     )}
 
                     {data.output.length > 0 ? (
-                        <pre
-                            className={cn(
-                                "mt-1.5 whitespace-pre text-muted-foreground",
-                                isError && "text-destructive"
-                            )}
-                        >
+                        <pre className="mt-1.5 whitespace-pre text-muted-foreground">
                             {data.output}
                         </pre>
                     ) : null}

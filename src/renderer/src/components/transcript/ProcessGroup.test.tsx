@@ -24,7 +24,6 @@ const runningEntries = [
             output: "saved output",
             status: "running"
         },
-        isError: false,
         endReason: null
     }
 ] satisfies ProcessGroupEntry[];
@@ -47,8 +46,22 @@ const completedEntries = [
             output: "saved output",
             status: "completed"
         },
-        isError: false,
         endReason: null
+    }
+] satisfies ProcessGroupEntry[];
+
+const failedEntries = [
+    {
+        kind: "tool",
+        key: "tool-1",
+        toolName: "exec_command",
+        data: {
+            kind: "shell.exec_command",
+            command: "false",
+            output: "",
+            status: "failed"
+        },
+        endReason: "exited"
     }
 ] satisfies ProcessGroupEntry[];
 
@@ -84,4 +97,16 @@ test("collapses inner calls and thinking when they complete", async () => {
         expect(screen.queryByText("Inspect the workspace")).toBeNull();
         expect(screen.queryByText("saved output")).toBeNull();
     });
+});
+
+test("does not label process groups by tool outcome", async () => {
+    render(
+        <I18nextProvider i18n={i18n}>
+            <ProcessGroup entries={failedEntries} defaultOpen />
+        </I18nextProvider>
+    );
+
+    expect(await screen.findByText("执行详情")).toBeTruthy();
+    expect(screen.queryByText("失败")).toBeNull();
+    expect(screen.queryByText("已完成")).toBeNull();
 });

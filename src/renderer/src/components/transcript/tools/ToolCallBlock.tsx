@@ -22,11 +22,10 @@ import { quickTransition } from "../../../motion.ts";
 type ToolCallBlockProps = {
     toolName: string;
     data: ToolCallViewData;
-    isError: boolean;
     endReason: ToolCallEndReason | null;
 };
 
-export function ToolCallBlock({ toolName, data, isError, endReason }: ToolCallBlockProps) {
+export function ToolCallBlock({ toolName, data, endReason }: ToolCallBlockProps) {
     const { t } = useTranslation();
     const active = endReason === null
         && (data.status === "pending" || data.status === "running");
@@ -42,10 +41,8 @@ export function ToolCallBlock({ toolName, data, isError, endReason }: ToolCallBl
     }, [active, staysExpanded]);
 
     if (data.kind === "permission.request") {
-        return <PermissionRequestToolCall data={data} isError={isError} />;
+        return <PermissionRequestToolCall data={data} />;
     }
-
-    const failed = isError || data.status === "failed";
 
     return (
         <Collapsible open={open} onOpenChange={setOpen} className="flex flex-col gap-1.5">
@@ -63,18 +60,6 @@ export function ToolCallBlock({ toolName, data, isError, endReason }: ToolCallBl
                 </motion.span>
                 <span className={cn("font-medium", active && "animate-pulse")}>
                     {toolLabel(toolName, data, t)}
-                </span>
-                <span aria-hidden="true" className="opacity-50">·</span>
-                <span
-                    className={cn(
-                        failed
-                            ? "text-destructive"
-                            : active
-                                ? "text-foreground"
-                                : "text-muted-foreground"
-                    )}
-                >
-                    {statusLabel(data.status, isError, endReason, t)}
                 </span>
             </CollapsibleTrigger>
 
@@ -98,7 +83,6 @@ export function ToolCallBlock({ toolName, data, isError, endReason }: ToolCallBl
                         <ShellToolCall
                             data={data}
                             streaming={streaming}
-                            isError={isError}
                         />
                     )}
                     {data.kind === "generic" && data.output.length > 0 ? (
@@ -158,30 +142,4 @@ function toolLabel(toolName: string, data: ToolCallViewData, t: TFunction<"trans
         return t("tools.finishGoal");
     }
     return `${t("tools.generic")} · ${toolName}`;
-}
-
-function statusLabel(
-    status: ToolCallViewData["status"],
-    isError: boolean,
-    endReason: ToolCallEndReason | null,
-    t: TFunction<"translation">
-): string {
-    if (isError || status === "failed") {
-        return t("tools.status.failed");
-    }
-    if (endReason === "terminated") {
-        return t("tools.status.terminated");
-    }
-    if (endReason === "background") {
-        return t("tools.status.background");
-    }
-    switch (status) {
-        case "pending":
-        case "running":
-            return t("tools.status.running");
-        case "timed_out":
-            return t("tools.status.background");
-        case "completed":
-            return t("tools.status.completed");
-    }
 }
