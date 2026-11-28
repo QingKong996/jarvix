@@ -442,7 +442,7 @@ test("stops accepting stdin input when the pending queue is full", async () => {
     try {
         const started = await tool.execute(call("exec_command", {
             command,
-            cwd: directory,
+            cwd: tmpdir(),
             timeoutMs: 100
         }), { onOutput: () => undefined });
         const sessionId = started.task?.id;
